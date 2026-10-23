@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.11
+// @version      0.8.12
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.11';
+  const VERSION = '0.8.12';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3643,6 +3643,79 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 }
 @container kc-pawlounge-shell (max-width:780px){
  #kc-panel .chatcenter>.collapse-handle.left{display:flex!important;top:68px!important;left:7px!important}
+}
+
+
+/* v0.8.12 — Artwork-safe header & compact sidebar labels.
+   Do not move the decorative frame or widen the 88px rail. The title asset
+   can hang over the frame; navigation items must never start underneath it.
+   The lower decorative black cat remains above the border but below controls. */
+#kc-panel .brand-after-lockup{
+  left:440px!important;
+  top:96px!important;
+  right:auto!important;
+  width:max-content!important;
+  max-width:calc(100% - 660px)!important;
+  white-space:nowrap!important;
+  z-index:28!important;
+  pointer-events:none!important;
+}
+#kc-panel .brand-after-lockup small{
+  display:block!important;
+  font-size:11px!important;
+  line-height:1.3!important;
+  white-space:nowrap!important;
+}
+#kc-panel .rail{
+  padding-top:35px!important;
+  padding-bottom:124px!important;
+  scroll-padding-top:35px!important;
+  scroll-padding-bottom:124px!important;
+  gap:4px!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  overscroll-behavior-y:contain!important;
+}
+#kc-panel .rail .railtab,
+#kc-panel .rail .railtab[data-tab="moments"]{
+  flex:0 0 64px!important;
+  height:64px!important;
+  min-height:64px!important;
+  max-height:64px!important;
+  gap:2px!important;
+  padding:5px 1px!important;
+  position:relative!important;
+  z-index:30!important;
+}
+#kc-panel .rail .railtab .ic{flex-shrink:0!important;max-width:100%!important}
+#kc-panel .rail .railtab .tx{flex-shrink:0!important;line-height:1.15!important}
+/* Decorative cat remains on the edge of the scrollable nav, behind controls. */
+#kc-panel .kc-deco-left-bottom{pointer-events:none!important;z-index:19!important}
+@container kc-pawlounge-shell (max-width:1280px){
+  #kc-panel .brand-after-lockup{left:385px!important;top:92px!important;max-width:calc(100% - 575px)!important}
+  #kc-panel .rail{padding-top:30px!important;padding-bottom:116px!important;scroll-padding-top:30px!important}
+}
+@container kc-pawlounge-shell (max-width:920px){
+  #kc-panel .brand-after-lockup{left:333px!important;top:85px!important;max-width:calc(100% - 430px)!important}
+  #kc-panel .rail{padding-top:24px!important;padding-bottom:105px!important;scroll-padding-top:24px!important}
+}
+@container kc-pawlounge-shell (max-width:780px){
+  /* The corner cat otherwise covers the last navigation item on small windows. */
+  #kc-panel .kc-deco-left-bottom{display:none!important}
+  #kc-panel .brand-after-lockup{display:none!important}
+  #kc-panel .rail{padding-top:17px!important;padding-bottom:92px!important;scroll-padding-top:17px!important}
+  #kc-panel .rail .railtab,#kc-panel .rail .railtab[data-tab="moments"]{
+    flex-basis:60px!important;height:60px!important;min-height:60px!important;max-height:60px!important
+  }
+}
+@container kc-pawlounge-shell (max-width:740px){
+  /* Both decorative cats are hidden at this width: give the nav its room back. */
+  #kc-panel .rail{padding-top:10px!important;padding-bottom:12px!important;scroll-padding-top:10px!important;scroll-padding-bottom:12px!important}
+}
+#kc-panel.kc-short .rail{padding-top:10px!important;padding-bottom:12px!important}
+#kc-panel.kc-short .rail .railtab,
+#kc-panel.kc-short .rail .railtab[data-tab="moments"]{
+  flex-basis:56px!important;height:56px!important;min-height:56px!important;max-height:56px!important
 }
 
 `; }
