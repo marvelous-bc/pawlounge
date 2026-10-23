@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.3
+// @version      0.8.5
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.2';
+  const VERSION = '0.8.5';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -84,7 +84,17 @@
     { id: 'zoomies', name: 'Zoomies', emoji: '🐈' },
     { id: 'blush', name: 'Blush', emoji: '😳' },
     { id: 'hug', name: 'Hug', emoji: '🫂' },
-    { id: 'hiss', name: 'Hiss', emoji: '😾' }
+    { id: 'hiss', name: 'Hiss', emoji: '😾' },
+    { id: 'moon-purr', name: 'Moon Purr', emoji: '😽' },
+    { id: 'moon-wink', name: 'Moon Wink', emoji: '😉' },
+    { id: 'moon-cheer', name: 'Moon Cheer', emoji: '🎉' },
+    { id: 'moon-blush', name: 'Moon Blush', emoji: '🥰' },
+    { id: 'moon-hiss', name: 'Moon Hiss', emoji: '😾' },
+    { id: 'moon-boop', name: 'Moon Boop', emoji: '🐾' },
+    { id: 'moon-hug', name: 'Moon Hug', emoji: '🫂' },
+    { id: 'moon-yawn', name: 'Moon Yawn', emoji: '🥱' },
+    { id: 'moon-zoomies', name: 'Moon Zoomies', emoji: '✨' },
+    { id: 'moon-smug', name: 'Moon Smug', emoji: '😼' }
   ];
   const DEFAULT_SETTINGS = { theme: 'midnight', fontSize:'large', notifications: true, sounds: false,
     typing: false, panelScrollbars: true, assetBase: DEFAULT_ASSET_BASE, avatar: '', signature: 'Purrs and pawprints ♡',
@@ -3427,6 +3437,21 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   #kc-panel .kc-deco-left-bottom .asset img{transform:translate(-4px,4px) scale(1.02)!important}
 }
 @container (max-width:790px){#kc-panel .rail{padding-bottom:12px!important}}
+
+
+/* v0.8.5: Layer the bottom-left cat above the sculpted frame outline. */
+#kc-panel .kc-sculpted-frame{z-index:15!important}
+#kc-panel .kc-deco-left-bottom{
+ position:absolute!important;z-index:35!important;
+ left:-9px!important;bottom:-8px!important;
+ overflow:visible!important;border-radius:0!important;clip-path:none!important;
+ pointer-events:none!important;filter:drop-shadow(0 5px 8px rgba(6,2,10,.56))!important;
+}
+#kc-panel .kc-deco-left-bottom .asset,
+#kc-panel .kc-deco-left-bottom .asset img{overflow:visible!important;clip-path:none!important}
+#kc-panel .kc-deco-left-bottom .asset img{transform:translate(0,0) scale(1.02)!important}
+@container (max-width:1280px){#kc-panel .kc-deco-left-bottom{left:-7px!important;bottom:-7px!important}}
+@container (max-width:920px){#kc-panel .kc-deco-left-bottom{left:-5px!important;bottom:-5px!important}}
 
 `; }
 
