@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.15
+// @version      0.8.17
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.15';
+  const VERSION = '0.8.17';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3922,6 +3922,33 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   min-height:32px!important;flex-basis:32px!important;
 }
 
+/* v0.8.16: one default All inbox option, without the horizontal track.
+   Its content remains searchable through Search kitties and BC Friends/Circles. */
+#kc-panel .kc-single-inbox-filter{
+  display:flex!important;
+  margin:0!important;
+  padding:0!important;
+  gap:0!important;
+  min-height:0!important;
+  flex:0 0 auto!important;
+}
+#kc-panel .kc-single-inbox-filter>.kc-inbox-filters{
+  overflow:hidden!important;
+  flex:0 0 30px!important;
+  width:100%!important;
+  height:30px!important;
+  padding:0!important;
+  margin:0!important;
+  align-items:center!important;
+}
+#kc-panel .kc-single-inbox-filter .filterbtn{
+  box-sizing:border-box!important;
+  height:29px!important;
+  min-height:29px!important;
+  padding:4px 14px!important;
+  border-radius:15px!important;
+}
+
 `; }
 
   function setTheme() {
@@ -3972,7 +3999,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <div class="workspace">
         <nav class="rail" aria-label="PawLounge navigation">
           <button class="railtab active" data-tab="chats"><span class="ic">${asset('ui-paw.svg','','🐾')}</span><span class="tx">Chats</span></button>
-          <button class="railtab" data-tab="friends"><span class="ic">${asset('ui-cat.svg','','🐈')}</span><span class="tx">Pals</span></button>
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
           <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
@@ -4349,6 +4375,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function render() {
     if (!ui.body) return;
+    if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
     setTheme();
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'friends' ? 'flex' : 'none';
@@ -4377,8 +4404,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (Array.isArray(window.ChatRoomCharacter)) for (const p of window.ChatRoomCharacter) if (numeric(p.MemberNumber)) ids.add(p.MemberNumber);
     ids.delete(me());
     const query=state.search.toLowerCase();
-    return [...ids].filter(numeric).filter(id => state.tab !== 'friends' || friends.has(id))
-      .filter(id => !state.circleFilter || !!state.circles.find(c=>c.id===state.circleFilter&&c.members.includes(id)))
+    return [...ids].filter(numeric)
+      .filter(id => !state.circleFilter || (state.circleFilter === '__paw_bc_friends__'
+        ? friends.has(id)
+        : !!state.circles.find(c => c.id === state.circleFilter && c.members.includes(id))))
       .filter(id => !query || (`${name(id)} ${id}`).toLowerCase().includes(query))
       .filter(id => state.contactsMode !== 'unread' || Number(state.chats[id]?.unread || 0) > 0)
       .filter(id => state.contactsMode !== 'pinned' || !!state.chats[id]?.pinned)
@@ -4499,6 +4528,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function renderSidebar() {
     if (!ui.menu) return;
+    // v0.8.16 only exposes the default All inbox view.
+    if (state.contactsMode !== 'all') state.contactsMode = 'all';
     const confirmedFriends=new Set(myFriends());
     for(const [id,c] of Object.entries(state.chats)) if(c?.requestPending && confirmedFriends.has(Number(id))){c.requestPending=false;c.requestAccepted=true;saveSoon();}
     const currentLeft = ui.menu.querySelector('.contacts-scroll');
@@ -4526,14 +4557,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <div class="side-card"><div class="side-card-title">Now Purring ♡</div>
         ${heroId ? `<div class="side-mainline">${avatar(heroId)}<div style="min-width:0;flex:1"><div style="font-size:15px;font-weight:900">${escapeText(name(heroId))}</div><div class="muted">${escapeText(heroLast?.text || (onlineMembers.has(heroId) ? 'Together in the same room ♡' : 'A cozy connection'))}</div>${statusMarkup(heroId)}</div><span class="hero-heart">♡</span></div>` : '<div class="muted">Pick a kitty to start purring ♡</div>'}</div>
       <div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
-      <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
-      <div class="kc-inbox-filter-wrap">
-        <div class="side-filters kc-inbox-filters" aria-label="Inbox filters">${[['all','All'],['unread','♡ Unread'],['favorites','💗 Favorites'],['later','⏰ Later'],['requests','✉ Requests'],['muted','🔕 Muted'],['pinned','📌 Pinned']].map(([key,label])=>`<button class="filterbtn ${state.contactsMode===key?'active':''}" data-filter="${key}">${label}</button>`).join('')}</div>
-        <div class="kc-filter-scroll-controls" aria-label="Scroll inbox filters">
-          <button class="kc-filter-scroll-btn" data-action="inboxscrollleft" title="Previous filters" aria-label="Scroll filters left">‹</button>
-          <div class="kc-filter-scroll-track" role="scrollbar" tabindex="0" aria-label="Inbox filters horizontal scrollbar" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="kc-filter-scroll-thumb"></div></div>
-          <button class="kc-filter-scroll-btn" data-action="inboxscrollright" title="Next filters" aria-label="Scroll filters right">›</button>
-        </div>
+      <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option><option value="__paw_bc_friends__" ${state.circleFilter==='__paw_bc_friends__'?'selected':''}>🐈 BC Friends only</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
+      <div class="kc-inbox-filter-wrap kc-single-inbox-filter">
+        <div class="side-filters kc-inbox-filters" aria-label="Inbox filter"><button type="button" class="filterbtn active" data-filter="all" aria-pressed="true">All</button></div>
       </div>
       <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names, contacts and groups">
         <div class="side-list">${items.map(contactButton).join('') || '<div class="muted">No kitties found yet.</div>'}</div>
@@ -4835,9 +4861,77 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function renderSharedAlbums(){
     return `<section class="paw-albums"><h3>📒 Shared Scrapbooks</h3><div class="paw-items">${state.sharedAlbums.map(a=>`<div class="paw-item"><b>${escapeText(a.name)}</b> <span class="muted">· ${a.members.length} member(s) · ${a.cards.length} moments</span>
-      ${a.joined?`<div class="flex"><button class="secondary" data-paw-album="${escapeText(a.id)}">${state.albumView===a.id?'✓ Viewing':'View album'}</button><button class="secondary" data-paw-album-invite="${escapeText(a.id)}">✉ Invite collaborator</button></div>`:'<span class="muted">Invitation pending — see Catch Up</span>'}
+      ${a.joined?`<div class="flex"><button class="secondary" data-paw-album="${escapeText(a.id)}">${state.albumView===a.id?'✓ Viewing':'View album'}</button>${a.owner===me()?`<button class="secondary" data-paw-album-invite="${escapeText(a.id)}">✉ Invite collaborator</button>`:''}<button class="secondary paw-album-leave" data-paw-album-leave="${escapeText(a.id)}" title="${a.owner===me()?'Transfer or close this scrapbook':'Leave this scrapbook'}">${a.owner===me()?(a.members.length>1?'↪ Transfer &amp; leave':'✕ Delete scrapbook'):'↩ Leave scrapbook'}</button></div>`:'<span class="muted">Invitation pending — see Catch Up</span>'}
       ${a.joined&&state.albumView===a.id?`<div class="paw-album-cards">${a.cards.map(c=>`<div><b>${escapeText(c.title)}</b><p>${escapeText(c.text)}</p>${c.image?`<img src="${escapeText(c.image)}" loading="lazy" alt="Scrapbook picture"/>`:''}</div>`).join('')||'<p class="muted">Add Paw Moments below to this scrapbook.</p>'}</div>`:''}</div>`).join('')||'<p class="muted">Create a shared scrapbook to collect memories with friends.</p>'}</div></section>`;
   }
+  // Shared Scrapbooks are separate from Group Dens (which already have Leave Group).
+  // Keep private Paw Moments only when explicitly requested. For owners with other
+  // participants, hand off ownership rather than destroying the shared scrapbook.
+  function leaveSharedAlbum(albumId){
+    const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined);
+    if(!a||!a.members.includes(me()))return;
+    const owned=a.owner===me();
+    const others=a.members.filter(member=>member!==me());
+    let successor=0;
+    if(owned&&others.length){
+      const members=others.map(member=>`${member} — ${bcName(member)}`).join('\n');
+      const requested=window.prompt(`Transfer ownership of “${a.name}” before leaving.\nChoose one of these member numbers:\n${members}`,String(others[0]));
+      if(requested===null)return;
+      successor=numeric(requested);
+      if(!others.includes(successor)){notice('Choose an existing scrapbook collaborator to transfer ownership to.');return;}
+    }
+    const consequence=owned?(successor?`Ownership will transfer to ${bcName(successor)}. You will lose access to the shared scrapbook.`:'This scrapbook will be deleted from your account.'):'You will lose access to its shared memories and stop receiving updates.';
+    if(!window.confirm(`${owned&&successor?'Transfer and leave':owned?'Delete':'Leave'} “${a.name}”?\n${consequence}\nOther collaborators keep their own copies.`))return;
+
+    // Validate the private-copy choice before changing membership or notifying peers.
+    let copies=[];
+    if(a.cards.length&&window.confirm(`Keep a personal copy of this scrapbook’s ${a.cards.length} saved moment(s) in your private Paw Moments?`)){
+      const available=MOMENT_LIMIT-state.moments.length;
+      if(available<a.cards.length){notice(`Not enough private Paw Moment slots (${available} available, ${a.cards.length} needed). Delete older moments or retry without keeping a copy.`);return;}
+      copies=a.cards.map(card=>normalizeMoment({...card,id:uniquePawId('moment'),source:`Scrapbook: ${a.name}`,received:false})).filter(Boolean);
+    }
+
+    const priorOwner=a.owner;
+    let sent=0,failed=0;
+    let transfer=null;
+    if(owned&&successor){
+      transfer={type:'KCPawAlbum',v:1,action:'owner-transfer',id:a.id,owner:successor,members:others};
+      // A failed transfer must not orphan the scrapbook. Only remove ourselves
+      // after the selected new owner has successfully been sent the notice.
+      if(!pawSend(successor,'KCPawAlbum',transfer)){
+        notice(`Could not notify ${bcName(successor)}. You are still the scrapbook owner; try again when you are BC friends.`);
+        return;
+      }
+      sent++;
+    }
+
+    if(copies.length)state.moments.push(...copies);
+    // Update this user's UI and saved account immediately, even if a peer is offline.
+    state.sharedAlbums=state.sharedAlbums.filter(album=>album.id!==a.id);
+    if(state.albumView===a.id)state.albumView='';
+    saveNow(true);
+    renderMoments();
+
+    if(transfer){
+      for(const member of others){
+        if(member===successor)continue;
+        if(pawSend(member,'KCPawAlbum',transfer))sent++;else failed++;
+      }
+      notice(`📒 Left “${a.name}”. Ownership transferred to ${bcName(successor)}.${failed?' Some collaborators could not be notified.':''}`);
+    }else if(!owned){
+      // Notify collaborators directly in addition to the owner: their member lists
+      // can update even when the owner is temporarily offline.
+      for(const member of others){
+        if(pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'leave',id:a.id}))sent++;else failed++;
+      }
+      // Legacy owners recognize response:false even before adopting v0.8.17.
+      if(priorOwner&&others.includes(priorOwner))pawSend(priorOwner,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'response',id:a.id,accepted:false});
+      notice(`📒 You left “${a.name}”.${failed?' Some collaborators could not be notified.':''}`);
+    }else{
+      notice(`📒 Your empty scrapbook “${a.name}” was removed.`);
+    }
+  }
+
   function inviteAlbumFriend(albumId){
     const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined);if(!a)return;
     const member=numeric(window.prompt('Friend member number to invite:',String(state.selected||'')));
@@ -4886,6 +4980,29 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       for(const member of album.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id:album.id,owner:me(),members:album.members});
     }else if(p.action==='sync'&&album&&from===album.owner&&Array.isArray(p.members)){
       album.members=[...new Set([album.owner,...p.members.map(numeric).filter(Boolean)])].slice(0,8);album.updated=Date.now();
+      if(album.joined&&!album.members.includes(me())){
+        state.sharedAlbums=state.sharedAlbums.filter(x=>x.id!==id);
+        if(state.albumView===id)state.albumView='';
+        notice('📒 You are no longer a member of this scrapbook.');
+      }
+    }else if(p.action==='leave'&&album?.joined&&from!==album.owner&&album.members.includes(from)){
+      album.members=album.members.filter(member=>member!==from);album.updated=Date.now();
+      if(album.owner===me()){
+        // The owner updates the rest of the collaborators after someone leaves.
+        for(const member of album.members)if(member!==me())
+          pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id,owner:me(),members:album.members});
+      }
+    }else if(p.action==='owner-transfer'&&album?.joined&&from===album.owner&&Array.isArray(p.members)){
+      const incoming=[...new Set(p.members.map(numeric).filter(Boolean))].slice(0,8);
+      const successor=numeric(p.owner);
+      // Only the former owner may transfer, and the successor must have been
+      // an existing member. The departing owner must not remain on the list.
+      if(!album.members.includes(successor)||successor===from||!incoming.includes(successor)||incoming.includes(from))return;
+      album.owner=successor;album.members=incoming;album.updated=Date.now();
+      if(!incoming.includes(me())){
+        state.sharedAlbums=state.sharedAlbums.filter(x=>x.id!==id);
+        if(state.albumView===id)state.albumView='';
+      }else notice(`📒 ${bcName(successor)} now owns “${album.name}”.`);
     }else if(p.action==='card'&&album?.joined&&album.members.includes(from)){
       const card=normalizeMoment(p.card);if(!card||album.cards.some(x=>x.id===card.id))return;
       album.cards.push(card);album.cards=album.cards.slice(-60);album.updated=Date.now();notice(`♡ ${bcName(from)} added a scrapbook memory.`);
@@ -5201,12 +5318,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return sent;
   }
   function clickUI(e) {
-    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline]');
+    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline]');
     if (!target) return;
     if(target.dataset.pawCircleToggle!==undefined){const [id,field]=target.dataset.pawCircleToggle.split(':');togglePawCircleFlag(id,field);return;}
     if(target.dataset.pawCircleDelete!==undefined){const id=target.dataset.pawCircleDelete;if(window.confirm('Delete this friend circle?')){state.circles=state.circles.filter(c=>c.id!==id);if(state.circleFilter===id)state.circleFilter='';saveSoon();renderCircles();}return;}
     if(target.dataset.pawAlbum!==undefined){state.albumView=target.dataset.pawAlbum;renderMoments();return;}
     if(target.dataset.pawAlbumInvite!==undefined){inviteAlbumFriend(target.dataset.pawAlbumInvite);return;}
+    if(target.dataset.pawAlbumLeave!==undefined){leaveSharedAlbum(target.dataset.pawAlbumLeave);return;}
     if(target.dataset.pawAlbumMoment!==undefined){addMomentToAlbum(target.dataset.pawAlbumMoment);return;}
     if(target.dataset.pawAlbumAccept!==undefined){answerAlbumInvite(target.dataset.pawAlbumAccept,true);return;}
     if(target.dataset.pawAlbumDecline!==undefined){answerAlbumInvite(target.dataset.pawAlbumDecline,false);return;}
@@ -5223,7 +5341,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.group){selectGroup(target.dataset.group);return;}
     if (target.dataset.groupAccept){respondGroup(target.dataset.groupAccept,true);return;}
     if (target.dataset.groupDecline){respondGroup(target.dataset.groupDecline,false);return;}
-    if (target.dataset.filter) { state.contactsMode = target.dataset.filter; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
+    if (target.dataset.filter) { state.contactsMode = 'all'; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
     if (target.dataset.quick !== undefined) { (currentGroup()?sendGroupMessage:sendText)(state.settings.shortcuts[Number(target.dataset.quick)]); return; }
     if (target.dataset.react !== undefined) { const chosen=window.prompt('Reaction emoji: 💗 🐾 😽 ✨ 😹','💗');if(chosen)replyAndReact(currentConversationKind(),target.dataset.react,trim(chosen,12));return; }
     if (target.dataset.sticker) { const st = STICKERS.find(x => x.id === target.dataset.sticker); if (!st) return; if (!currentGroup() && !state.chats[state.selected]) { notice('Choose a kitty or Group Den before sending a sticker.'); return; } (currentGroup()?sendGroupMessage:sendText)(`🐱 Kittychat sticker: ${st.name} ${st.emoji}`); return; }
