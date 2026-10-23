@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.14
+// @version      0.8.15
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.14';
+  const VERSION = '0.8.15';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -937,7 +937,9 @@
     for (const friend of ids) if (sendGroupWire(friend,{t:'invite',id,creator:me(),name:title,members:g.members},
       `💌 ${bcName(me())} invited you to PawLounge group “${title}”. Open PawLounge to accept.`)) delivered++;
     state.groupCreateOpen=false;state.selectedGroup=id;state.selected=0;state.tab='chats';
-    saveSoon();render();notice(`Invited ${delivered}/${ids.length} friends. They must accept before messages reach them.`);
+    saveSoon();render();
+    requestAnimationFrame(()=>{if(state.open&&state.tab==='chats'&&state.selectedGroup===id)renderGroupChat();});
+    notice(`Invited ${delivered}/${ids.length} friends. They must accept before messages reach them.`);
     return true;
   }
   function respondGroup(id, accept) {
@@ -949,6 +951,7 @@
       `🐾 ${bcName(me())} ${accept?'accepted':'declined'} your PawLounge invitation to ${g.name}.`);
     if (!ok) notice('Could not notify the group creator. Check that you are BC friends.');
     saveSoon();updateBadge();render();
+    if(accept)requestAnimationFrame(()=>{if(state.open&&state.tab==='chats'&&state.selectedGroup===id)renderGroupChat();});
   }
   function sendGroupMessage(text) {
     const g=currentGroup();text=trim(text,MAX_GROUP_TEXT);
@@ -965,7 +968,16 @@
     if (!sent){notice('No recipients reachable. BC friendship is required for each recipient.');return false;}
     addGroupMessage(g,me(),text,mid,reply);state.replyTarget=null;renderReplyBar();
     if (skipped) notice(`Sent to ${sent}; ${skipped} unavailable (not a BC friend or send failed).`);
-    if (ui.input)ui.input.value='';g.draft='';saveSoon();return true;
+    if (ui.input)ui.input.value='';g.draft='';saveSoon();
+    if(state.open && state.tab==='chats' && state.selectedGroup===g.id) {
+      const refresh=()=>{
+        if(!state.open || state.tab!=='chats' || state.selectedGroup!==g.id)return;
+        const log=ui.shadow?.getElementById('kc-log');
+        if(!log || ![...log.querySelectorAll('[data-message-id]')].some(row=>row.dataset.messageId===mid))renderGroupChat();
+      };
+      refresh();requestAnimationFrame(refresh);
+    }
+    return true;
   }
   function leaveGroup() {
     const g=currentGroup();if(!g)return;
@@ -1345,6 +1357,11 @@
     }
     if (ui.input) ui.input.value = '';
     chat.draft = ''; state.replyTarget=null;renderReplyBar();saveSoon();
+    // Explicitly reconcile the conversation with the stored outgoing message.
+    // The normal append fast path can race native beep hooks / history hydration.
+    const ownLast=[...chat.messages].reverse().find(m=>m.from===me() && m.text===text);
+    queueVisiblePrivateChatSync(member,ownLast?.id||'');
+    scheduleSidebarUpdate();
     return true;
   }
 
@@ -4293,10 +4310,33 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.badge.textContent = total > 99 ? '99+' : String(total);
     ui.badge.classList.toggle('hidden', total === 0);
   }
+  // A new conversation can be selected while its IndexedDB history is still loading.
+  // Also BC may synchronously invoke several outgoing hooks during a quick message.
+  // Reconcile only the active chat, never a different chat selected since the send.
+  // A targeted refresh avoids the old close/reopen workaround and prevents full
+  // panel rebuilds on every message (important for BC/WCE portrait performance).
+  function syncVisiblePrivateChat(member, expectedId = '') {
+    member=numeric(member);
+    if (!state.open || state.tab!=='chats' || state.selected!==member || state.selectedGroup) return;
+    const log=ui.shadow?.getElementById('kc-log');
+    if (!log || !log.isConnected) {renderChat();return;}
+    const present=expectedId && [...log.querySelectorAll('[data-message-id]')]
+      .some(row=>row.dataset.messageId===String(expectedId));
+    if (expectedId && present) return;
+    renderMessages();
+  }
+  function queueVisiblePrivateChatSync(member, expectedId = '') {
+    // First refresh right now, then check again after any synchronous BC hooks,
+    // async history preparation, or same-frame sidebar update have run.
+    syncVisiblePrivateChat(member, expectedId);
+    requestAnimationFrame(()=>syncVisiblePrivateChat(member, expectedId));
+  }
   function selectChat(id) {
     const chat = ensure(id); if (!chat) return;
     state.compactOpen=false;state.selected = id; state.selectedGroup=''; state.messageSearch = ''; chat.unread = 0;
-    state.tab = 'chats'; saveSoon(); updateBadge(); void prepareHistoryView('chat',id); render(); requestFriendStatus(id);
+    state.tab = 'chats'; saveSoon(); updateBadge(); void prepareHistoryView('chat',id); render();
+    queueVisiblePrivateChatSync(id);
+    requestFriendStatus(id);
   }
   function selectGroup(id) {
     const g=state.groups[id];if(!g)return;
@@ -4743,8 +4783,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       invitation.groupId=g.id;invitation.label=g.name;
     }
     if(!window.confirm(`Invite ${bcName(target)} to ${kind==='room'?`room ${invitation.label}`:kind==='group'?`group ${invitation.label}`:'chat'}?`))return;
-    if(pawSend(target,'KCPawInvite',{v:1,type:'KCPawInvite',invitation})){notice('✉ Invitation sent. Your friend needs PawLounge to accept.');}
-    else notice('Could not send invitation.');
+    if(pawSend(target,'KCPawInvite',{v:1,type:'KCPawInvite',invitation})){
+      notice('✉ Invitation sent. Your friend needs PawLounge to accept.');
+      queueVisiblePrivateChatSync(target);
+    } else notice('Could not send invitation.');
   }
   function receivePawInvite(data,from){
     if(!myFriends().includes(from))return;
