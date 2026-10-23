@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.10
+// @version      0.8.11
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.10';
+  const VERSION = '0.8.11';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3527,114 +3527,122 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 }
 
 
-/* v0.8.10: Preserve a safe gutter between PawLounge's left sculpted frame
-   and actual navigation content. Older overrides made a narrower content box
-   and clipped initial letters; widening ONLY text did not address that. */
-#kc-panel .workspace{
-  grid-template-columns:110px minmax(0,342px) minmax(0,1fr)!important;
-}
+/* v0.8.11: Compact rail with an unobstructed frame-side text gutter.
+   This replaces the v0.8.10 110px/104px/100px wide navigation rail. */
+#kc-panel .workspace{grid-template-columns:88px minmax(0,342px) minmax(0,1fr)!important}
 #kc-panel .rail{
-  box-sizing:border-box!important;
-  min-width:0!important;
-  padding-left:28px!important;
-  padding-right:8px!important;
-  display:flex!important;
-  flex-direction:column!important;
-  align-items:stretch!important;
-  overflow-x:hidden!important;
-  overflow-y:auto!important;
-  scrollbar-width:thin!important;
+  box-sizing:border-box!important;min-width:0!important;
+  padding-left:15px!important;padding-right:5px!important;
+  display:flex!important;flex-direction:column!important;
+  align-items:stretch!important;overflow-x:hidden!important;
+  overflow-y:auto!important;scrollbar-width:thin!important;
 }
-#kc-panel .rail .railtab,
-#kc-panel .rail .railtab[data-tab="moments"]{
-  box-sizing:border-box!important;
-  position:relative!important;
-  left:0!important;
-  transform:none!important;
-  display:flex!important;
-  flex-direction:column!important;
-  align-items:center!important;
-  justify-content:center!important;
-  flex:0 0 auto!important;
-  width:100%!important;
-  min-width:0!important;
-  max-width:100%!important;
-  padding:7px 3px!important;
-  margin:0!important;
+#kc-panel .rail .railtab,#kc-panel .rail .railtab[data-tab="moments"]{
+  box-sizing:border-box!important;position:relative!important;
+  left:0!important;transform:none!important;
+  display:flex!important;flex-direction:column!important;
+  align-items:center!important;justify-content:center!important;
+  flex:0 0 auto!important;width:100%!important;
+  min-width:0!important;max-width:100%!important;
+  padding:7px 2px!important;margin:0!important;
   overflow:visible!important;
 }
-#kc-panel .rail .railtab .tx,
-#kc-panel .rail .railtab[data-tab="moments"] .tx,
+#kc-panel .rail .railtab .tx,#kc-panel .rail .railtab[data-tab="moments"] .tx,
 #kc-panel .rail .railtab[data-tab="catchup"] .tx{
-  display:block!important;
-  position:static!important;
-  transform:none!important;
-  box-sizing:border-box!important;
-  width:100%!important;
-  min-width:0!important;
-  max-width:100%!important;
-  margin:0!important;
-  padding:0!important;
-  font-size:10.5px!important;
-  font-weight:760!important;
-  letter-spacing:0!important;
-  line-height:1.18!important;
-  text-align:center!important;
-  white-space:normal!important;
-  overflow-wrap:normal!important;
-  word-break:normal!important;
-  overflow:visible!important;
-  text-overflow:clip!important;
+  display:block!important;position:static!important;transform:none!important;
+  box-sizing:border-box!important;width:100%!important;
+  min-width:0!important;max-width:100%!important;
+  margin:0!important;padding:0!important;
+  font-size:10px!important;font-weight:760!important;
+  letter-spacing:-.07px!important;line-height:1.18!important;
+  text-align:center!important;white-space:normal!important;
+  overflow-wrap:normal!important;word-break:normal!important;
+  overflow:visible!important;text-overflow:clip!important;
 }
 @container (max-width:1280px){
- #kc-panel .workspace{grid-template-columns:104px minmax(0,300px) minmax(0,1fr)!important}
- #kc-panel .rail{padding-left:26px!important;padding-right:7px!important}
+ #kc-panel .workspace{grid-template-columns:80px minmax(0,300px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:13px!important;padding-right:4px!important}
 }
 @container (max-width:1130px){
- #kc-panel .workspace{grid-template-columns:100px minmax(0,270px) minmax(0,1fr)!important}
- #kc-panel .rail{padding-left:24px!important;padding-right:7px!important}
+ #kc-panel .workspace{grid-template-columns:76px minmax(0,270px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:10px!important;padding-right:4px!important}
 }
 @container (max-width:1050px){
- #kc-panel .workspace{grid-template-columns:96px minmax(0,255px) minmax(0,1fr)!important}
- #kc-panel .rail{padding-left:22px!important;padding-right:6px!important}
+ #kc-panel .workspace{grid-template-columns:74px minmax(0,255px) minmax(0,1fr)!important}
 }
 @container (max-width:920px){
- #kc-panel .workspace{grid-template-columns:92px minmax(0,245px) minmax(0,1fr)!important}
- #kc-panel .rail{padding-left:20px!important;padding-right:6px!important}
+ #kc-panel .workspace{grid-template-columns:72px minmax(0,245px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:9px!important;padding-right:4px!important}
 }
 @container (max-width:780px){
- #kc-panel .workspace{grid-template-columns:76px minmax(0,1fr)!important}
+ #kc-panel .workspace{grid-template-columns:66px minmax(0,1fr)!important;position:relative!important}
  #kc-panel .workspace>.main{grid-column:2!important}
- #kc-panel .workspace>.sidebar.compact-open{left:76px!important;width:min(275px,calc(100% - 76px))!important}
- #kc-panel.left-collapsed .workspace{grid-template-columns:76px minmax(0,1fr)!important}
- #kc-panel .rail{padding-left:13px!important;padding-right:4px!important}
- #kc-panel .rail .railtab .tx,
- #kc-panel .rail .railtab[data-tab="moments"] .tx,
- #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:9.5px!important}
+ #kc-panel .workspace>.sidebar.compact-open{left:66px!important;width:min(275px,calc(100% - 66px))!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:66px minmax(0,1fr)!important}
+ #kc-panel.left-collapsed .workspace>.sidebar.compact-open{display:flex!important}
+ #kc-panel .rail{padding-left:7px!important;padding-right:3px!important}
+ #kc-panel .rail .railtab .tx,#kc-panel .rail .railtab[data-tab="moments"] .tx,
+ #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:9.1px!important}
 }
 @container (max-width:520px){
- #kc-panel .workspace{grid-template-columns:68px minmax(0,1fr)!important}
- #kc-panel .workspace>.sidebar.compact-open{left:68px!important;width:min(275px,calc(100% - 68px))!important}
- #kc-panel.left-collapsed .workspace{grid-template-columns:68px minmax(0,1fr)!important}
- #kc-panel .rail{padding-left:10px!important;padding-right:3px!important}
- #kc-panel .rail .railtab .tx,
- #kc-panel .rail .railtab[data-tab="moments"] .tx,
- #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:8.75px!important}
+ #kc-panel .workspace{grid-template-columns:60px minmax(0,1fr)!important}
+ #kc-panel .workspace>.sidebar.compact-open{left:60px!important;width:min(275px,calc(100% - 60px))!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:60px minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:5px!important;padding-right:2px!important}
+ #kc-panel .rail .railtab .tx,#kc-panel .rail .railtab[data-tab="moments"] .tx,
+ #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:8.5px!important;letter-spacing:-.15px!important}
 }
 @container (min-width:781px){
- #kc-panel.left-collapsed .workspace{grid-template-columns:110px 0 minmax(0,1fr)!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:88px 0 minmax(0,1fr)!important}
 }
 @container (min-width:781px) and (max-width:1280px){
- #kc-panel.left-collapsed .workspace{grid-template-columns:104px 0 minmax(0,1fr)!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:80px 0 minmax(0,1fr)!important}
 }
 @container (min-width:781px) and (max-width:1130px){
- #kc-panel.left-collapsed .workspace{grid-template-columns:100px 0 minmax(0,1fr)!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:76px 0 minmax(0,1fr)!important}
 }
 @container (min-width:781px) and (max-width:1050px){
- #kc-panel.left-collapsed .workspace{grid-template-columns:96px 0 minmax(0,1fr)!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:74px 0 minmax(0,1fr)!important}
 }
 @container (min-width:781px) and (max-width:920px){
- #kc-panel.left-collapsed .workspace{grid-template-columns:92px 0 minmax(0,1fr)!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:72px 0 minmax(0,1fr)!important}
+}
+
+/* Restore collapse arrows WITHIN the chat area to avoid clipped negative edges.
+   Leave message/panel scroll and cat frame artwork unchanged. */
+#kc-panel{container-name:kc-pawlounge-shell!important}
+#kc-panel .chatcenter{position:relative!important}
+#kc-panel .chatcenter>.collapse-handle{
+  position:absolute!important;top:100px!important;
+  z-index:72!important;display:flex!important;
+  visibility:visible!important;opacity:1!important;
+  width:30px!important;height:30px!important;
+  min-width:30px!important;min-height:30px!important;
+  padding:0!important;border-radius:50%!important;
+  align-items:center!important;justify-content:center!important;
+  line-height:1!important;pointer-events:auto!important;
+  touch-action:manipulation!important;
+}
+#kc-panel .chatcenter>.collapse-handle.left{left:8px!important;right:auto!important}
+#kc-panel .chatcenter>.collapse-handle.right{right:8px!important;left:auto!important;display:flex!important}
+#kc-panel .chatcenter>.collapse-handle .arr{display:block!important;line-height:1!important}
+#kc-panel .sidebar>.kc-compact-close{display:none!important}
+@container kc-pawlounge-shell (max-width:780px){
+  #kc-panel .sidebar.compact-open>.kc-compact-close{
+    display:grid!important;place-items:center!important;
+    position:absolute!important;right:9px!important;top:8px!important;
+    z-index:80!important;width:30px!important;height:30px!important;
+    font-size:22px!important;line-height:1!important;
+    color:#ffe3f0!important;background:#552241!important;
+    border:1px solid #ff96c9!important;border-radius:50%!important;
+    cursor:pointer!important;pointer-events:auto!important;
+  }
+}
+@container kc-pawlounge-shell (max-width:1120px){
+ #kc-panel .chatcenter>.collapse-handle.right{display:none!important}
+}
+@container kc-pawlounge-shell (max-width:780px){
+ #kc-panel .chatcenter>.collapse-handle.left{display:flex!important;top:68px!important;left:7px!important}
 }
 
 `; }
@@ -4035,6 +4043,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     state.compactOpen=false;state.selectedGroup=id;state.selected=0;state.messageSearch='';if(g.joined)g.unread=0;
     state.tab='chats';saveSoon();updateBadge();void prepareHistoryView('group',id);render();
   }
+  function isCompactCollapseLayout() {
+    // Container query tracks the resizable PawLounge panel, not viewport width.
+    return (ui.panel?.getBoundingClientRect().width || 9999) <= 780;
+  }
   function render() {
     if (!ui.body) return;
     setTheme();
@@ -4042,7 +4054,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'friends' ? 'flex' : 'none';
     ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='friends'));
     ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='catchup' || state.tab==='circles');
-    if (state.tab === 'chats' || state.tab === 'friends') { ensureDefaultSelection(); if (state.open && state.tab === 'chats') {if(state.selectedGroup) void prepareHistoryView('group',state.selectedGroup); else if(state.selected) void prepareHistoryView('chat',state.selected);} renderSidebar(); renderChat(); }
+    if (state.tab === 'chats' || state.tab === 'friends') { ensureDefaultSelection(); if (state.open && state.tab === 'chats') {if(state.selectedGroup) void prepareHistoryView('group',state.selectedGroup); else if(state.selected) void prepareHistoryView('chat',state.selected);} renderSidebar(); renderChat();
+      if (isCompactCollapseLayout() && state.compactOpen) {
+        ui.menu.insertAdjacentHTML('beforeend', '<button type="button" class="kc-compact-close" data-action="toggleleftpanel" title="Collapse contacts sidebar" aria-label="Collapse contacts sidebar">‹</button>');
+      }
+    }
     else if (state.tab === 'rooms') renderRooms();
     else if (state.tab === 'stickers') renderStickersLibrary();
     else if (state.tab === 'moments') renderMoments();
@@ -4243,7 +4259,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const p = state.profiles[id] || {};
     const lastSticker = (c.messages || []).slice().reverse().find(m => sticker(m.text));
     const lastStickerInfo = lastSticker ? sticker(lastSticker.text) : null;
-    ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${state.leftCollapsed ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${state.leftCollapsed ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button><div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
+    ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button><div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
       <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(s => `<button class="stickerbtn" data-sticker="${s.id}" title="Send ${s.name}">${asset(`sticker-${s.id}.png`,'',s.emoji)}<small>${s.name}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option></select>
@@ -4295,7 +4311,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const restoreComposer = oldComposer && ui.shadow.activeElement === oldComposer;
     const composerCursor = restoreComposer ? oldComposer.selectionStart : 0;
     const groupMessages=historyDisplayMessages('group',g.id,g.messages);
-    ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${state.leftCollapsed ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${state.leftCollapsed ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button>
+    ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button>
       <div class="chathead"><div style="font-size:36px">🏡</div><div class="headblock"><div class="headtitle">${escapeText(g.name)}</div><div class="headsubtitle">PawLounge Group Den · ${g.accepted.length}/${g.members.length} members joined</div></div><button class="secondary" data-action="leavegroup">Leave group</button></div>
       <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':bcName(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} acknowledged</span>` : ''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
       <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}">🐾 ${escapeText(q)}</button>`).join('')}</div>
@@ -4939,7 +4955,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act==='snoozechat') {const c=state.chats[state.selected];if(c){c.snoozeUntil=c.snoozeUntil>Date.now()?0:Date.now()+3600000;saveSoon();render();}}
     else if (act==='acceptrequest') {const c=state.chats[state.selected];if(c){c.requestPending=false;c.requestAccepted=true;saveSoon();render();notice('Message request accepted.');}}
     else if (act === 'whisperquick') {state.composerMode='whisper';const mode=ui.shadow.getElementById('kc-mode');if(mode)mode.value='whisper';ui.shadow.getElementById('kc-compose')?.focus();notice(inRoom(state.selected)?'Whisper mode selected.':'Whisper requires you both to be in the same BC room.');}
-    else if (act === 'toggleleftpanel') { state.leftCollapsed = !state.leftCollapsed; saveSoon(); render(); }
+    else if (act === 'toggleleftpanel') {
+      if (isCompactCollapseLayout()) state.compactOpen = !state.compactOpen;
+      else state.leftCollapsed = !state.leftCollapsed;
+      saveSoon(); render();
+    }
     else if (act === 'togglerightpanel') { state.rightCollapsed = !state.rightCollapsed; saveSoon(); render(); }
     else if (act === 'beepquick') {state.composerMode='beep';const mode=ui.shadow.getElementById('kc-mode');if(mode)mode.value='beep';ui.shadow.getElementById('kc-compose')?.focus();notice('Beep mode selected.');}
     else if (act === 'roomshortcut') {state.tab='rooms';render();void searchRooms('rooms-shortcut');}
