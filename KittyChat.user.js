@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.1
+// @version      0.8.3
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.1';
+  const VERSION = '0.8.2';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3377,6 +3377,56 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .paw-profile-theme-lavender{background:linear-gradient(#413569,#261c40)}
 @container (max-width:740px){#kc-panel .paw-brandlockup{font-size:27px!important;padding:16px 0 0 7px!important}#kc-panel .paw-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container (max-width:470px){#kc-panel .railtab[data-tab="catchup"] .ic{font-size:21px!important}#kc-panel .railtab[data-tab="catchup"] .tx{font-size:8.5px!important}}
+
+/* v0.8.3: Keep the rail scrollable and anchor the decorative kitty into the panel corner
+   so the art visually follows the chatbox curve instead of covering the lower buttons. */
+#kc-panel .workspace{min-height:0!important}
+#kc-panel .rail{
+  box-sizing:border-box!important;
+  min-height:0!important;
+  height:100%!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  overscroll-behavior:contain!important;
+  scrollbar-width:thin!important;
+  scrollbar-color:#d77aa9 #2a182b!important;
+  padding-bottom:clamp(126px,22%,178px)!important;
+  scroll-padding-bottom:146px!important;
+  align-content:start!important;
+}
+#kc-panel .rail .railtab{flex-shrink:0!important;isolation:isolate}
+#kc-panel .railspacer{flex-shrink:0!important;min-height:4px!important}
+#kc-panel .kc-deco-left-bottom{
+  pointer-events:none!important;
+  left:0!important;
+  bottom:0!important;
+  width:118px!important;
+  height:124px!important;
+  z-index:9!important;
+  overflow:hidden!important;
+  border-bottom-left-radius:34px!important;
+  transform:none!important;
+  display:flex!important;
+  align-items:flex-end!important;
+  justify-content:flex-start!important;
+  filter:drop-shadow(0 8px 14px rgba(0,0,0,.42))!important;
+}
+#kc-panel .kc-deco-left-bottom .asset{width:100%!important;height:100%!important}
+#kc-panel .kc-deco-left-bottom .asset img{
+  object-fit:contain!important;
+  object-position:left bottom!important;
+  transform:translate(-6px,7px) scale(1.08)!important;
+}
+#kc-panel.kc-short .rail{padding-bottom:116px!important}
+@container (max-width:1280px){
+  #kc-panel .kc-deco-left-bottom{width:106px!important;height:112px!important}
+  #kc-panel .kc-deco-left-bottom .asset img{transform:translate(-5px,6px) scale(1.05)!important}
+}
+@container (max-width:920px){
+  #kc-panel .kc-deco-left-bottom{width:94px!important;height:98px!important}
+  #kc-panel .kc-deco-left-bottom .asset img{transform:translate(-4px,4px) scale(1.02)!important}
+}
+@container (max-width:790px){#kc-panel .rail{padding-bottom:12px!important}}
 
 `; }
 
