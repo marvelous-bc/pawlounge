@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg"  preserveAspectRatio="none" viewBox="0 0 1438 916"><style>
+ .kc-outline-shadow{fill:none;stroke:#0d0613;stroke-width:17;stroke-linejoin:round}
+ .kc-outline-glow{fill:none;stroke:#f05e9e;stroke-width:8;stroke-opacity:.27}
+ .kc-outline-main{fill:none;stroke:url(#kc-outline-grad);stroke-width:2.8}
+ .kc-outline-inset{fill:none;stroke:#ffc0dd;stroke-opacity:.35;stroke-width:1.15}
+ .kc-divider-rail{fill:none;stroke:#af567f;stroke-width:1.7;stroke-opacity:.65}
+ </style>
+        <defs><linearGradient id="kc-outline-grad" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#ffd2e4"></stop><stop offset=".32" stop-color="#d979ad"></stop><stop offset=".7" stop-color="#803b67"></stop><stop offset="1" stop-color="#fd93bf"></stop></linearGradient></defs>
+        <path data-frame-path="outline" class="kc-outline-shadow" d="M 31 178 C 14 159 15 118 22 88 C 28 53 54 42 92 40 C 111 38 120 19 153 16 C 195 3 245 9 277 30 C 294 40 303 50 354 58 C 391 61 426 54 469 48 L 1076 48 C 1110 47 1126 42 1160 38 C 1188 34 1200 32 1223 38 C 1250 19 1299 15 1333 31 C 1382 26 1411 42 1415 83 L 1418 840 C 1420 877 1400 896 1360 896 L 92 896 C 49 897 31 878 31 840 Z"></path>
+        <path data-frame-path="outline" class="kc-outline-glow" d="M 31 178 C 14 159 15 118 22 88 C 28 53 54 42 92 40 C 111 38 120 19 153 16 C 195 3 245 9 277 30 C 294 40 303 50 354 58 C 391 61 426 54 469 48 L 1076 48 C 1110 47 1126 42 1160 38 C 1188 34 1200 32 1223 38 C 1250 19 1299 15 1333 31 C 1382 26 1411 42 1415 83 L 1418 840 C 1420 877 1400 896 1360 896 L 92 896 C 49 897 31 878 31 840 Z"></path>
+        <path data-frame-path="outline" class="kc-outline-main" d="M 31 178 C 14 159 15 118 22 88 C 28 53 54 42 92 40 C 111 38 120 19 153 16 C 195 3 245 9 277 30 C 294 40 303 50 354 58 C 391 61 426 54 469 48 L 1076 48 C 1110 47 1126 42 1160 38 C 1188 34 1200 32 1223 38 C 1250 19 1299 15 1333 31 C 1382 26 1411 42 1415 83 L 1418 840 C 1420 877 1400 896 1360 896 L 92 896 C 49 897 31 878 31 840 Z"></path>
+        <path data-frame-path="inset" class="kc-outline-inset" d="M 38 177 C 23 151 22 112 30 91 C 37 59 62 50 97 48 C 124 44 132 26 157 23 C 202 12 236 20 275 39 C 309 53 320 59 364 65 C 402 71 430 64 473 55 L 1079 55 C 1113 52 1128 49 1162 45 C 1194 40 1202 43 1223 46 C 1261 26 1292 24 1331 39 C 1379 33 1404 50 1407 85 L 1411 840 C 1411 869 1393 889 1359 889 L 94 889 C 57 890 38 871 38 837 Z"></path>
+        <path data-frame-path="rail" class="kc-divider-rail" d="M 97 165 Q 109 169 109 191 L 109 845 Q 109 865 125 868"></path>
+        <path data-frame-path="sidebar" class="kc-divider-rail" d="M 439 165 Q 451 169 451 191 L 451 845 Q 451 865 467 868"></path>
+        <path data-frame-path="companion" class="kc-divider-rail" d="M 1107 165 Q 1119 169 1119 191 L 1119 845 Q 1119 865 1135 868"></path>
+      </svg>

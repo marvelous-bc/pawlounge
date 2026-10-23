@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<defs>
+  <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#624164"/><stop offset=".6" stop-color="#34223e"/><stop offset="1" stop-color="#251b35"/></linearGradient>
+  <linearGradient id="inner" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffb2ce"/><stop offset="1" stop-color="#e865a2"/></linearGradient>
+  <linearGradient id="mail" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffa3c7"/><stop offset=".52" stop-color="#e96aab"/><stop offset="1" stop-color="#b94e92"/></linearGradient>
+  <linearGradient id="flap" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#ffd5e5"/><stop offset="1" stop-color="#f39bc2"/></linearGradient>
+  <linearGradient id="bell" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff1aa"/><stop offset=".6" stop-color="#e5a74a"/><stop offset="1" stop-color="#b96a42"/></linearGradient>
+  <filter id="shadow" x="-40%" y="-40%" width="180%" height="190%"><feGaussianBlur stdDeviation="8"/></filter>
+</defs>
+<!-- The launcher is a shaped kitten-mailer, deliberately not a circular avatar. -->
+<ellipse cx="257" cy="465" rx="176" ry="22" fill="#150e21" opacity=".30" filter="url(#shadow)"/>
+<!-- long expressive tail behind the envelope -->
+<path d="M119 290 C35 265 28 369 79 391 C109 404 139 376 120 355" fill="none" stroke="#281c34" stroke-width="52" stroke-linecap="round"/>
+<path d="M119 290 C35 265 28 369 79 391 C109 404 139 376 120 355" fill="none" stroke="#b96a9a" stroke-width="10" stroke-linecap="round" opacity=".8"/>
+<!-- left and right pointed ears -->
+<path d="M107 196 Q98 134 102 49 Q161 75 202 128" fill="url(#fur)" stroke="#241829" stroke-width="12" stroke-linejoin="round"/>
+<path d="M115 142 L119 82 L163 129 Q134 126 115 142Z" fill="url(#inner)"/>
+<path d="M281 130 Q318 52 391 19 Q390 111 351 186" fill="url(#fur)" stroke="#241829" stroke-width="12" stroke-linejoin="round"/>
+<path d="M317 124 Q342 83 373 62 L367 134Z" fill="url(#inner)"/>
+<!-- head: asymmetrical pear silhouette -->
+<path d="M100 172 C101 96 180 100 231 111 C298 89 372 128 367 209 C373 290 315 331 236 337 C136 340 78 267 100 172Z" fill="url(#fur)" stroke="#241829" stroke-width="12"/>
+<!-- round forehead tuft, soft blush and cheek tufts -->
+<path d="M172 120 Q192 105 214 121 Q224 109 236 119" fill="none" stroke="#986b94" stroke-width="12" stroke-linecap="round"/>
+<path d="M106 216 Q74 221 91 244 Q100 259 121 258" fill="#402c49" stroke="#241829" stroke-width="5"/>
+<path d="M347 229 Q374 232 367 254 Q360 274 333 277" fill="#422d49" stroke="#241829" stroke-width="5"/>
+<ellipse cx="151" cy="237" rx="30" ry="17" fill="#fa7fa9" opacity=".38"/>
+<ellipse cx="320" cy="239" rx="30" ry="17" fill="#fa7fa9" opacity=".38"/>
+<!-- sleepy expressive eyes -->
+<path d="M148 202 Q172 231 197 203" stroke="#ffe8ed" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M273 202 Q300 228 324 197" stroke="#ffe8ed" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M180 203 l-9 -9 M293 203 l10 -9" stroke="#ffe8ed" stroke-width="7" stroke-linecap="round"/>
+<!-- muzzle and nose -->
+<ellipse cx="236" cy="255" rx="63" ry="35" fill="#f7cbdf" opacity=".95"/>
+<path d="M229 244 Q235 239 242 244 Q237 252 235 252Z" fill="#b8507c"/>
+<path d="M235 252 Q231 273 219 267 M235 252 Q245 273 254 264" fill="none" stroke="#995273" stroke-width="5" stroke-linecap="round"/>
+<!-- whiskers -->
+<path d="M182 247 L123 236 M179 261 L125 270 M289 248 L350 236 M292 262 L346 272" fill="none" stroke="#f3d9e8" stroke-width="4" stroke-linecap="round" opacity=".88"/>
+<!-- bow on the right ear, smaller accent than full mascot avatar -->
+<path d="M326 104 Q292 71 285 106 Q279 144 325 130 Q373 152 377 114 Q371 84 338 109Z" fill="#f5a1c3" stroke="#ac4b86" stroke-width="7"/>
+<ellipse cx="330" cy="119" rx="13" ry="17" fill="#ffdcdf" stroke="#a85183" stroke-width="6"/>
+<!-- collar and tiny charm -->
+<path d="M161 295 Q226 335 307 291" fill="none" stroke="#f47ea8" stroke-width="15" stroke-linecap="round"/>
+<circle cx="235" cy="318" r="20" fill="url(#bell)" stroke="#9e5a44" stroke-width="6"/>
+<path d="M221 315h28M235 321v9" stroke="#825336" stroke-width="4" stroke-linecap="round"/>
+<!-- Envelope overlapping body: distinct recognisable messaging object -->
+<g transform="rotate(-7 294 367)">
+<rect x="136" y="288" width="314" height="163" rx="29" fill="url(#mail)" stroke="#53233f" stroke-width="12"/>
+<path d="M149 307 L282 391 Q293 403 306 391 L438 307" fill="none" stroke="#aa477d" stroke-width="10" stroke-linejoin="round"/>
+<path d="M154 309 Q144 302 154 295 L433 295 Q447 295 438 310 L307 393 Q294 404 282 393Z" fill="url(#flap)" stroke="#b45889" stroke-width="6"/>
+<path d="M151 437 L244 364 M436 435 L354 366" fill="none" stroke="#ffb9d4" stroke-width="6" opacity=".8"/>
+<!-- heart-shaped wax seal -->
+<path d="M284 374 C252 346 239 383 282 406 C324 383 309 348 284 374Z" fill="#c64b8e" stroke="#fff0f6" stroke-width="6"/>
+</g>
+<!-- adorable paws hugging front edge of envelope -->
+<path d="M162 312 Q137 290 128 317 Q117 348 166 354 Q180 351 178 333Z" fill="#3a283f" stroke="#26192d" stroke-width="8"/>
+<path d="M361 302 Q386 286 398 314 Q404 344 367 357 Q342 352 347 328Z" fill="#3a283f" stroke="#26192d" stroke-width="8"/>
+<path d="M144 325 Q149 318 154 328 M159 323 Q165 319 168 330 M369 325 Q374 316 379 324" stroke="#f4b4cb" stroke-width="6" stroke-linecap="round" fill="none"/>
+<!-- two floaty accent stars; minimal surrounding decoration -->
+<path d="M425 116 l9 19 19 9 -19 9 -9 19 -9 -19 -19 -9 19 -9Z" fill="#ffbbdb"/>
+<path d="M65 225 l6 12 12 6 -12 6 -6 12 -6 -12 -12 -6 12 -6Z" fill="#e588ba"/>
+</svg>
