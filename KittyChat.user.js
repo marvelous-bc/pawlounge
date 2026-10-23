@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.5
+// @version      0.8.7
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.5';
+  const VERSION = '0.8.7';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -94,7 +94,17 @@
     { id: 'moon-hug', name: 'Moon Hug', emoji: '🫂' },
     { id: 'moon-yawn', name: 'Moon Yawn', emoji: '🥱' },
     { id: 'moon-zoomies', name: 'Moon Zoomies', emoji: '✨' },
-    { id: 'moon-smug', name: 'Moon Smug', emoji: '😼' }
+    { id: 'moon-smug', name: 'Moon Smug', emoji: '😼' },
+    { id: 'moon-wave', name: 'Moon Wave', emoji: '👋' },
+    { id: 'moon-laugh', name: 'Moon Laugh', emoji: '😹' },
+    { id: 'moon-cry', name: 'Moon Cry', emoji: '😭' },
+    { id: 'moon-surprised', name: 'Moon Surprised', emoji: '😲' },
+    { id: 'moon-think', name: 'Moon Think', emoji: '🤔' },
+    { id: 'moon-stretch', name: 'Moon Stretch', emoji: '🙆' },
+    { id: 'moon-peek', name: 'Moon Peek', emoji: '🫣' },
+    { id: 'moon-dizzy', name: 'Moon Dizzy', emoji: '😵' },
+    { id: 'moon-grumpy', name: 'Moon Grumpy', emoji: '😒' },
+    { id: 'moon-sneeze', name: 'Moon Sneeze', emoji: '🤧' }
   ];
   const DEFAULT_SETTINGS = { theme: 'midnight', fontSize:'large', notifications: true, sounds: false,
     typing: false, panelScrollbars: true, assetBase: DEFAULT_ASSET_BASE, avatar: '', signature: 'Purrs and pawprints ♡',
@@ -3453,6 +3463,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 @container (max-width:1280px){#kc-panel .kc-deco-left-bottom{left:-7px!important;bottom:-7px!important}}
 @container (max-width:920px){#kc-panel .kc-deco-left-bottom{left:-5px!important;bottom:-5px!important}}
 
+
+/* v0.8.7 restored illustrated PawLounge header artwork */
+#kc-panel .paw-image-brandlockup{padding:0!important;display:block!important;overflow:visible!important;pointer-events:none!important}
+#kc-panel .paw-image-brandlockup .asset{width:100%!important;height:100%!important;display:block!important}
+#kc-panel .paw-image-brandlockup .asset img{width:100%!important;height:100%!important;display:block!important;object-fit:contain!important;object-position:center center!important}
+
 `; }
 
   function setTheme() {
@@ -3495,7 +3511,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       </svg>
       <div class="kc-deco-left-ribbon">${asset('decor-bow-bell.png','','Ribbon and bell')}</div><div class="kc-deco-left-bottom">${asset('decor-black-cat-bottom.png','','Black kitten')}</div><div class="kc-deco-right-top">${asset('decor-black-cat-top.png','','Black kitten')}<span class="mini-moon">${asset('ui-moon-decor.svg','','')}</span></div>
       <header class="hero"><span class="pawfloat">🐾</span><span class="pawfloat2">🐾</span>
-        <span class="brandlockup paw-brandlockup">PawLounge<span class="paw-brand-heart">♡</span></span>
+        <span class="brandlockup paw-image-brandlockup">${asset('decor-header-lockup-shaped.png','','PawLounge','PawLounge')}</span>
         <div class="brandblock brand-after-lockup"><span class="subrow"><small>A cozy little social lounge · v${VERSION}</small></span></div>
         <div class="grow"></div>
         <div class="heroactions"><span class="dragcue" aria-hidden="true">⠿ &nbsp; Drag to move</span><div class="herocharms" aria-hidden="true"><span class="herocharm">${asset('ui-paw.svg','','')}</span><span class="herocharm">${asset('ui-star.svg','','')}</span></div><button class="iconbutton closekitty" data-action="close" aria-label="Close PawLounge">${asset('ui-close.svg','','✕')}</button></div>
