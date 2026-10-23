@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.8
+// @version      0.8.9
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.8';
+  const VERSION = '0.8.9';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3524,6 +3524,92 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   #kc-panel .brandlockup.paw-image-brandlockup{
     left:-4px!important;top:1px!important;width:193px!important;height:83px!important;
   }
+}
+
+
+/* PawLounge v0.8.9 — artwork-safe header + centered, fully visible rail labels.
+   The transparent kitten-and-wordmark artwork is intentionally unchanged. */
+#kc-panel .brand-after-lockup{
+  left:420px!important;
+  top:109px!important;
+  right:auto!important;
+  z-index:20!important;
+  pointer-events:none!important;
+  width:max-content!important;
+  max-width:min(340px,calc(100% - 435px))!important;
+  white-space:nowrap!important;
+}
+#kc-panel .brand-after-lockup .subrow small{
+  display:block!important;
+  font-size:11px!important;
+  line-height:1.35!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+#kc-panel .rail{
+  padding-left:6px!important;
+  padding-right:6px!important;
+  min-width:0!important;
+}
+#kc-panel .rail .railtab{
+  box-sizing:border-box!important;
+  position:relative!important;
+  left:0!important;
+  right:auto!important;
+  width:100%!important;
+  min-width:0!important;
+  max-width:100%!important;
+  margin-left:0!important;
+  margin-right:0!important;
+  padding-left:2px!important;
+  padding-right:2px!important;
+  flex:0 0 auto!important;
+  align-items:center!important;
+  justify-content:center!important;
+  overflow:hidden!important;
+}
+#kc-panel .rail .railtab .tx,
+#kc-panel .rail .railtab[data-tab="moments"] .tx,
+#kc-panel .rail .railtab[data-tab="catchup"] .tx{
+  display:block!important;
+  flex:0 1 auto!important;
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  padding:0!important;
+  font-size:10px!important;
+  font-weight:750!important;
+  letter-spacing:-.15px!important;
+  line-height:1.2!important;
+  text-align:center!important;
+  white-space:normal!important;
+  overflow-wrap:normal!important;
+  overflow:hidden!important;
+  text-overflow:clip!important;
+}
+@container (max-width:1280px){
+  #kc-panel .brand-after-lockup{left:368px!important;top:99px!important;max-width:calc(100% - 385px)!important}
+}
+@container (max-width:920px){
+  #kc-panel .brand-after-lockup{left:322px!important;top:90px!important;max-width:calc(100% - 337px)!important}
+}
+@container (max-width:790px){
+  #kc-panel .brand-after-lockup{display:none!important}
+  #kc-panel .rail{padding-left:3px!important;padding-right:3px!important}
+  #kc-panel .rail .railtab .tx,
+  #kc-panel .rail .railtab[data-tab="moments"] .tx,
+  #kc-panel .rail .railtab[data-tab="catchup"] .tx{
+    font-size:9px!important;
+    letter-spacing:-.25px!important;
+  }
+}
+@container (max-width:520px){
+  #kc-panel .rail .railtab .tx,
+  #kc-panel .rail .railtab[data-tab="moments"] .tx,
+  #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:8.5px!important}
 }
 
 `; }
