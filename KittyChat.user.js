@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.13
+// @version      0.8.14
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.13';
+  const VERSION = '0.8.14';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3775,6 +3775,136 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   flex-basis:50px!important;height:50px!important;min-height:50px!important;max-height:50px!important;
 }
 
+/* v0.8.14 — compact contacts view. Save vertical height without reducing
+   sidebar width, hiding message controls, or changing navigation/collapse arrows. */
+#kc-panel .sidebar .side-shell{
+  padding:8px 9px 8px!important;
+  gap:6px!important;
+  min-height:0!important;
+}
+/* Now Purring is a small summary rather than a full profile card. */
+#kc-panel .side-shell>.side-card{
+  min-height:0!important;height:auto!important;
+  padding:7px 10px 8px!important;border-radius:15px!important;
+}
+#kc-panel .side-card .side-card-title{
+  font-size:12px!important;line-height:16px!important;margin:0 0 3px!important;
+}
+#kc-panel .side-card .side-mainline{
+  min-height:0!important;margin-top:0!important;gap:7px!important;align-items:center!important;
+}
+#kc-panel .side-card .side-mainline .avatar{
+  width:38px!important;height:38px!important;min-width:38px!important;
+  min-height:38px!important;flex:0 0 38px!important;
+}
+#kc-panel .side-card .side-mainline>div{min-width:0!important}
+#kc-panel .side-card .side-mainline>div>div:first-child{
+  font-size:13px!important;line-height:1.2!important;
+  white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;
+}
+#kc-panel .side-card .side-mainline .muted{
+  font-size:11px!important;line-height:1.2!important;
+  max-width:100%!important;white-space:nowrap!important;
+  overflow:hidden!important;text-overflow:ellipsis!important;
+}
+#kc-panel .side-card .side-mainline .kc-status-label{
+  font-size:10px!important;line-height:1.15!important;
+  white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;
+  margin:2px 0 0!important;
+}
+#kc-panel .side-card .hero-heart{font-size:18px!important;flex:0 0 auto!important}
+/* Contacts circles and search keep usable hit targets, with reduced empty space. */
+#kc-panel .side-shell>.paw-circle-row{
+  box-sizing:border-box!important;gap:5px!important;
+  flex:0 0 32px!important;height:32px!important;min-height:32px!important;
+}
+#kc-panel .paw-circle-row .field{
+  box-sizing:border-box!important;height:32px!important;min-height:32px!important;
+  max-height:32px!important;padding:3px 6px!important;
+  font-size:11px!important;line-height:1.2!important;
+}
+#kc-panel .paw-circle-row .secondary{
+  box-sizing:border-box!important;height:32px!important;min-height:32px!important;
+  padding:3px 8px!important;font-size:11px!important;
+}
+#kc-panel .side-search{min-height:0!important}
+#kc-panel .side-search .search{
+  box-sizing:border-box!important;height:36px!important;min-height:36px!important;
+  padding:6px 37px 6px 12px!important;font-size:12px!important;
+}
+#kc-panel .side-search .pawhint{font-size:16px!important}
+/* Filters stay horizontally scrollable; trim the dead space around the bar. */
+#kc-panel .kc-inbox-filter-wrap{
+  gap:4px!important;padding:0!important;
+  margin:0!important;min-height:0!important;
+}
+#kc-panel .kc-inbox-filter-wrap>.kc-inbox-filters{
+  align-items:center!important;padding:0!important;
+}
+#kc-panel .kc-inbox-filter-wrap .filterbtn{
+  box-sizing:border-box!important;height:33px!important;min-height:33px!important;
+  max-height:33px!important;padding:5px 8px!important;
+  font-size:11px!important;line-height:1.2!important;
+}
+#kc-panel .kc-filter-scroll-controls{
+  height:14px!important;min-height:14px!important;flex-basis:14px!important;
+  gap:5px!important;
+}
+#kc-panel .kc-filter-scroll-btn{height:14px!important;font-size:14px!important}
+#kc-panel .kc-filter-scroll-track{height:9px!important}
+#kc-panel .kc-filter-scroll-thumb{height:5px!important}
+/* Denser, still readable contact rows. Unread badges and statuses stay visible. */
+#kc-panel .contacts-scroll>.side-list{gap:2px!important;padding:0 0 3px!important}
+#kc-panel .contacts-scroll .contact{
+  box-sizing:border-box!important;min-height:52px!important;height:auto!important;
+  padding:4px 6px!important;gap:7px!important;border-radius:12px!important;
+}
+#kc-panel .contacts-scroll .contact .avatar{
+  width:36px!important;height:36px!important;min-width:36px!important;
+  min-height:36px!important;flex:0 0 36px!important;
+}
+#kc-panel .contact .info{min-width:0!important}
+#kc-panel .contact .topline{gap:4px!important;min-width:0!important}
+#kc-panel .contact .nameline{
+  font-size:13px!important;line-height:1.18!important;min-width:0!important;
+}
+#kc-panel .contact .time{font-size:10px!important;line-height:1.2!important}
+#kc-panel .contact .preview{
+  font-size:11px!important;line-height:1.2!important;
+  margin-top:1px!important;
+}
+#kc-panel .contact .kc-status-label{
+  font-size:10px!important;line-height:1.18!important;
+  white-space:nowrap!important;overflow:hidden!important;
+  text-overflow:ellipsis!important;margin-top:1px!important;
+}
+#kc-panel .contact .tiny-pill{
+  font-size:10px!important;min-width:19px!important;
+  padding:2px 4px!important;
+}
+#kc-panel .contact .presence{width:8px!important;height:8px!important;flex:0 0 8px!important}
+#kc-panel .contacts-scroll .groupbar{
+  padding:7px 0 2px!important;margin:4px 1px 2px!important;
+}
+#kc-panel .contacts-scroll .groupbar b{font-size:13px!important}
+#kc-panel .contacts-scroll .group-stack{gap:3px!important;margin-bottom:3px!important}
+#kc-panel .contacts-scroll .group-item{
+  min-height:53px!important;padding:5px 7px!important;border-radius:12px!important;
+}
+#kc-panel .side-shell>.new-kitty{
+  box-sizing:border-box!important;min-height:34px!important;
+  height:34px!important;padding:6px 9px!important;
+  border-radius:13px!important;flex-shrink:0!important;
+}
+/* Short-height windows: keep the Now Purring summary rather than deleting it,
+   but reduce it further to preserve a usable scrolling contacts area. */
+#kc-panel.kc-short .side-shell>.side-card{display:block!important;padding:5px 9px!important}
+#kc-panel.kc-short .side-card .side-card-title{margin-bottom:2px!important}
+#kc-panel.kc-short .side-card .side-mainline .avatar{
+  width:32px!important;height:32px!important;min-width:32px!important;
+  min-height:32px!important;flex-basis:32px!important;
+}
+
 `; }
 
   function setTheme() {
@@ -4366,9 +4496,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         </div>
       </div>
       <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names, contacts and groups">
-        <div class="side-list">${items.slice(0,3).map(contactButton).join('') || '<div class="muted">No kitties found yet.</div>'}</div>
+        <div class="side-list">${items.map(contactButton).join('') || '<div class="muted">No kitties found yet.</div>'}</div>
         ${state.tab === 'chats' ? `<div class="groupbar"><b>Group Dens ♡</b><button class="group-plus" data-action="newgroup">＋ Group</button></div><div class="group-stack">${groupsMarkup || '<div class="muted">A little den for your kitties ♡</div>'}</div>` : ''}
-        <div class="side-list">${items.slice(3).map(contactButton).join('')}</div>
       </div>
       <button class="new-kitty" data-action="new">＋ Add a kitty by member #</button>
     </div>`;
