@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.7
+// @version      0.8.8
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.7';
+  const VERSION = '0.8.8';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -141,7 +141,9 @@
   const dataKey = () => `Kittychat.v1.${state.myId}`;
   const imgUrl = file => {
     const base = /^https:\/\/[^\s]+\/$/.test(state.settings.assetBase) ? state.settings.assetBase : DEFAULT_ASSET_BASE;
-    return base + file;
+    // Header art changes need their own versioned URL: fresh launcher fetches
+    // do not invalidate a browser/CDN cache for PNG files automatically.
+    return base + file + (/^decor-header-lockup(?:-shaped|-mockup)?\.png$/.test(file) ? `?art=${VERSION}` : '');
   };
   const sticker = text => STICKERS.find(s => text === `🐱 Kittychat sticker: ${s.name} ${s.emoji}`);
   const bcName = id => {
@@ -3468,6 +3470,61 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .paw-image-brandlockup{padding:0!important;display:block!important;overflow:visible!important;pointer-events:none!important}
 #kc-panel .paw-image-brandlockup .asset{width:100%!important;height:100%!important;display:block!important}
 #kc-panel .paw-image-brandlockup .asset img{width:100%!important;height:100%!important;display:block!important;object-fit:contain!important;object-position:center center!important}
+
+/* v0.8.8: Irregular, transparent PawLounge logo artwork.
+   No solid rectangular image backing: the frame, kitten, ribbon and wordmark
+   sit cleanly over the existing header border. Keep the art click-through. */
+#kc-panel .brandlockup.paw-image-brandlockup{
+  left:-14px!important;
+  top:-11px!important;
+  width:396px!important;
+  height:172px!important;
+  z-index:27!important;
+  filter:drop-shadow(0 5px 6px rgba(11,2,15,.42))!important;
+  pointer-events:none!important;
+  background:transparent!important;
+  overflow:visible!important;
+}
+#kc-panel .paw-image-brandlockup .asset{
+  background:transparent!important;
+  border:0!important;
+  overflow:visible!important;
+  width:100%!important;
+  height:100%!important;
+}
+#kc-panel .paw-image-brandlockup .asset img{
+  width:100%!important;height:100%!important;
+  object-fit:fill!important;object-position:left top!important;
+  display:block!important;max-width:none!important;
+  background:transparent!important;
+}
+#kc-panel .brand-after-lockup{left:180px!important;top:108px!important;z-index:28!important}
+/* The new logo includes its own hanging bow and bell. Do not render the
+   duplicate ribbon art over the kitten's face. */
+#kc-panel .kc-deco-left-ribbon{display:none!important}
+@container (max-width:1280px){
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-10px!important;top:-8px!important;width:348px!important;height:151px!important;
+  }
+  #kc-panel .brand-after-lockup{left:160px!important;top:99px!important}
+}
+@container (max-width:920px){
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-8px!important;top:-5px!important;width:308px!important;height:133px!important;
+  }
+  #kc-panel .brand-after-lockup{left:137px!important;top:90px!important}
+}
+@container (max-width:740px){
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-3px!important;top:0!important;width:232px!important;height:99px!important;
+  }
+  #kc-panel .brand-after-lockup{display:none!important}
+}
+@container (max-width:480px){
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-4px!important;top:1px!important;width:193px!important;height:83px!important;
+  }
+}
 
 `; }
 
