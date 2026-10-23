@@ -1,0 +1,1 @@
+javascript:(()=>{const u="https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js";fetch(u+"?t="+Date.now(),{cache:"no-store"}).then(r=>{if(!r.ok)throw Error("HTTP "+r.status);return r.text()}).then(s=>{if(!s.startsWith("// ==UserScript=="))throw Error("Invalid script");(0,eval)(s)}).catch(e=>alert("PawLounge: "+e.message))})()
