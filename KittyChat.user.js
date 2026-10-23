@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.12
+// @version      0.8.13
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.12';
+  const VERSION = '0.8.13';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3716,6 +3716,63 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel.kc-short .rail .railtab,
 #kc-panel.kc-short .rail .railtab[data-tab="moments"]{
   flex-basis:56px!important;height:56px!important;min-height:56px!important;max-height:56px!important
+}
+
+
+/* v0.8.13 — compact, artwork-safe navigation.  In BC's scaled UI, seven 64px
+   tabs can fill the rail and put Settings directly on the corner cat.
+   Keep all controls in normal flow, just use a smaller, consistent tab size. */
+#kc-panel .rail{
+  padding-top:27px!important;
+  gap:3px!important;
+  scroll-padding-top:27px!important;
+  padding-bottom:132px!important;
+  scroll-padding-bottom:132px!important;
+}
+#kc-panel .rail .railtab,
+#kc-panel .rail .railtab[data-tab="moments"]{
+  flex:0 0 53px!important;
+  box-sizing:border-box!important;
+  height:53px!important;min-height:53px!important;max-height:53px!important;
+  padding:3px 1px!important;gap:1px!important;
+}
+#kc-panel .rail .railtab .ic{
+  height:30px!important;min-height:0!important;
+  line-height:1!important;flex:0 0 30px!important;
+  display:flex!important;align-items:center!important;justify-content:center!important;
+}
+#kc-panel .rail .railtab[data-tab="moments"] .ic{height:30px!important;flex-basis:30px!important}
+#kc-panel .rail .railtab .ic .asset{width:29px!important;height:29px!important}
+#kc-panel .rail .railtab[data-tab="moments"] .kc-moments-icon{width:29px!important;height:29px!important}
+#kc-panel .rail .railtab .tx,
+#kc-panel .rail .railtab[data-tab="moments"] .tx,
+#kc-panel .rail .railtab[data-tab="catchup"] .tx{
+  font-size:9.8px!important;line-height:1.1!important;
+  flex:0 0 auto!important;
+}
+/* The subtitle belongs to the logo's immediate right, not the middle of the header. */
+#kc-panel .brand-after-lockup{left:380px!important;top:96px!important;max-width:calc(100% - 580px)!important}
+/* The cat remains above the OUTER border, while the rail icons stay separate. */
+#kc-panel .kc-deco-left-bottom{pointer-events:none!important;z-index:19!important}
+@container kc-pawlounge-shell (max-width:1280px){
+  #kc-panel .brand-after-lockup{left:325px!important;top:92px!important;max-width:calc(100% - 500px)!important}
+  #kc-panel .rail{padding-top:24px!important;padding-bottom:122px!important;scroll-padding-top:24px!important}
+}
+@container kc-pawlounge-shell (max-width:920px){
+  #kc-panel .brand-after-lockup{left:278px!important;top:85px!important;max-width:calc(100% - 390px)!important}
+  #kc-panel .rail{padding-top:20px!important;padding-bottom:108px!important;scroll-padding-top:20px!important}
+}
+@container kc-pawlounge-shell (max-width:780px){
+  #kc-panel .brand-after-lockup{display:none!important}
+  #kc-panel .kc-deco-left-bottom{display:none!important}
+  #kc-panel .rail{padding-top:12px!important;padding-bottom:12px!important;scroll-padding-top:12px!important;scroll-padding-bottom:12px!important}
+  #kc-panel .rail .railtab,#kc-panel .rail .railtab[data-tab="moments"]{
+    flex-basis:52px!important;height:52px!important;min-height:52px!important;max-height:52px!important;
+  }
+}
+#kc-panel.kc-short .rail{padding-top:9px!important;padding-bottom:10px!important}
+#kc-panel.kc-short .rail .railtab,#kc-panel.kc-short .rail .railtab[data-tab="moments"]{
+  flex-basis:50px!important;height:50px!important;min-height:50px!important;max-height:50px!important;
 }
 
 `; }
