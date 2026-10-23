@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.9
+// @version      0.8.10
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.9';
+  const VERSION = '0.8.10';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3527,89 +3527,114 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 }
 
 
-/* PawLounge v0.8.9 — artwork-safe header + centered, fully visible rail labels.
-   The transparent kitten-and-wordmark artwork is intentionally unchanged. */
-#kc-panel .brand-after-lockup{
-  left:420px!important;
-  top:109px!important;
-  right:auto!important;
-  z-index:20!important;
-  pointer-events:none!important;
-  width:max-content!important;
-  max-width:min(340px,calc(100% - 435px))!important;
-  white-space:nowrap!important;
-}
-#kc-panel .brand-after-lockup .subrow small{
-  display:block!important;
-  font-size:11px!important;
-  line-height:1.35!important;
-  white-space:nowrap!important;
-  overflow:hidden!important;
-  text-overflow:ellipsis!important;
+/* v0.8.10: Preserve a safe gutter between PawLounge's left sculpted frame
+   and actual navigation content. Older overrides made a narrower content box
+   and clipped initial letters; widening ONLY text did not address that. */
+#kc-panel .workspace{
+  grid-template-columns:110px minmax(0,342px) minmax(0,1fr)!important;
 }
 #kc-panel .rail{
-  padding-left:6px!important;
-  padding-right:6px!important;
+  box-sizing:border-box!important;
   min-width:0!important;
+  padding-left:28px!important;
+  padding-right:8px!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:stretch!important;
+  overflow-x:hidden!important;
+  overflow-y:auto!important;
+  scrollbar-width:thin!important;
 }
-#kc-panel .rail .railtab{
+#kc-panel .rail .railtab,
+#kc-panel .rail .railtab[data-tab="moments"]{
   box-sizing:border-box!important;
   position:relative!important;
   left:0!important;
-  right:auto!important;
+  transform:none!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  flex:0 0 auto!important;
   width:100%!important;
   min-width:0!important;
   max-width:100%!important;
-  margin-left:0!important;
-  margin-right:0!important;
-  padding-left:2px!important;
-  padding-right:2px!important;
-  flex:0 0 auto!important;
-  align-items:center!important;
-  justify-content:center!important;
-  overflow:hidden!important;
+  padding:7px 3px!important;
+  margin:0!important;
+  overflow:visible!important;
 }
 #kc-panel .rail .railtab .tx,
 #kc-panel .rail .railtab[data-tab="moments"] .tx,
 #kc-panel .rail .railtab[data-tab="catchup"] .tx{
   display:block!important;
-  flex:0 1 auto!important;
+  position:static!important;
+  transform:none!important;
   box-sizing:border-box!important;
   width:100%!important;
-  max-width:100%!important;
   min-width:0!important;
+  max-width:100%!important;
   margin:0!important;
   padding:0!important;
-  font-size:10px!important;
-  font-weight:750!important;
-  letter-spacing:-.15px!important;
-  line-height:1.2!important;
+  font-size:10.5px!important;
+  font-weight:760!important;
+  letter-spacing:0!important;
+  line-height:1.18!important;
   text-align:center!important;
   white-space:normal!important;
   overflow-wrap:normal!important;
-  overflow:hidden!important;
+  word-break:normal!important;
+  overflow:visible!important;
   text-overflow:clip!important;
 }
 @container (max-width:1280px){
-  #kc-panel .brand-after-lockup{left:368px!important;top:99px!important;max-width:calc(100% - 385px)!important}
+ #kc-panel .workspace{grid-template-columns:104px minmax(0,300px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:26px!important;padding-right:7px!important}
+}
+@container (max-width:1130px){
+ #kc-panel .workspace{grid-template-columns:100px minmax(0,270px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:24px!important;padding-right:7px!important}
+}
+@container (max-width:1050px){
+ #kc-panel .workspace{grid-template-columns:96px minmax(0,255px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:22px!important;padding-right:6px!important}
 }
 @container (max-width:920px){
-  #kc-panel .brand-after-lockup{left:322px!important;top:90px!important;max-width:calc(100% - 337px)!important}
+ #kc-panel .workspace{grid-template-columns:92px minmax(0,245px) minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:20px!important;padding-right:6px!important}
 }
-@container (max-width:790px){
-  #kc-panel .brand-after-lockup{display:none!important}
-  #kc-panel .rail{padding-left:3px!important;padding-right:3px!important}
-  #kc-panel .rail .railtab .tx,
-  #kc-panel .rail .railtab[data-tab="moments"] .tx,
-  #kc-panel .rail .railtab[data-tab="catchup"] .tx{
-    font-size:9px!important;
-    letter-spacing:-.25px!important;
-  }
+@container (max-width:780px){
+ #kc-panel .workspace{grid-template-columns:76px minmax(0,1fr)!important}
+ #kc-panel .workspace>.main{grid-column:2!important}
+ #kc-panel .workspace>.sidebar.compact-open{left:76px!important;width:min(275px,calc(100% - 76px))!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:76px minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:13px!important;padding-right:4px!important}
+ #kc-panel .rail .railtab .tx,
+ #kc-panel .rail .railtab[data-tab="moments"] .tx,
+ #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:9.5px!important}
 }
 @container (max-width:520px){
-  #kc-panel .rail .railtab .tx,
-  #kc-panel .rail .railtab[data-tab="moments"] .tx,
-  #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:8.5px!important}
+ #kc-panel .workspace{grid-template-columns:68px minmax(0,1fr)!important}
+ #kc-panel .workspace>.sidebar.compact-open{left:68px!important;width:min(275px,calc(100% - 68px))!important}
+ #kc-panel.left-collapsed .workspace{grid-template-columns:68px minmax(0,1fr)!important}
+ #kc-panel .rail{padding-left:10px!important;padding-right:3px!important}
+ #kc-panel .rail .railtab .tx,
+ #kc-panel .rail .railtab[data-tab="moments"] .tx,
+ #kc-panel .rail .railtab[data-tab="catchup"] .tx{font-size:8.75px!important}
+}
+@container (min-width:781px){
+ #kc-panel.left-collapsed .workspace{grid-template-columns:110px 0 minmax(0,1fr)!important}
+}
+@container (min-width:781px) and (max-width:1280px){
+ #kc-panel.left-collapsed .workspace{grid-template-columns:104px 0 minmax(0,1fr)!important}
+}
+@container (min-width:781px) and (max-width:1130px){
+ #kc-panel.left-collapsed .workspace{grid-template-columns:100px 0 minmax(0,1fr)!important}
+}
+@container (min-width:781px) and (max-width:1050px){
+ #kc-panel.left-collapsed .workspace{grid-template-columns:96px 0 minmax(0,1fr)!important}
+}
+@container (min-width:781px) and (max-width:920px){
+ #kc-panel.left-collapsed .workspace{grid-template-columns:92px 0 minmax(0,1fr)!important}
 }
 
 `; }
