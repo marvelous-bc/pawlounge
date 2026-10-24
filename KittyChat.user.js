@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.6
+// @version      0.9.7
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.6';
+  const VERSION = '0.9.7';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -116,13 +116,13 @@
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
-    title: null, subtitle: null, input: null, menu: null, status: null };
+    title: null, subtitle: null, input: null, menu: null, status: null, rightArrowObserver: null };
   const state = { myId: 0, settings: { ...DEFAULT_SETTINGS }, chats: {}, profiles: {}, groups: {}, selectedGroup: '', groupCreateOpen: false, windowRect: null,
     selected: 0, roomHistory: [], tab: 'chats', search: '', roomSearch: '', roomSort: 'most', roomFavorites: [], roomRecent: [], rooms: [], moments: [], replyTarget:null, momentView:null,
     roomError: '', roomLoading: false, roomSearched: false, roomCounts: {}, roomSearchWarnings: [], roomSearchTrigger: 'not-started', roomLastStarted: 0, roomLastFinished: 0, open: false, contactsMode: 'all',
     composerMode: 'beep', typingUntil: {}, lastTypingSent: 0, lastSave: null,
     hooks: [], mod: null, suppressOutgoing: false, recentFingerprints: new Map(),
-    started: false, scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0 };
+    started: false, scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, rightDrawerOpen: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0 };
   // Friend-status packets are private Kittychat control messages, not public
   // chat/beeps. Keep all delivery state in memory; only settings/received status
   // are saved with existing Kittychat account data.
@@ -4343,6 +4343,54 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   color:#491728!important;
 }
 
+/* v0.9.7 — Keep the right widget arrow visible at every panel width.
+   On compact panel sizes, reveal the companion as a slide-over drawer, not a
+   second grid column. This avoids crushing the message composer at 900px. */
+#kc-panel .chatcenter>.collapse-handle.right{
+  display:flex!important;visibility:visible!important;opacity:1!important;
+  pointer-events:auto!important;right:8px!important;left:auto!important;
+  z-index:78!important;
+}
+#kc-panel .companion>.kc-drawer-close{display:none!important}
+@container kc-pawlounge-shell (max-width:1120px){
+  #kc-panel .chatlayout{
+    position:relative!important;
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+  #kc-panel .chatcenter>.collapse-handle.right{
+    display:flex!important;visibility:visible!important;opacity:1!important;
+  }
+  /* A drawer can open even if desktop profile details were previously collapsed. */
+  #kc-panel.right-drawer-open .chatlayout>.companion{
+    display:flex!important;position:absolute!important;
+    top:0!important;right:0!important;bottom:0!important;
+    left:auto!important;
+    width:min(320px,calc(100% - 42px))!important;
+    height:100%!important;max-height:100%!important;
+    min-width:0!important;
+    z-index:82!important;
+    overflow-y:auto!important;
+    padding-top:51px!important;
+    background:var(--bg)!important;
+    border:1px solid var(--accent)!important;
+    border-radius:18px 0 0 18px!important;
+    box-shadow:-12px 0 25px #08040eae!important;
+  }
+  #kc-panel.right-drawer-open .chatcenter>.collapse-handle.right{display:none!important}
+  #kc-panel.right-drawer-open .companion>.kc-drawer-close{
+    display:flex!important;align-items:center!important;justify-content:center!important;
+    position:absolute!important;top:9px!important;right:10px!important;
+    z-index:85!important;flex:none!important;
+    width:32px!important;height:32px!important;
+    border-radius:50%!important;
+    border:1px solid #ff92c2!important;
+    background:linear-gradient(180deg,#52253e,#28132f)!important;
+    color:#ffd5e8!important;font-size:22px!important;font-weight:900!important;
+    box-shadow:0 4px 12px #0006!important;cursor:pointer!important;
+    pointer-events:auto!important;
+  }
+}
+
 `; }
 
   function setTheme() {
@@ -4363,6 +4411,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.panel.style.setProperty('--paw-bubble-opacity',`${state.settings.bubbleOpacity}%`);
     ui.panel.classList.toggle('left-collapsed', !!state.leftCollapsed);
     ui.panel.classList.toggle('right-collapsed', !!state.rightCollapsed);
+    ui.panel.classList.toggle('right-drawer-open', !!state.rightDrawerOpen);
     ui.panel.classList.toggle('open', state.open);
     ui.panel.setAttribute('aria-hidden', state.open ? 'false' : 'true');
     if (ui.fab) ui.fab.style.display = state.open ? 'none' : 'flex';
@@ -4433,13 +4482,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     shadow.getElementById('kc-resize')?.addEventListener('pointerdown', resizeWindow);
     if (!state.windowRect) state.windowRect = defaultWindowRect();
     applyWindowRect();
+    if (typeof ResizeObserver === 'function') {
+      ui.rightArrowObserver?.disconnect();
+      ui.rightArrowObserver = new ResizeObserver(syncRightDrawerArrow);
+      ui.rightArrowObserver.observe(ui.panel);
+    }
     if (!state.hotkeysAttached) { document.addEventListener('keydown', hotkeys, true); state.hotkeysAttached = true; }
     if (state.fabPosition) positionFab(state.fabPosition.x, state.fabPosition.y);
     if (!state.resizeAttached) { let pendingViewport=0; window.addEventListener('resize', () => { if (!pendingViewport) pendingViewport=requestAnimationFrame(()=>{pendingViewport=0;fitFab();applyWindowRect();syncInboxFilterBar();}); }, { passive:true }); state.resizeAttached = true; }
     setTheme(); updateBadge(); render();
     } catch (err) {
       // If startup fails partway through the UI, remove partial nodes before retrying.
-      try { ui.host?.remove(); } catch {}
+      try { ui.rightArrowObserver?.disconnect(); ui.rightArrowObserver = null; ui.host?.remove(); } catch {}
       Object.assign(ui, {host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null,input:null});
       throw err;
     }
@@ -4525,6 +4579,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     style.setProperty('width', `${r.w}px`, 'important');
     style.setProperty('height', `${r.h}px`, 'important');
     if (refreshFrame) { updateSculptedFrame(r.w, r.h); requestAnimationFrame(syncInboxFilterBar); }
+    syncRightDrawerArrow();
   }
   function dragWindow(e) {
     if (e.button !== 0 || !ui.panel || e.target?.closest?.('button,a,input,select,textarea')) return;
@@ -4774,6 +4829,34 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     // Container query tracks the resizable PawLounge panel, not viewport width.
     return (ui.panel?.getBoundingClientRect().width || 9999) <= 780;
   }
+  // In a compact resized window the BC profile/den details occupy a drawer,
+  // rather than a permanent second chat column. Desktop collapse state is
+  // preserved independently, so resizing never silently changes preferences.
+  function isRightDrawerLayout() {
+    return (ui.panel?.getBoundingClientRect().width || 9999) <= 1120;
+  }
+  function rightPaneIsOpen() {
+    return isRightDrawerLayout() ? !!state.rightDrawerOpen : !state.rightCollapsed;
+  }
+  function rightArrowButton() {
+    const shown = rightPaneIsOpen();
+    return `<button type="button" class="collapse-handle right" data-action="togglerightpanel" aria-label="${shown?'Close':'Open'} right widget" aria-expanded="${shown}" title="${shown?'Close':'Open'} right widget"><span class="arr">${shown?'›':'‹'}</span></button>`;
+  }
+  function rightDrawerCloseButton() {
+    return '<button type="button" class="kc-drawer-close" data-action="togglerightpanel" title="Close right widget" aria-label="Close right widget">›</button>';
+  }
+  function syncRightDrawerArrow() {
+    if (!ui.panel || !ui.shadow) return;
+    const shown = rightPaneIsOpen();
+    const button = ui.body?.querySelector('.chatcenter>.collapse-handle.right');
+    if (button) {
+      button.title = `${shown?'Close':'Open'} right widget`;
+      button.setAttribute('aria-label', button.title);
+      button.setAttribute('aria-expanded', String(shown));
+      const arrow = button.querySelector('.arr');
+      if (arrow) arrow.textContent = shown ? '›' : '‹';
+    }
+  }
   function render() {
     if (!ui.body) return;
     if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
@@ -4795,6 +4878,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else renderSettings();
     ui.panel?.classList.toggle('left-collapsed', !!state.leftCollapsed);
     ui.panel?.classList.toggle('right-collapsed', !!state.rightCollapsed);
+    ui.panel?.classList.toggle('right-drawer-open', !!state.rightDrawerOpen);
     renderGroupModal();
     renderProfileModal();
     schedulePortraits();
@@ -4994,12 +5078,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const p = state.profiles[id] || {};
     const lastSticker = (c.messages || []).slice().reverse().find(m => sticker(m.text));
     const lastStickerInfo = lastSticker ? sticker(lastSticker.text) : null;
-    ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button><div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
+    ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}<div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
       ${scheduleMarkup('chat',id)}<div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(s => `<button class="stickerbtn" data-sticker="${s.id}" title="Send ${s.name}">${asset(`sticker-${s.id}.png`,'',s.emoji)}<small>${s.name}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option></select>
       <textarea class="field" id="kc-compose" maxlength="2000" rows="1" placeholder="Write a little meow...">${escapeText(c.draft || '')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div></section>
-      <aside class="companion" tabindex="0" aria-label="Scrollable profile, stickers, room and actions">
+      <aside class="companion" tabindex="0" aria-label="Scrollable profile, stickers, room and actions">${rightDrawerCloseButton()}
         <section class="compcard profilehero"><button class="kitty-profile-avatar facepop-btn" type="button" data-facepop="profile-face" title="Pat the kitty face">${avatar(id)}<span class="kitty-heartbadge">${c.favorite ? '♥' : '♡'}</span></button>
           <div class="profilename">${escapeText(name(id))} ♡ <button class="secondary paw-nickname" data-action="nickname" title="Private nickname">✎</button></div>
           <div class="profile-number">#${id}${inRoom(id) ? ' · <span class="kconline">● Together in BC</span>' : ''}</div>
@@ -5046,13 +5130,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const restoreComposer = oldComposer && ui.shadow.activeElement === oldComposer;
     const composerCursor = restoreComposer ? oldComposer.selectionStart : 0;
     const groupMessages=historyDisplayMessages('group',g.id,g.messages);
-    ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button>
+    ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}
       <div class="chathead"><div style="font-size:36px">🏡</div><div class="headblock"><div class="headtitle">${escapeText(g.name)}</div><div class="headsubtitle">PawLounge Group Den · ${g.accepted.length}/${g.members.length} members joined</div></div><button class="secondary" data-action="leavegroup">Leave group</button></div>
       <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':name(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} acknowledged</span>` : ''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
       <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(st=>`<button class="stickerbtn" data-sticker="${st.id}">${asset(`sticker-${st.id}.png`,'',st.emoji)}<small>${escapeText(st.name)}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}
-      </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members"><div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div></div>`).join('')}</div>
+      </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members">${rightDrawerCloseButton()}<div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div></div>`).join('')}</div>
       <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask members for up to eight of their recent sent messages">↻ Recover recent messages</button><p class="muted">Acknowledged counts require recipients using this version of Kittychat. Recovery is best-effort and limited to recent messages.</p></div>${pawGroupExtras(g)}</aside></div>`;
     ui.input=ui.shadow.getElementById('kc-compose');renderReplyBar();
     const logEl=ui.shadow.getElementById('kc-log'); if(logEl)logEl.scrollTop=preserveTop ? previousTop+(logEl.scrollHeight-previousHeight) : logEl.scrollHeight;
@@ -6099,7 +6183,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       else state.leftCollapsed = !state.leftCollapsed;
       saveSoon(); render();
     }
-    else if (act === 'togglerightpanel') { state.rightCollapsed = !state.rightCollapsed; saveSoon(); render(); }
+    else if (act === 'togglerightpanel') {
+      if (isRightDrawerLayout()) { state.rightDrawerOpen = !state.rightDrawerOpen; render(); }
+      else { state.rightCollapsed = !state.rightCollapsed; saveSoon(); render(); }
+    }
     else if (act === 'beepquick') {state.composerMode='beep';const mode=ui.shadow.getElementById('kc-mode');if(mode)mode.value='beep';ui.shadow.getElementById('kc-compose')?.focus();notice('Beep mode selected.');}
     else if (act === 'roomshortcut') {state.tab='rooms';render();void searchRooms('rooms-shortcut');}
     else if (act === 'send') sendFromComposer();
