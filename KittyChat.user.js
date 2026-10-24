@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.11
+// @version      1.0.12
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.11';
+  const VERSION = '1.0.12';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -1392,7 +1392,7 @@
       state.groups[gid] = { id:gid, creator, name:trim(raw.name,46)||'Kitty Den', members,
         accepted:[...new Set((Array.isArray(raw.accepted) ? raw.accepted : []).map(numeric).filter(n => members.includes(n)))],
         joined:!!raw.joined, draft:trim(raw.draft||'',MAX_GROUP_TEXT), unread:Math.min(999,Math.max(0,Number(raw.unread)||0)),
-        updated:Number(raw.updated)||Date.now(), moderators:(Array.isArray(raw.moderators)?raw.moderators:[]).map(numeric).filter(n=>members.includes(n) && n!==creator),
+        updated:Number(raw.updated)||Date.now(), membershipRevision:Math.max(0,Math.min(2147483647,Number(raw.membershipRevision)||0)), moderators:(Array.isArray(raw.moderators)?raw.moderators:[]).map(numeric).filter(n=>members.includes(n) && n!==creator),
         roles:Object.fromEntries(Object.entries(raw.roles||{}).filter(([k,v])=>members.includes(numeric(k))&&PAW_ROLE_NAMES.includes(v)).slice(0,MAX_GROUP_MEMBERS)),
         announcement:raw.announcement?{text:trim(raw.announcement.text,220),from:numeric(raw.announcement.from),at:Number(raw.announcement.at)||0}:null,
         polls:(Array.isArray(raw.polls)?raw.polls:[]).slice(-25).map(normalizePawPoll).filter(Boolean), receipts:raw.receipts && typeof raw.receipts==='object' ? Object.fromEntries(Object.entries(raw.receipts).slice(-90).map(([k,v])=>[trim(k,70),Array.isArray(v)?v.map(numeric).filter(n=>members.includes(n)):[]])) : {}, messages:(Array.isArray(raw.messages)?raw.messages:[]).slice(-MAX_MESSAGES)
@@ -1550,7 +1550,10 @@
   }
   function syncGroup(g) {
     if (g.creator !== me()) return;
-    const packet = {t:'sync',id:g.id,accepted:g.accepted,mods:g.moderators||[],name:g.name,roles:g.roles||{},announcement:g.announcement||null};
+    // All membership changes originate at the host; monotonically increasing
+    // revisions prevent delayed synchronization packets resurrecting removals.
+    g.membershipRevision=Math.min(2147483647,Math.max(0,Number(g.membershipRevision)||0)+1);
+    const packet = {t:'sync',id:g.id,members:g.members,accepted:g.accepted,mods:g.moderators||[],name:g.name,roles:g.roles||{},announcement:g.announcement||null,rev:g.membershipRevision};
     for (const member of g.accepted) if (member!==me()) sendGroupWire(member,packet,`🐾 Kittychat group update: ${g.name}`);
   }
   function receiveGroupBeep(data, from) {
@@ -1561,11 +1564,11 @@
     if(!inboundLimit(from,'groups',raw,2400))return true;
     const p=kcDecode(raw);
     if (!p || !/^g_[a-zA-Z0-9_-]{8,44}$/.test(p.id||'')) return true;
-    if(!['invite','response','sync','msg','ack','announcement','poll','pollvote','react','historyRequest','historyMessage','historyWitness','leave'].includes(p.t))return true;
+    if(!['invite','response','sync','msg','ack','announcement','poll','pollvote','react','historyRequest','historyMessage','historyWitness','leave','memberRequest','memberResult','removed'].includes(p.t))return true;
     // A durable event ID prevents replay even after the old message leaves the
     // 90-message cache. The sender is always BC's outer member number.
     const eventId=(p.t==='msg'||p.t==='historyMessage'||p.t==='historyWitness')&&integrityMsgId(p.mid,70)?`${p.id}:${p.mid}`:
-      p.t==='invite'?`${p.id}:invite`:p.t==='poll'&&integrityMsgId(p.poll?.id)?`${p.id}:${p.poll.id}`:'';
+      p.t==='invite'?`${p.id}:invite:${Number(p.rev)||0}`:p.t==='poll'&&integrityMsgId(p.poll?.id)?`${p.id}:${p.poll.id}`:'';
     if(!integrityAcceptEvent('group',from,p,eventId))return true;
     if (p.t==='invite') {
       if (numeric(p.creator)!==from || !Array.isArray(p.members) || typeof p.name!=='string'||p.name.length>46) return true;
@@ -1573,26 +1576,72 @@
       if (members.length<2 || members.length>MAX_GROUP_MEMBERS || !members.includes(from) || !members.includes(me())) return true;
       if (!state.groups[p.id]) {
         state.groups[p.id] = {id:p.id,creator:from,name:trim(p.name,46)||'Kitty Den',members,
-          accepted:[from], joined:false,draft:'',unread:1, updated:Date.now(),messages:[],moderators:[],receipts:{}};
+          accepted:[from], joined:false,draft:'',unread:1, updated:Date.now(),membershipRevision:Math.max(0,Number(p.rev)||0),messages:[],moderators:[],receipts:{}};
         notice(`💌 Group invitation from ${bcName(from)} — open Groups to accept`);
       }
       saveSoon();updateBadge();if(state.open)render();
       return true;
     }
     const g=state.groups[p.id];
-    if (!g || !g.members.includes(from) || (p.t!=='response' && p.t!=='sync' && !g.accepted.includes(from))) return true;
+    if(!g)return true;
+    // A removal must originate from the actual host identified by the BC
+    // sender envelope, never a claimed ID inside the message.
+    if(p.t==='removed'){
+      if(from!==g.creator||!g.members.includes(me())){integrityReject();return true;}
+      const rev=Number(p.rev);
+      if(!Number.isSafeInteger(rev)||rev<=Number(g.membershipRevision||0))return true;
+      delete state.groups[g.id];
+      if(state.selectedGroup===g.id)state.selectedGroup='';
+      notice(`You were removed from Group Den “${g.name}”.`);
+      saveNow(true);updateBadge();if(state.open)render();
+      return true;
+    }
+    if (!g.members.includes(from) || (p.t!=='response' && p.t!=='sync' && !g.accepted.includes(from))) return true;
+    if(p.t==='memberRequest'){
+      // Moderators request changes, but only the host can commit them.
+      if(me()!==g.creator||!g.joined||!g.accepted.includes(from)||!g.moderators?.includes(from)){integrityReject();return true;}
+      const target=numeric(p.target), operation=p.operation;
+      if(!target||!['invite','kick'].includes(operation)){integrityReject();return true;}
+      hostChangeGroupMember(g,operation,target,from);
+      return true;
+    }
+    if(p.t==='memberResult'){
+      if(from!==g.creator){integrityReject();return true;}
+      notice(`🐾 Den request: ${trim(p.message||'Group membership updated',150)}`);
+      return true;
+    }
     if (p.t==='response' && me()===g.creator) {
       g.accepted=g.accepted.filter(n=>n!==from);
       if (p.accepted===true) g.accepted.push(from);
       g.accepted=[...new Set(g.accepted)].filter(n=>g.members.includes(n));
       g.updated=Date.now();syncGroup(g);saveSoon();if(state.open)render();
     } else if (p.t==='sync' && from===g.creator && Array.isArray(p.accepted)) {
+      // Older hosts can sync legacy groups. Once a revisioned roster has been
+      // observed, never accept a stale or unversioned membership rollback.
+      const rev=Number(p.rev),current=Number(g.membershipRevision||0);
+      if(current>0&&(!Number.isSafeInteger(rev)||rev<=current))return true;
+      if(p.members!==undefined){
+        if(!Array.isArray(p.members)){integrityReject();return true;}
+        const members=[...new Set(p.members.map(numeric).filter(Boolean))];
+        if(members.length<1||members.length>MAX_GROUP_MEMBERS||!members.includes(g.creator)) {integrityReject();return true;}
+        if(!members.includes(me())){
+          delete state.groups[g.id];if(state.selectedGroup===g.id)state.selectedGroup='';
+          notice(`You are no longer a member of “${g.name}”.`);
+          saveNow(true);updateBadge();if(state.open)render();return true;
+        }
+        g.members=members;
+      }
+      if(Number.isSafeInteger(rev)&&rev>=0)g.membershipRevision=rev;
       g.accepted=[...new Set(p.accepted.map(numeric).filter(n=>g.members.includes(n)))];
       g.moderators=Array.isArray(p.mods)?p.mods.map(numeric).filter(n=>g.members.includes(n)&&n!==g.creator):[];
       g.name=trim(p.name||g.name,46);
       g.roles=Object.fromEntries(Object.entries(p.roles||{}).filter(([k,v])=>g.members.includes(numeric(k))&&PAW_ROLE_NAMES.includes(v)));
       if(p.announcement&&typeof p.announcement==='object'&&Number(p.announcement.at)>Number(g.announcement?.at||0))g.announcement={text:trim(p.announcement.text,220),from:numeric(p.announcement.from),at:Number(p.announcement.at)};
-      if (g.joined && !g.accepted.includes(me())) g.accepted.push(me());
+      if (g.joined && !g.accepted.includes(me())){
+        // Host has removed our accepted status: keep the invitation only if
+        // explicitly pending; never silently add ourselves back.
+        g.joined=false;
+      }
       saveSoon();if(state.open)render();
     } else if (p.t==='msg' && g.joined && g.accepted.includes(from)) {
       if (typeof p.text==='string' && p.text.length<=MAX_GROUP_TEXT && integrityMsgId(p.mid,70)) {
@@ -1649,6 +1698,59 @@
     const votes=Object.fromEntries(Object.entries(x.votes||{}).slice(0,10).filter(([id,n])=>numeric(id)&&Number.isInteger(Number(n))&&n>=0&&n<options.length).map(([k,v])=>[numeric(k),Number(v)]));
     return {id:trim(x.id,80),from:numeric(x.from),question:trim(x.question,130),options,votes,at:Number(x.at)||Date.now()};
   }
+  function canModerateDen(g){return !!g?.joined&&!!g.accepted?.includes(me())&&(g.creator===me()||g.moderators?.includes(me()));}
+  function hostChangeGroupMember(g,operation,target,requester=me()){
+    const report=(message,success=false)=>{
+      if(requester!==me())sendGroupWire(requester,{t:'memberResult',id:g.id,message,success},'🐾 Den management',true);
+      else notice(message);
+      return success;
+    };
+    if(!g||g.creator!==me()||!g.joined)return report('The group host must be online to change membership.');
+    if(!Number.isSafeInteger(target)||target<=0||target===me())return report('Invalid group member.');
+    if(requester!==me()&&(!g.accepted.includes(requester)||!g.moderators?.includes(requester)))return report('Not authorized.');
+    if(operation==='invite'){
+      if(g.members.includes(target))return report('That person is already invited or in the group.');
+      if(g.members.length>=MAX_GROUP_MEMBERS)return report('This Group Den is full.');
+      if(!myFriends().includes(target))return report('The host must be BC friends with the invitee.');
+      const members=[...g.members,target];
+      if(!sendGroupWire(target,{t:'invite',id:g.id,creator:g.creator,name:g.name,members,rev:(g.membershipRevision||0)+1},
+        `💌 Invitation to ${g.name}. Open PawLounge to accept.`))return report('BC could not send the invitation.');
+      g.members=members;g.updated=Date.now();syncGroup(g);
+      saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat(true);
+      return report(`Invitation sent to ${bcName(target)} (#${target}).`,true);
+    }
+    if(operation==='kick'){
+      if(!g.members.includes(target))return report('That person is not in the group.');
+      if(requester!==me()&&g.moderators?.includes(target))return report('Moderators cannot remove other moderators.');
+      const nextRevision=Math.max(0,Number(g.membershipRevision)||0)+1;
+      // Notify the person being removed before excluding them from group sync.
+      // An offline recipient may miss this, but other clients will immediately
+      // stop recognizing their membership and packets.
+      sendGroupWire(target,{t:'removed',id:g.id,rev:nextRevision},'🐾 You were removed from this Group Den.',true);
+      g.members=g.members.filter(id=>id!==target);
+      g.accepted=g.accepted.filter(id=>id!==target);
+      g.moderators=(g.moderators||[]).filter(id=>id!==target);
+      if(g.roles)delete g.roles[target];
+      for(const acks of Object.values(g.receipts||{}))if(Array.isArray(acks)){const k=acks.indexOf(target);if(k>=0)acks.splice(k,1);}
+      g.updated=Date.now();syncGroup(g);saveSoon();
+      if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat(true);
+      return report(`${bcName(target)} (#${target}) was removed from the group.`,true);
+    }
+    return report('Invalid group action.');
+  }
+  function changeGroupMember(operation,target){
+    const g=currentGroup();
+    if(!canModerateDen(g))return notice('Only the host and moderators can manage members.');
+    const id=numeric(target);
+    if(!id)return notice('Enter a valid BC member number.');
+    if(operation==='kick'&&!window.confirm(`Remove ${bcName(id)} (#${id}) from “${g.name}”?`))return;
+    if(g.creator===me()){hostChangeGroupMember(g,operation,id);return;}
+    if(operation==='kick'&&(id===g.creator||g.moderators?.includes(id)))return notice('Moderators cannot remove the host or other moderators.');
+    if(!sendGroupWire(g.creator,{t:'memberRequest',id:g.id,operation,target:id},'🐾 Moderator membership request',true)){
+      notice('Could not reach the group host.');return;
+    }
+    notice(`Request sent to ${bcName(g.creator)}. The host must be online to approve it.`);
+  }
   function createGroup(title, members) {
     title=trim(title,46);
     const friends=myFriends();
@@ -1656,7 +1758,7 @@
     if (!title || ids.length<2) {notice('Choose a group name and at least two BC friends.');return false;}
     const id=groupId();
     const g={id,name:title,creator:me(),members:[me(),...ids],accepted:[me()],joined:true,draft:'',
-      unread:0,updated:Date.now(),messages:[],moderators:[],receipts:{}};
+      unread:0,updated:Date.now(),membershipRevision:0,messages:[],moderators:[],receipts:{}};
     state.groups[id]=g;
     let delivered=0;
     for (const friend of ids) if (sendGroupWire(friend,{t:'invite',id,creator:me(),name:title,members:g.members},
@@ -5509,6 +5611,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel.kc-mobile .companion{max-width:95%!important}
 #kc-panel.kc-mobile button,#kc-panel.kc-mobile input,#kc-panel.kc-mobile select{touch-action:manipulation}
 #kc-panel.kc-mobile .kc-profile-backdrop,#kc-panel.kc-mobile .group-create-backdrop{z-index:150!important}
+/* v1.0.12 — Compact host/moderator management. */
+#kc-panel .kc-group-invite{width:100%;margin:2px 0 9px;padding:7px 8px;font-size:12px}
+#kc-panel .group-member{gap:5px;min-width:0;flex-wrap:wrap}
+#kc-panel .group-member>div{min-width:0;flex:1 1 90px}
+#kc-panel .kc-group-kick{margin:2px 0 2px auto;flex:0 0 auto;border-color:#f18caa!important;color:#ffd3df!important}
 `; }
 
   // Browser zoom changes devicePixelRatio on desktop Firefox/Chrome.
@@ -5957,7 +6064,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         const label=`${node.id||''} ${typeof node.className==='string'?node.className:''}`;
         const namedWindow=/(?:lian(?:chat)?|modal|popup|overlay|dialog|floating[-_ ]?window|addon[-_ ]?menu)/i.test(label);
         const modal=node.matches?.('dialog[open],[role="dialog"],[aria-modal="true"]');
-        if(!modal&&!namedWindow&&!(position==='fixed'&&z>=50)&&!((position==='absolute'||position==='sticky')&&z>=200))continue;
+        // Generic BC canvas wrappers and fullscreen overlay hosts often have
+        // fixed positioning/high z-index. They aren't mod windows, and hiding
+        // our only launcher under them makes PawLounge impossible to open.
+        if(!modal&&!namedWindow)continue;
+        if(namedWindow&&!modal&&/^(?:chatroom|online|main|game|canvas|screen|container)$/i.test(String(node.id||'')))continue;
         let box;
         try {box=node.getBoundingClientRect();}catch {continue;}
         if(!overlapping(box))continue;
@@ -5989,7 +6100,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         // Native BC uses Online/ChatRoom, not CurrentScreen='ChatRoom'.
         // Do not hide the only launcher just because the user is in BC.
         if(nativeMenu)reason='BC character menu';
-        else if(screen&&screen!=='Online'&&screen!=='ChatRoom'&&screen!=='Login')reason=`BC screen: ${screen}/${module}`;
+        else if(screen&&screen!=='Online'&&screen!=='ChatRoom'&&screen!=='Login'&&module!=='Online')reason=`BC screen: ${screen}/${module}`;
         else reason=findOverlappingForeignWindow(fab.getBoundingClientRect());
       } catch(e) {
         // UI cooperation is best-effort and must never break PawLounge.
@@ -6541,7 +6652,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <div class="quick" aria-label="Quick Paws and scheduling">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}<button class="pill paw-quick-schedule" type="button" data-action="schedulepaw" title="Schedule a group message for later">📅 Schedule</button></div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(st=>`<button class="stickerbtn" data-sticker="${st.id}">${asset(`sticker-${st.id}.png`,'',st.emoji)}<small>${escapeText(st.name)}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}
-      </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members">${rightDrawerCloseButton()}<div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div></div>`).join('')}</div>
+      </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members">${rightDrawerCloseButton()}<div class="compcard"><h3>🐾 Den Members</h3>${canModerateDen(g)?'<button class="secondary kc-group-invite" type="button" data-action="groupinvite">＋ Invite member</button>':''}${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div>${canModerateDen(g)&&id!==g.creator&&(g.creator===me()||!g.moderators?.includes(id))?`<button class="kc-role-toggle kc-group-kick" type="button" data-kick-group-member="${id}" title="Remove ${escapeText(name(id))} from group" aria-label="Remove ${escapeText(name(id))} from group">Kick</button>`:''}</div>`).join('')}</div>
       <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask group members to corroborate recent messages">↻ Recover recent messages</button>${quorumState(g.id)?`<p class="muted" data-recovery-status>${escapeText(recoveryStatus(g.id))}</p>`: ''}</div>${pawGroupExtras(g)}</aside></div>`;
     ui.input=ui.shadow.getElementById('kc-compose');renderReplyBar();
     const logEl=ui.shadow.getElementById('kc-log'); if(logEl)logEl.scrollTop=preserveTop ? previousTop+(logEl.scrollHeight-previousHeight) : logEl.scrollHeight;
@@ -7962,7 +8073,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return sent;
   }
   function clickUI(e) {
-    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
+    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-kick-group-member],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
     if (!target) return;
     if(target.dataset.outboxRetry!==undefined){retryFailedOutbox(target.dataset.outboxRetry);return;}
     if(target.dataset.outboxCancel!==undefined){cancelQueuedOutbox(target.dataset.outboxCancel);return;}
@@ -8004,6 +8115,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.bookSaveMessage!==undefined){bookAddFromConversation(target.dataset.bookSaveMessage);return;}
     if (target.dataset.saveMoment!==undefined) {saveMessageAsMoment(target.dataset.saveMoment);return;}
     if (target.dataset.reactionId!==undefined) {replyAndReact(currentConversationKind(),target.dataset.reactionId,target.dataset.emoji);return;}
+    if (target.dataset.kickGroupMember!==undefined) {changeGroupMember('kick',target.dataset.kickGroupMember);return;}
     if (target.dataset.roleToggle!==undefined) {const g=currentGroup(),id=numeric(target.dataset.roleToggle);if(g?.creator===me()&&g.members.includes(id)&&id!==me()){g.moderators||=[];g.moderators=g.moderators.includes(id)?g.moderators.filter(x=>x!==id):[...g.moderators,id];syncGroup(g);saveSoon();renderGroupChat();}return;}
     if (target.dataset.tab) {state.compactOpen=['chats','groups'].includes(target.dataset.tab); state.tab=target.dataset.tab;state.replyTarget=null;render();if (state.tab==='rooms') void searchRooms('rooms-tab');return;}
     if (target.dataset.contact) { selectChat(numeric(target.dataset.contact)); return; }
@@ -8059,6 +8171,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'resetwindow') { state.windowRect = defaultWindowRect(); applyWindowRect(); saveSoon(); notice('Window size and position restored.'); }
     else if (act === 'new') { const val = window.prompt('Kitty member number (BC ID):'); if (val !== null) {
       const id = numeric(val); if (id && id !== me()) selectChat(id); else notice('Please enter a valid member number.'); } }
+    else if(act==='groupinvite'){
+      const number=window.prompt('BC member number to invite to this Group Den:');
+      if(number!==null)changeGroupMember('invite',number);
+    }
     else if (act === 'newgroup') {state.groupCreateOpen=true;renderGroupModal();ui.shadow.getElementById('kc-group-name')?.focus();}
     else if (act === 'cancelgroup') {state.groupCreateOpen=false;renderGroupModal();}
     else if (act === 'creategroup') {const picked=[...ui.shadow.querySelectorAll('input[name="kc-group-member"]:checked')].map(x=>numeric(x.value));createGroup(ui.shadow.getElementById('kc-group-name')?.value,picked);}
