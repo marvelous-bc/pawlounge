@@ -3724,7 +3724,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 
 
 /* Keep grid placement correct when the viewport is narrower than 930px.
-   Old Lian-like responsive rules had accidentally stacked main on top of sidebar. */
+   Old responsive rules had accidentally stacked main on top of sidebar. */
 #kc-panel .workspace:not(.wide) .main{grid-column:3}
 #kc-panel .workspace.wide .main{grid-column:2}
 @container (max-width:740px){#kc-panel .workspace:not(.wide) .main{grid-column:2}}
