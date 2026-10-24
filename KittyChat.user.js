@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.14
+// @version      1.0.15
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.14';
+  const VERSION = '1.0.15';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6148,12 +6148,149 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else{fab.style.removeProperty('left');fab.style.removeProperty('top');
       fab.style.removeProperty('right');fab.style.removeProperty('bottom');}
   }
+  // v1.0.15: BC's room interface and third-party room addons can create a
+  // new stacking context above a Shadow DOM launcher. A working JS runtime and
+  // connected shadow host do not prove that its launcher is actually visible.
+  // Mount a *single* independent, light-DOM room button at document root. It
+  // mirrors the same saved coordinates and action but cannot be buried in the
+  // zero-sized shadow host. No timers, global hooks or other mods are patched.
+  const roomLauncher={button:null,repairs:0,lastReason:'',moves:0};
+  function roomLauncherActive(){
+    return window.CurrentScreen==='ChatRoom'||
+      (window.CurrentScreen==='Online'&&window.CurrentModule==='ChatRoom');
+  }
+  function removeRoomLauncher(){
+    const old=roomLauncher.button;
+    if(old){try{old.remove();}catch{}roomLauncher.button=null;}
+    if(ui.fab){ui.fab.style.removeProperty('visibility');ui.fab.style.removeProperty('pointer-events');}
+    if(ui.host){
+      ui.host.style.setProperty('z-index','2147483000','important');
+      if(document.body&&ui.host.parentNode!==document.body)document.body.appendChild(ui.host);
+    }
+  }
+  function makeRoomLauncher(){
+    const button=document.createElement('button');
+    button.id='kc-room-launcher';
+    button.type='button';
+    button.setAttribute('aria-label','Open PawLounge');
+    button.title='PawLounge · drag to reposition, tap to open';
+    button.style.cssText='all:initial!important;box-sizing:border-box!important;position:fixed!important;z-index:2147483647!important;width:64px!important;height:64px!important;display:flex!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;cursor:grab!important;touch-action:none!important;user-select:none!important;filter:drop-shadow(0 7px 8px #190b24ae)!important;pointer-events:auto!important;';
+    const icon=ui.fab?.querySelector('.asset')?.cloneNode(true);
+    if(icon){
+      icon.style.cssText='display:inline-flex!important;align-items:center!important;justify-content:center!important;position:relative!important;overflow:hidden!important;width:64px!important;height:64px!important;pointer-events:none!important';
+      const img=icon.querySelector('img');
+      if(img){img.style.cssText='display:block;position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none';}
+      const fallback=icon.querySelector('span');
+      if(fallback){fallback.style.cssText='display:none'; if(img){img.addEventListener('error',()=>{img.style.display='none';fallback.style.cssText='display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:36px;color:#ffbada';});}}
+      button.appendChild(icon);
+    }else{
+      const fallback=document.createElement('span');fallback.textContent='🐾';
+      fallback.style.cssText='font:36px system-ui;pointer-events:none';button.appendChild(fallback);
+    }
+    const counter=document.createElement('span');
+    counter.className='kc-room-counter';
+    counter.style.cssText='position:absolute;right:-2px;top:0;font:bold 11px system-ui;color:#fff1f8;background:#532843;border:2px solid #e79bbd;border-radius:8px;min-width:25px;text-align:center;padding:2px 5px;pointer-events:none';
+    button.appendChild(counter);
+    let drag=null;
+    button.addEventListener('pointerdown',e=>{
+      if(e.pointerType==='mouse'&&e.button!==0)return;
+      drag={id:e.pointerId,startX:e.clientX,startY:e.clientY,x:Number.parseFloat(button.style.left)||0,y:Number.parseFloat(button.style.top)||0,moved:false};
+      try{button.setPointerCapture(e.pointerId);}catch{}
+      e.preventDefault();e.stopPropagation();
+    });
+    button.addEventListener('pointermove',e=>{
+      if(!drag||e.pointerId!==drag.id)return;
+      const dx=e.clientX-drag.startX,dy=e.clientY-drag.startY;
+      if(Math.hypot(dx,dy)>5)drag.moved=true;
+      if(drag.moved){
+        const ratio=pawViewportScale.ratio||1;
+        const x=Math.max(4,Math.min(innerWidth-64*ratio-4,drag.x+dx));
+        const y=Math.max(4,Math.min(innerHeight-64*ratio-4,drag.y+dy));
+        button.style.setProperty('left',`${x}px`,'important');button.style.setProperty('top',`${y}px`,'important');
+      }
+      e.preventDefault();
+    });
+    function finish(e){
+      if(!drag||e.pointerId!==drag.id)return;
+      const moved=drag.moved,interrupted=e.type!=='pointerup';drag=null;
+      if(moved&&!interrupted){
+        const x=Number.parseFloat(button.style.left)||4,y=Number.parseFloat(button.style.top)||4;
+        if(ui.fab)positionFab(x,y);
+        fabCoexistence.temporary=null;roomLauncher.moves++;saveSoon();
+      } else if(!moved&&!interrupted)toggle(true);
+      try{if(button.hasPointerCapture(e.pointerId))button.releasePointerCapture(e.pointerId);}catch{}
+      if(!interrupted)syncFabCoexistence();
+      e.preventDefault();e.stopPropagation();
+    }
+    button.addEventListener('pointerup',finish);
+    button.addEventListener('pointercancel',finish);
+    // Use the document root rather than a BC-controlled body overlay. Some BC
+    // themes and mods apply transforms to the body during room entry.
+    document.documentElement.appendChild(button);
+    roomLauncher.button=button;roomLauncher.repairs++;
+    return button;
+  }
+  function syncRoomLauncher(){
+    if(!ui.fab?.isConnected||!roomLauncherActive()){
+      if(roomLauncher.button)removeRoomLauncher();return;
+    }
+    const button=roomLauncher.button?.isConnected?roomLauncher.button:makeRoomLauncher();
+    // Move the main panel's Shadow DOM host to the same document-root layer
+    // as the room button. Otherwise a room-created stacking context can hide
+    // the entire panel after the user taps the rescue button.
+    if(ui.host&&ui.host.parentNode!==document.documentElement)
+      document.documentElement.insertBefore(ui.host,button);
+    // Opening the full panel intentionally hides both launch buttons.
+    if(state.open){
+      button.style.setProperty('display','none','important');
+      ui.fab.style.setProperty('visibility','hidden','important');
+      ui.fab.style.setProperty('pointer-events','none','important');
+      if(ui.host)ui.host.style.setProperty('z-index','2147483647','important');
+      return;
+    }
+    // The shadow copy is only a source of positioning/icons in rooms. The
+    // independent room copy is the one interactive visible button.
+    ui.fab.style.setProperty('visibility','hidden','important');
+    ui.fab.style.setProperty('pointer-events','none','important');
+    if(ui.host)ui.host.style.setProperty('z-index','2147483647','important');
+    const r=ui.fab.getBoundingClientRect();
+    const scale=pawViewportScale.ratio||1;
+    const w=64*scale;
+    let x=Number.isFinite(r.left)?r.left:defaultFabHomeRect().left;
+    let y=Number.isFinite(r.top)?r.top:defaultFabHomeRect().top;
+    x=Math.max(4,Math.min(innerWidth-w-4,x));
+    y=Math.max(4,Math.min(innerHeight-w-4,y));
+    button.style.setProperty('left',`${Math.round(x)}px`,'important');
+    button.style.setProperty('top',`${Math.round(y)}px`,'important');
+    button.style.setProperty('width','64px','important');
+    button.style.setProperty('height','64px','important');
+    button.style.setProperty('transform',`scale(${scale})`,'important');
+    button.style.setProperty('transform-origin','top left','important');
+    button.style.setProperty('visibility','visible','important');
+    button.style.setProperty('opacity','1','important');
+    button.style.setProperty('display','flex','important');
+    const counter=button.querySelector('.kc-room-counter');
+    if(counter){counter.textContent=ui.badge?.textContent||'';
+      counter.style.setProperty('display',ui.badge?.classList.contains('hidden')?'none':'inline-block');}
+    // BC sometimes adds its full-screen canvas AFTER the room launcher during
+    // room entry. If the canvas (not a real addon dialog) is on top, restore
+    // document order once so the normal launcher can be clicked.
+    const box=button.getBoundingClientRect();
+    const hit=document.elementFromPoint(box.left+box.width/2,box.top+box.height/2);
+    if(hit&&hit!==button&&!button.contains(hit)&&
+       (hit.matches?.('canvas,#MainCanvas,#ChatRoomCanvas')||
+        hit.closest?.('#bc-app,#ChatRoomCanvas'))&&
+       button.parentNode===document.documentElement){
+      document.documentElement.appendChild(button);
+      roomLauncher.repairs++;
+    }
+  }
   function syncFabCoexistence() {
     if(ui.panel&&!motionRuntime.active)syncZoomAndMobile();
     const fab=ui.fab;
-    if(!fab?.isConnected)return;
+    if(!fab?.isConnected){syncRoomLauncher();return;}
     fabCoexistence.checks++;
-    if(fab.classList.contains('kc-moving'))return;
+    if(fab.classList.contains('kc-moving')){syncRoomLauncher();return;}
     const room=window.CurrentScreen==='ChatRoom' ||
       (window.CurrentScreen==='Online'&&window.CurrentModule==='ChatRoom');
     const screen=room?'room':String(window.CurrentScreen||'');
@@ -6161,7 +6298,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       fabCoexistence.roomTransitions+=room?1:0;restoreFabHome();}
     if(state.open||fabCoexistence.alwaysShow){restoreFabHome();
       fab.classList.remove('kc-yielding');fabCoexistence.reason='';fabCoexistence.surfaces=[];
-      fab.setAttribute('aria-hidden',state.open?'true':'false');return;}
+      fab.setAttribute('aria-hidden',state.open?'true':'false');syncRoomLauncher();return;}
     let surfaces=[];
     try{surfaces=foreignPopupSurfaces(defaultFabHomeRect());}catch{surfaces=[];}
     fabCoexistence.surfaces=surfaces.map(s=>s.name);
@@ -6201,6 +6338,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!hidden&&fab.style.display==='none')fab.style.display='flex';
     fabCoexistence.reason=reason;
     if(hidden)fabCoexistence.hidden++;
+    syncRoomLauncher();
   }
   function dragFab(e) {
     if (e.button !== 0 || !ui.fab) return;
@@ -8486,8 +8624,15 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
     displayDiagnostics:()=>({version:VERSION,zoomFactor:pawViewportScale.ratio,referenceDpr:state.settings.zoomReferenceDpr,currentDpr:window.devicePixelRatio,mobile:pawViewportScale.mobile,updates:pawViewportScale.updates}),
+    roomLauncherDiagnostics:()=>({version:VERSION,active:roomLauncherActive(),mounted:!!roomLauncher.button?.isConnected,
+      repairs:roomLauncher.repairs,moves:roomLauncher.moves,
+      rect:(()=>{const r=roomLauncher.button?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null;})(),
+      nodeOnTop:(()=>{const r=roomLauncher.button?.getBoundingClientRect();if(!r)return null;
+        const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+        return hit?.id||hit?.tagName||null;})(),
+      style:roomLauncher.button?{display:getComputedStyle(roomLauncher.button).display,visibility:getComputedStyle(roomLauncher.button).visibility,z:getComputedStyle(roomLauncher.button).zIndex}:null}),
     launcherCoexistenceDiagnostics:()=>({version:VERSION,checks:fabCoexistence.checks,hiddenChecks:fabCoexistence.hidden,reason:fabCoexistence.reason,hidden:!!ui.fab?.classList.contains('kc-yielding'),temporaryPosition:fabCoexistence.temporary,foreignSurfaces:[...fabCoexistence.surfaces],roomTransitions:fabCoexistence.roomTransitions,screen:window.CurrentScreen||null,hostLayer:ui.host?getComputedStyle(ui.host).zIndex:null,visible:!!ui.fab?.isConnected&&!ui.fab?.classList.contains('kc-yielding'),alwaysShow:fabCoexistence.alwaysShow}),
-    recoverLauncher:()=>{fabCoexistence.alwaysShow=true;if(ui.host&&!ui.host.isConnected){try{ui.host.remove();}catch{}Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null});}if(!ui.host&&document.body)buildUI();restoreFabHome();setTheme();syncFabCoexistence();return !!ui.fab?.isConnected;},
+    recoverLauncher:()=>{fabCoexistence.alwaysShow=true;if(ui.host&&!ui.host.isConnected){try{ui.host.remove();}catch{}Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null});}if(!ui.host&&document.body)buildUI();restoreFabHome();setTheme();syncFabCoexistence();return roomLauncherActive()?!!roomLauncher.button?.isConnected:!!ui.fab?.isConnected;},
     alwaysShowLauncher:(enable=true)=>{fabCoexistence.alwaysShow=!!enable;syncFabCoexistence();return fabCoexistence.alwaysShow;},
     zeroFlickerDiagnostics:()=>({...sidebarDiffStats,sideScroll:ui.menu?.querySelector('.contacts-scroll')?.scrollTop||0,filterScroll:ui.menu?.querySelector('.kc-inbox-filters')?.scrollLeft||0}),
     dataCodecDiagnostics:()=>({version:VERSION,codec:'PL2',storage:'reversible-encoded localStorage',archive:'encoded message text only; metadata indexed',packets:'PL2 with legacy JSON/KC1 receive fallback',privateChatEncoded:!!state.settings.encodePrivateChat,cryptographic:false,...pawCodecMetrics}),
@@ -8551,9 +8696,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     attempts: state.bootAttempts, error: state.bootError || BOOT.error,
     hasLauncher: !!ui.fab, hasPanel: !!ui.panel,
     hostConnected: !!ui.host?.isConnected,
-    launcherVisible: !!ui.fab?.isConnected && !ui.fab.classList.contains('kc-yielding') &&
+    launcherVisible: roomLauncherActive() ? !!roomLauncher.button?.isConnected &&
+      getComputedStyle(roomLauncher.button).display!=='none' && getComputedStyle(roomLauncher.button).visibility!=='hidden' :
+      (!!ui.fab?.isConnected && !ui.fab.classList.contains('kc-yielding') &&
       getComputedStyle(ui.fab).display !== 'none' && getComputedStyle(ui.fab).visibility !== 'hidden' &&
-      getComputedStyle(ui.fab).opacity !== '0',
+      getComputedStyle(ui.fab).opacity !== '0'),
+    roomLauncherMounted:!!roomLauncher.button?.isConnected,
+    roomLauncherRect:(()=>{const r=roomLauncher.button?.getBoundingClientRect();return r?{x:r.x,y:r.y,w:r.width,h:r.height}:null;})(),
     launcherHiddenReason: fabCoexistence.reason,
     launcherTemporaryPosition:fabCoexistence.temporary,
     launcherForeignSurfaces:[...fabCoexistence.surfaces],
