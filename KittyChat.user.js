@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.2
+// @version      1.0.7
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -18,7 +18,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.2';
+  const VERSION = '1.0.7';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -115,7 +115,7 @@
     roomError: '', roomLoading: false, roomSearched: false, roomCounts: {}, roomSearchWarnings: [], roomSearchTrigger: 'not-started', roomLastStarted: 0, roomLastFinished: 0, open: false, contactsMode: 'all',
     composerMode: 'beep', typingUntil: {}, lastTypingSent: 0, lastSave: null,
     hooks: [], mod: null, suppressOutgoing: false, recentFingerprints: new Map(),
-    started: false, deliveryOutbox:[], scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, rightDrawerOpen: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0, integritySeen: [] };
+    started: false, deliveryOutbox:[], scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, rightDrawerOpen: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, catchUpWhispersSince: 0, catchUpGroupsSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0, integritySeen: [] };
   // Friend-status packets are private Kittychat control messages, not public
   // chat/beeps. Keep all delivery state in memory; only settings/received status
   // are saved with existing Kittychat account data.
@@ -556,7 +556,7 @@
   }
   function recoveryStatus(gid){
     const round=quorumState(gid);
-    if(!round)return 'Requires matching reports from two other accepted members using v0.9.15+.';
+    if(!round)return '';
     return `Confirmed ${round.confirmed} · Pending ${round.candidates.size} · Reports from ${round.reporters.size}/${RECOVERY_QUORUM}+ members`;
   }
   function receiveHistoryWitness(g,from,p){
@@ -1278,7 +1278,7 @@
     for (const g of Object.values(state.groups)) g.messages = (g.messages || []).slice(-MAX_MESSAGES);
     for (const old of Object.values(state.groups).sort((a,b) => (b.updated||0) - (a.updated||0)).slice(MAX_GROUPS)) delete state.groups[old.id];
     if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();
-    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
+    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
   }
   function loadForAccount(id) {
     if (state.myId === id) return;
@@ -1289,7 +1289,7 @@
     bookVaultPrepareAccount(id);
     integrity.bursts.clear();integrity.recovery.clear();integrity.quorums.clear();integrity.keys.clear();
     state.integritySeen=[];
-    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.sharedAlbums=[];state.privateBookPages={};state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.deliveryOutbox=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
+    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.catchUpWhispersSince=0;state.catchUpGroupsSince=0;state.sharedAlbums=[];state.privateBookPages={};state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.deliveryOutbox=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
     const loaded = safeRead(dataKey(), {});
     state.integritySeen=(Array.isArray(loaded.integritySeen)?loaded.integritySeen:[]).slice(-INTEGRITY_LOG_LIMIT)
       .filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&x[0].length<180&&Number.isFinite(Number(x[1]))&&Number(x[1])>Date.now()-14*86400000);
@@ -1313,6 +1313,10 @@
     state.moments=(Array.isArray(loaded.moments)?loaded.moments:[]).slice(-MOMENT_LIMIT).map(m=>normalizeMoment(m)).filter(Boolean);
     state.circles=(Array.isArray(loaded.circles)?loaded.circles:[]).slice(0,30).map(c=>({id:trim(c.id,40),name:trim(c.name,45),members:[...new Set((Array.isArray(c.members)?c.members:[]).map(numeric).filter(Boolean))].slice(0,150),shareStatus:c.shareStatus!==false,shareProfile:c.shareProfile!==false,quiet:c.quiet===true})).filter(c=>/^circle_[\w-]{4,32}$/.test(c.id)&&c.name);
     state.catchUpSince=Number.isFinite(Number(loaded.catchUpSince))?Number(loaded.catchUpSince):Date.now();
+    // Independent read checkpoints. Existing installations inherit the global
+    // checkpoint so old highlights never unexpectedly reappear.
+    state.catchUpWhispersSince=Number.isFinite(Number(loaded.catchUpWhispersSince))&&Number(loaded.catchUpWhispersSince)>0?Number(loaded.catchUpWhispersSince):state.catchUpSince;
+    state.catchUpGroupsSince=Number.isFinite(Number(loaded.catchUpGroupsSince))&&Number(loaded.catchUpGroupsSince)>0?Number(loaded.catchUpGroupsSince):state.catchUpSince;
     state.sharedAlbums=pawBookVault.active?[]:(Array.isArray(loaded.sharedAlbums)?loaded.sharedAlbums:[]).slice(-30).map(normalizeAlbum).filter(Boolean);
     state.privateBookPages=pawBookVault.active?{}:normalizePrivateBookPages(loaded.privateBookPages);
     state.invitations=(Array.isArray(loaded.invitations)?loaded.invitations:[]).slice(-70).map(normalizeInvitation).filter(Boolean);
@@ -1664,20 +1668,63 @@
     notice(`Invited ${delivered}/${ids.length} friends. They must accept before messages reach them.`);
     return true;
   }
-  function respondGroup(id, accept) {
+  function respondGroup(id, accept, batch=false) {
     const g=state.groups[id];if(!g || g.joined || g.creator===me())return;
     if (accept) {g.joined=true;g.unread=0;g.accepted=[...new Set([g.creator,me()])];
-      state.selectedGroup=id;state.tab='groups';}
+      if(!batch){state.selectedGroup=id;state.tab='groups';}}
     else delete state.groups[id];
     const ok=sendGroupWire(g.creator,{t:'response',id,accepted:!!accept},
       `🐾 ${bcName(me())} ${accept?'accepted':'declined'} your PawLounge invitation to ${g.name}.`);
-    if (!ok) notice('Could not notify the group creator. Check that you are BC friends.');
-    saveSoon();updateBadge();render();
-    if(accept)requestAnimationFrame(()=>{if(state.open&&state.tab==='groups'&&state.selectedGroup===id)renderGroupChat();});
+    if (!ok && !batch) notice('Could not notify the group creator. Check that you are BC friends.');
+    saveSoon();
+    if(!batch){updateBadge();render();}
+    if(accept&&!batch)requestAnimationFrame(()=>{if(state.open&&state.tab==='groups'&&state.selectedGroup===id)renderGroupChat();});
+    return ok;
   }
   // v0.9.12: Transport-safe outbox. "Sent" means handed to BC, not read or
   // received by another player. Only compatible Group Dens provide ACK packets.
   const outboxRuntime={draining:false,repaintQueued:false,nonce:new Map(),sent:0,held:0};
+  // The compact outbox is a session-only popover rather than a dedicated
+  // chat row. Keep its state across message redraws, never across recipients.
+  const outboxPopover={kind:'',to:'',open:false};
+  function outboxIsOpen(kind,to){return outboxPopover.open&&outboxPopover.kind===kind&&String(outboxPopover.to)===String(to);}
+  function outboxAttentionCount(kind,to){
+    return state.deliveryOutbox.filter(x=>x.kind===kind&&String(x.to)===String(to)&&liveOutboxStatuses.has(x.status)).length;
+  }
+  function outboxTrigger(kind,to){
+    const count=outboxAttentionCount(kind,to),open=outboxIsOpen(kind,to);
+    return `<button type="button" class="kc-outbox-trigger${count?' kc-outbox-needs-attention':''}" data-action="toggleoutbox" aria-label="Outbox${count?` (${count} to review)`:''}" aria-controls="kc-outbox-popup" aria-expanded="${open}" title="Delivery outbox${count?` · ${count} to review`:''}"><span aria-hidden="true">📤</span><span class="kc-outbox-trigger-label">Outbox</span><span class="kc-outbox-trigger-count"${count?'':' hidden'}>${count||''}</span></button>`;
+  }
+  function updateOutboxTrigger(kind,to){
+    const button=ui.body?.querySelector('.kc-outbox-trigger');
+    if(!button)return;
+    const count=outboxAttentionCount(kind,to);
+    button.setAttribute('aria-expanded',String(outboxIsOpen(kind,to)));
+    button.setAttribute('aria-label',`Outbox${count?` (${count} to review)`:''}`);
+    button.title=`Delivery outbox${count?` · ${count} to review`:''}`;
+    button.classList.toggle('kc-outbox-needs-attention',count>0);
+    const badge=button.querySelector('.kc-outbox-trigger-count');
+    if(badge){badge.hidden=count===0;badge.textContent=count?String(count):'';}
+  }
+  function refreshOutboxPopover(kind,to){
+    const old=ui.body?.querySelector('.kc-outbox');
+    if(!old || old.dataset.kind!==kind || String(old.dataset.to)!==String(to))return;
+    const scrollTop=old.scrollTop;
+    const tpl=document.createElement('template');tpl.innerHTML=outboxMarkup(kind,to).trim();
+    const replacement=tpl.content.firstElementChild;
+    if(replacement){old.replaceWith(replacement);replacement.scrollTop=scrollTop;}
+    updateOutboxTrigger(kind,to);
+  }
+  function toggleOutboxPopover(){
+    const kind=state.tab==='groups'?'group':'chat';
+    const to=kind==='group'?state.selectedGroup:state.selected;
+    if(!to)return;
+    const open=!outboxIsOpen(kind,to);
+    outboxPopover.kind=kind;outboxPopover.to=to;outboxPopover.open=open;
+    const pop=ui.body?.querySelector('.kc-outbox');
+    if(pop&&pop.dataset.kind===kind&&String(pop.dataset.to)===String(to))pop.hidden=!open;
+    updateOutboxTrigger(kind,to);
+  }
   const liveOutboxStatuses=new Set(['queued','sending','failed','unconfirmed','partial']);
   function outboxStatusLabel(item){
     if(!item)return '';
@@ -1711,19 +1758,14 @@
         if(entry){const text=outboxStatusLabel(entry);if(label.textContent!==text)label.textContent=text;}
       }
       const kind=state.tab==='groups'?'group':'chat',id=kind==='group'?state.selectedGroup:state.selected;
-      const container=ui.body.querySelector('.kc-outbox');
-      if(container){
-        const template=document.createElement('template');template.innerHTML=outboxMarkup(kind,id).trim();
-        const replacement=template.content.firstElementChild;
-        if(replacement){replacement.scrollTop=container.scrollTop;container.replaceWith(replacement);}
-      }
+      refreshOutboxPopover(kind,id);
     });
   }
   function outboxMarkup(kind,to){
     const list=state.deliveryOutbox.filter(x=>x.kind===kind&&String(x.to)===String(to)&&x.status!=='cancelled').slice(-10).reverse();
     const flagged=list.filter(x=>liveOutboxStatuses.has(x.status));
     const shown=flagged.length?list.slice(0,5):list.slice(0,1);
-    return `<section class="kc-outbox" aria-label="Message delivery outbox"><div class="kc-outbox-title">📤 Outbox${flagged.length?` · ${flagged.length} to review`:''}</div>${shown.map(x=>`<div class="kc-outbox-row"><span class="kc-outbox-preview" title="${escapeText(x.text)}">${escapeText(x.text.slice(0,42))}</span><span class="kc-outbox-status" data-outbox-status="${escapeText(x.id)}">${escapeText(outboxStatusLabel(x))}</span>${x.status==='failed'||(x.kind==='group'&&Object.values(x.targets).includes('failed'))?`<button class="secondary" data-outbox-retry="${escapeText(x.id)}" title="Retry only failed destinations">Retry failed</button>`:''}${x.status==='queued'?`<button class="secondary" data-outbox-cancel="${escapeText(x.id)}">Cancel</button>`:''}</div>`).join('')||'<div class="muted">Nothing pending · BC delivery is not guaranteed.</div>'}</section>`;
+    return `<section id="kc-outbox-popup" class="kc-outbox kc-outbox-popover" data-kind="${escapeText(kind)}" data-to="${escapeText(to)}" role="region" aria-label="Message delivery outbox" ${outboxIsOpen(kind,to)?'':'hidden'}><div class="kc-outbox-title">📤 Outbox${flagged.length?` · ${flagged.length} to review`:''}<button type="button" class="kc-outbox-close" data-action="toggleoutbox" aria-label="Close outbox">×</button></div>${shown.map(x=>`<div class="kc-outbox-row"><span class="kc-outbox-preview" title="${escapeText(x.text)}">${escapeText(x.text.slice(0,42))}</span><span class="kc-outbox-status" data-outbox-status="${escapeText(x.id)}">${escapeText(outboxStatusLabel(x))}</span>${x.status==='failed'||(x.kind==='group'&&Object.values(x.targets||{}).includes('failed'))?`<button class="secondary" data-outbox-retry="${escapeText(x.id)}" title="Retry only failed destinations">Retry failed</button>`:''}${x.status==='queued'?`<button class="secondary" data-outbox-cancel="${escapeText(x.id)}">Cancel</button>`:''}</div>`).join('')||'<div class="kc-outbox-empty">Nothing pending <small>BC delivery is not guaranteed.</small></div>'}</section>`;
   }
   function markOutboxMessage(item,member){
     const arr=state.chats[numeric(member)]?.messages;
@@ -5354,6 +5396,63 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .pawbook-invite{padding:13px;background:#563052;border:1px solid #da9abd;border-radius:10px;margin:9px 0}
 @container (max-width:700px){#kc-panel .pawbooks-screen{padding:10px}#kc-panel .pawbook-cover-hero{flex-wrap:wrap}#kc-panel .pawbook-chapter{padding:10px}#kc-panel .pawbook-shelf{grid-template-columns:repeat(auto-fill,minmax(132px,1fr))}#kc-panel .pawbook-canvas{grid-template-columns:1fr}#kc-panel .pawbook-layout-collage .pawbook-memory{min-width:100px}}
 
+
+/* v1.0.4 — Compact conversation-header outbox. It must never consume a row
+   or compress the message log / composer. The existing details and retry
+   buttons remain in an on-demand floating popover. */
+#kc-panel .chatcenter{position:relative!important}
+#kc-panel .chathead .headblock{min-width:0!important}
+#kc-panel .chathead .kc-header-subrow{display:flex!important;align-items:center!important;gap:7px!important;min-width:0!important;white-space:nowrap!important;overflow:hidden!important}
+#kc-panel .kc-header-subtext{min-width:0!important;flex:0 1 auto!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}
+#kc-panel .kc-outbox-trigger{display:inline-flex!important;align-items:center!important;justify-content:center!important;flex:0 0 auto!important;gap:3px!important;min-height:24px!important;min-width:27px!important;padding:2px 6px!important;margin:0!important;border:1px solid #bf739d99!important;border-radius:12px!important;background:#49304a!important;color:#ffe1f0!important;font-size:10px!important;font-weight:700!important;line-height:1.1!important;cursor:pointer!important;box-shadow:none!important}
+#kc-panel .kc-outbox-trigger:hover,#kc-panel .kc-outbox-trigger[aria-expanded="true"]{border-color:#ffc2e2!important;background:#613854!important}
+#kc-panel .kc-outbox-trigger:focus-visible,#kc-panel .kc-outbox-close:focus-visible{outline:2px solid #ffb5db!important;outline-offset:2px!important}
+#kc-panel .kc-outbox-trigger-count{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-width:16px!important;height:16px!important;padding:0 3px!important;border-radius:9px!important;background:#f27eb1!important;color:#271222!important;font-size:10px!important}
+#kc-panel .kc-outbox-trigger-count[hidden]{display:none!important}
+#kc-panel .kc-outbox-needs-attention{border-color:#f3a5ce!important}
+#kc-panel .kc-outbox-popover{display:block!important;position:absolute!important;top:calc(80px - 1px)!important;left:min(60px, 7%)!important;right:auto!important;z-index:115!important;width:min(390px, calc(100% - 22px))!important;max-width:calc(100% - 22px)!important;max-height:min(285px, 55%)!important;margin:0!important;padding:11px!important;overflow:auto!important;background:linear-gradient(165deg,#3c2240,#241528)!important;border:1px solid #e897bf!important;border-radius:14px!important;box-shadow:0 10px 35px #090311cf,0 0 0 1px #f6aaca16!important;scrollbar-width:thin!important}
+#kc-panel .kc-outbox-popover[hidden]{display:none!important}
+#kc-panel .kc-outbox-popover .kc-outbox-title{display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:5px;color:#ffdaee}
+#kc-panel .kc-outbox-close{min-height:24px;min-width:25px;border-radius:10px;border:1px solid #9e6083;background:#482a49;color:#ffe5f4;font-size:17px;cursor:pointer}
+#kc-panel .kc-outbox-popover .kc-outbox-row{flex-wrap:wrap;gap:5px;line-height:1.4;padding:6px 0}
+#kc-panel .kc-outbox-popover .kc-outbox-preview{flex:1 1 125px;max-width:none}
+#kc-panel .kc-outbox-popover .kc-outbox-status{flex:1 1 140px;font-size:11px}
+#kc-panel .kc-outbox-empty{font-size:11px;color:#ffe0ed;line-height:1.45}
+#kc-panel .kc-outbox-empty small{display:block;color:#d6adc6}
+#kc-panel.kc-short .kc-outbox-popover{top:58px!important}
+@container kc-pawlounge-shell (max-width:850px){#kc-panel .kc-outbox-trigger-label{display:none!important}#kc-panel .kc-outbox-trigger{padding:2px 5px!important}#kc-panel .kc-outbox-popover{top:63px!important;left:9px!important}}
+@container kc-pawlounge-shell (max-width:650px){#kc-panel .kc-outbox-popover{top:56px!important}}
+
+
+/* v1.0.5 — More conversation room, with all controls preserved.
+   Reduces fixed chrome instead of hiding quick actions, and keeps the
+   message log flexible / scrollable across desktop and compact sizes. */
+#kc-panel .chatlayout{grid-template-columns:minmax(0,1fr) minmax(225px,260px)!important}
+#kc-panel .chathead{height:68px!important;min-height:68px!important;padding:6px 12px!important;flex:0 0 auto!important}
+#kc-panel .chathead .headtitle{font-size:18px!important;line-height:1.2!important}
+#kc-panel .chathead .headsubtitle{font-size:12px!important;line-height:1.3!important}
+#kc-panel .chatcenter>.msglog{flex:1 1 auto!important;min-height:0!important;overflow-y:auto!important;padding:10px 12px!important;gap:8px!important}
+#kc-panel .quick,#kc-panel.kc-short .quick{display:flex!important;flex:0 0 34px!important;height:34px!important;min-height:0!important;max-height:34px!important;box-sizing:border-box!important;flex-wrap:nowrap!important;align-items:center!important;align-content:center!important;gap:5px!important;overflow-x:auto!important;overflow-y:hidden!important;padding:3px 8px!important;scrollbar-width:thin!important}
+#kc-panel .quick .pill,#kc-panel.kc-short .quick .pill{flex:0 0 auto!important;box-sizing:border-box!important;max-width:min(235px,75%)!important;min-width:0!important;height:26px!important;min-height:26px!important;padding:4px 10px!important;font-size:11px!important;line-height:1.2!important;text-overflow:ellipsis!important;white-space:nowrap!important;overflow:hidden!important;border-radius:17px!important}
+#kc-panel .quick .paw-quick-schedule{margin-left:auto!important;border-color:#c586aa!important}
+#kc-panel .paw-schedule-collapsed{flex:0 0 auto!important;max-height:115px!important;padding:0 8px!important;margin:0 7px 4px!important;overflow-y:auto!important}
+#kc-panel .paw-schedule-collapsed:not([open]){height:24px!important;max-height:24px!important;overflow:hidden!important}
+#kc-panel .paw-schedule-collapsed>summary{cursor:pointer!important;display:flex!important;align-items:center!important;justify-content:space-between!important;min-height:23px!important;font-size:10px!important;font-weight:750!important;list-style:none!important;color:#ffe2f0!important}
+#kc-panel .paw-schedule-collapsed>summary::-webkit-details-marker{display:none!important}
+#kc-panel .paw-schedule-collapsed .paw-schedule-items{padding:3px 0 6px!important}
+#kc-panel.kc-short .chathead{height:55px!important;min-height:55px!important;padding:3px 8px!important}
+@container kc-pawlounge-shell (max-width:1280px){#kc-panel .chatlayout{grid-template-columns:minmax(0,1fr) 235px!important}}
+@container kc-pawlounge-shell (max-width:1120px){#kc-panel .chatlayout{grid-template-columns:minmax(0,1fr)!important}}
+@container kc-pawlounge-shell (max-width:920px){#kc-panel .chatlayout{grid-template-columns:minmax(0,1fr)!important}#kc-panel .chathead{height:61px!important;min-height:61px!important;padding:4px 8px!important}}
+@container kc-pawlounge-shell (max-width:740px){#kc-panel .chathead{height:58px!important;min-height:58px!important}}
+
+/* v1.0.6 — Smart Catch-Up: compact category controls and batch invitations. */
+#kc-panel .paw-catchup-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:7px 0 10px}
+#kc-panel .paw-catchup-actions>button{flex:0 0 auto;min-height:29px;padding:5px 10px;font-size:11px;line-height:1.2;white-space:normal}
+#kc-panel .paw-catchup-invites-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between}
+#kc-panel .paw-catchup-invites-title h3{margin:7px 0}
+#kc-panel .paw-catchup-invites-title .paw-catchup-actions{margin:0}
+#kc-panel .paw-catchup-actions>button:disabled{opacity:.45;cursor:not-allowed}
 `; }
 
   function setTheme() {
@@ -6182,8 +6281,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const p = state.profiles[id] || {};
     const lastSticker = (c.messages || []).slice().reverse().find(m => sticker(m.text));
     const lastStickerInfo = lastSticker ? sticker(lastSticker.text) : null;
-    ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}<div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
-      ${scheduleMarkup('chat',id)}${outboxMarkup('chat',id)}<div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
+    ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}<div class="chathead" id="kc-chathead"></div>${outboxMarkup('chat',id)}<div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
+      ${scheduleMarkup('chat',id)}<div class="quick" aria-label="Quick Paws and scheduling">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}<button class="pill paw-quick-schedule" type="button" data-action="schedulepaw" title="Schedule a message for later">📅 Schedule</button></div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(s => `<button class="stickerbtn" data-sticker="${s.id}" title="Send ${s.name}">${asset(`sticker-${s.id}.png`,'',s.emoji)}<small>${s.name}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option></select>
       <textarea class="field" id="kc-compose" maxlength="2000" rows="1" placeholder="Write a little meow...">${escapeText(c.draft || '')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div></section>
@@ -6240,13 +6339,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const composerCursor = restoreComposer ? oldComposer.selectionStart : 0;
     const groupMessages=historyDisplayMessages('group',g.id,g.messages);
     ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}
-      <div class="chathead"><div style="font-size:36px">🏡</div><div class="headblock"><div class="headtitle">${escapeText(g.name)}</div><div class="headsubtitle">PawLounge Group Den · ${g.accepted.length}/${g.members.length} members joined</div></div><button class="secondary" data-action="leavegroup">Leave group</button></div>
+      <div class="chathead"><div style="font-size:36px">🏡</div><div class="headblock"><div class="headtitle">${escapeText(g.name)}</div><div class="headsubtitle kc-header-subrow"><span class="kc-header-subtext">PawLounge Group Den · ${g.accepted.length}/${g.members.length} members joined</span>${outboxTrigger('group',g.id)}</div></div><button class="secondary" data-action="leavegroup">Leave group</button></div>${outboxMarkup('group',g.id)}
       <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':name(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${m.recovered?`<span title="Matched by ${m.verifiedBy?.length||0} other group participants; client-reported, not cryptographically verified">✓ ${m.verifiedBy?.length||0} peer confirmations · </span>`:''}${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} client ACKs</span>` : ''}${m.outboxId?` <span class="kc-delivery" data-outbox-status="${escapeText(m.outboxId)}">${escapeText(outboxStatusLabel(outboxById(m.outboxId)))}</span>`:''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
-      <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}">🐾 ${escapeText(q)}</button>`).join('')}</div>
+      <div class="quick" aria-label="Quick Paws and scheduling">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}<button class="pill paw-quick-schedule" type="button" data-action="schedulepaw" title="Schedule a group message for later">📅 Schedule</button></div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(st=>`<button class="stickerbtn" data-sticker="${st.id}">${asset(`sticker-${st.id}.png`,'',st.emoji)}<small>${escapeText(st.name)}</small></button>`).join('')}</div>
-      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}${outboxMarkup('group',g.id)}
+      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}
       </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members">${rightDrawerCloseButton()}<div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div></div>`).join('')}</div>
-      <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask group members to corroborate recent messages">↻ Recover recent messages</button><p class="muted" data-recovery-status>${escapeText(recoveryStatus(g.id))}</p><p class="muted">Every recovered message requires identical reports from two different accepted group members (other than you), both on v0.9.15+. Client-reported matching is not cryptographic proof. ACKs are not read receipts.</p></div>${pawGroupExtras(g)}</aside></div>`;
+      <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask group members to corroborate recent messages">↻ Recover recent messages</button>${quorumState(g.id)?`<p class="muted" data-recovery-status>${escapeText(recoveryStatus(g.id))}</p>`: ''}</div>${pawGroupExtras(g)}</aside></div>`;
     ui.input=ui.shadow.getElementById('kc-compose');renderReplyBar();
     const logEl=ui.shadow.getElementById('kc-log'); if(logEl)logEl.scrollTop=preserveTop ? previousTop+(logEl.scrollHeight-previousHeight) : logEl.scrollHeight;
     restoreSideScroll('right');
@@ -6260,7 +6359,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const id = state.selected, c = state.chats[id], head = ui.shadow.getElementById('kc-chathead'); if (!head || !c) return;
     const typing = (state.typingUntil[id] || 0) > Date.now();
     const p = state.profiles[id];
-    head.innerHTML = `<button class="headface facepop-btn" type="button" data-facepop="head-face" title="Pat the kitty face">${avatar(id)}</button><div class="headblock"><div class="headtitle">${escapeText(name(id))} ${p?.kitty ? '♡' : ''}</div><div class="headsubtitle">#${id} · ${typing ? '<span class="typing-paws">🐾 typing...</span>' : inRoom(id) ? 'In the room with you' : (p?.signature ? escapeText(p.signature) : 'A cozy connection')}</div>${statusMarkup(id,'kc-head-status')}</div>
+    head.innerHTML = `<button class="headface facepop-btn" type="button" data-facepop="head-face" title="Pat the kitty face">${avatar(id)}</button><div class="headblock"><div class="headtitle">${escapeText(name(id))} ${p?.kitty ? '♡' : ''}</div><div class="headsubtitle kc-header-subrow"><span class="kc-header-subtext">#${id} · ${typing ? '<span class="typing-paws">🐾 typing...</span>' : inRoom(id) ? 'In the room with you' : (p?.signature ? escapeText(p.signature) : 'A cozy connection')}</span>${outboxTrigger('chat',id)}</div>${statusMarkup(id,'kc-head-status')}</div>
     <div class="headright"><button class="iconbutton" data-action="securechat" title="Secure Chat: ${pawSecureSecrets.has(id)?'Enabled (session only)':'Set a shared secret'}">${pawSecureSecrets.has(id)?'🔐':'🔒'}</button><button class="iconbutton" data-action="searchmessages" title="Search chat history">${asset('ui-search.svg','','🔎')}</button><button class="iconbutton" data-action="profile" title="Share your Paw Profile">🐾</button><button class="iconbutton" data-action="viewpawprofile" title="View saved Paw Profile">♡</button><button class="iconbutton" data-action="favorite" title="Favourite">${asset('ui-heart.svg','','♡')}</button><button class="iconbutton" data-action="menu" title="Chat options">⋯</button></div>`;
   }
   // Reuse one markup function for initial render and fast append. This also
@@ -6414,18 +6513,74 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.body.innerHTML=`<div class="screen paw-wide-screen"><div class="sectiontitle">🐾 Friend Circles</div><p class="muted">Arrange your BC friends into private local circles. No one is notified, and circle labels are not sent to other players.</p><button class="primary" data-action="newcircle">＋ New circle</button>
       <div class="paw-items">${state.circles.map(c=>`<div class="paw-item"><h3>♡ ${escapeText(c.name)}</h3><p class="muted">${c.members.length} friend${c.members.length===1?'':'s'}</p><p>${c.members.map(x=>escapeText(bcName(x))).join(' · ')||'No members yet. Open a conversation and use 🐾 Circle to add someone.'}</p><div class="flex"><button class="secondary" data-paw-circle-toggle="${escapeText(c.id)}:shareStatus">${c.shareStatus===false?'⛔ Status hidden':'🟢 Share status'}</button><button class="secondary" data-paw-circle-toggle="${escapeText(c.id)}:shareProfile">${c.shareProfile===false?'⛔ Profile sharing off':'🐾 Profile sharing on'}</button><button class="secondary" data-paw-circle-toggle="${escapeText(c.id)}:quiet">${c.quiet?'🔕 Quiet circle':'🔔 Normal sounds'}</button><button class="secondary" data-paw-circle-delete="${escapeText(c.id)}">Remove circle</button></div></div>`).join('')||'<p class="muted">No circles yet.</p>'}</div></div>`;
   }
+  // Mark only the relevant category as caught up. Beep unread counts must
+  // survive a "Whispers caught up" action. Historic chats predate per-mode
+  // counters, so infer the whisper portion from the cached unread tail.
+  function markCatchUpCategory(kind){
+    const now=Date.now();
+    if(kind==='whispers'){
+      state.catchUpWhispersSince=now;
+      for(const chat of Object.values(state.chats)){
+        const unread=Math.max(0,Number(chat.unread)||0);
+        if(!unread)continue;
+        const recentIncoming=(chat.messages||[]).filter(m=>m.from!==me()).slice(-unread);
+        const whisperUnread=recentIncoming.filter(m=>m.mode==='whisper').length;
+        chat.unread=Math.max(0,unread-whisperUnread);
+      }
+      notice('🤫 Whispers caught up. Unread beeps are preserved.');
+    }else if(kind==='groups'){
+      state.catchUpGroupsSince=now;
+      for(const group of Object.values(state.groups))if(group.joined)group.unread=0;
+      notice('🏡 Group chats caught up.');
+    }else return;
+    saveSoon();updateBadge();if(state.open&&state.tab==='catchup')renderCatchUp();
+  }
+  function pendingCatchUpInvitations(){
+    const paw=state.invitations.filter(x=>x.status==='pending');
+    const albums=state.sharedAlbums.filter(x=>!x.joined&&x.owner!==me());
+    const dens=Object.values(state.groups).filter(g=>!g.joined&&g.creator!==me());
+    return {paw,albums,dens};
+  }
+  function bulkAnswerCatchUpInvitations(accept){
+    const {paw,albums,dens}=pendingCatchUpInvitations();
+    const count=paw.length+albums.length+dens.length;
+    if(!count)return notice('No pending invitations to process.');
+    const roomCount=accept?paw.filter(x=>x.type==='room').length:0;
+    const unavailable=accept?paw.filter(x=>x.type==='group'&&!state.groups[x.groupId]).length:0;
+    const locked=accept&&pawBookVault.locked?albums.length:0;
+    const skipped=roomCount+unavailable+locked;
+    const actionable=count-skipped;
+    if(!actionable)return notice('These invitations need individual attention before they can be accepted.');
+    const caveat=skipped?`\n\n${skipped} invitation(s) will remain pending: room joins need individual approval, unknown Group Dens need a creator invite, and locked PawBooks must be unlocked.`:'';
+    if(!window.confirm(`${accept?'Accept':'Decline'} ${actionable} pending PawLounge invitation(s)?${caveat}`))return;
+    let done=0;
+    for(const g of dens){if(state.groups[g.id]&&!g.joined){respondGroup(g.id,accept,true);done++;}}
+    for(const a of albums){if(!pawBookVault.locked&&state.sharedAlbums.includes(a)&&!a.joined){if(answerAlbumInvite(a.id,accept,true))done++;}}
+    for(const invite of paw){if(answerPawInvite(invite.id,accept,true))done++;}
+    // Batch controls must never select arbitrary chats, change tabs, or join
+    // a BC room. Render once, after the entire action has been saved.
+    saveSoon();updateBadge();if(state.open&&state.tab==='catchup')renderCatchUp();
+    notice(`${accept?'Accepted':'Declined'} ${done} invitation${done===1?'':'s'}.${skipped?` ${skipped} still pending.`:''}`);
+  }
   function renderCatchUp(){
     const since=state.catchUpSince||Date.now();
-    const chats=Object.entries(state.chats).flatMap(([id,c])=>(c.messages||[]).filter(m=>m.from!==me()&&Number(m.time)>since).map(m=>({id:Number(id),time:m.time,text:m.text}))).sort((a,b)=>b.time-a.time);
-    const groups=Object.values(state.groups).flatMap(g=>(g.messages||[]).filter(m=>m.from!==me()&&Number(m.time)>since).map(m=>({id:g.id,name:g.name,time:m.time,text:m.text}))).sort((a,b)=>b.time-a.time);
-    const pending=state.invitations.filter(x=>x.status==='pending'),albums=state.sharedAlbums.filter(x=>!x.joined&&x.owner!==me());
+    const whispersSince=Math.max(since,state.catchUpWhispersSince||since);
+    const groupsSince=Math.max(since,state.catchUpGroupsSince||since);
+    const allPrivate=Object.entries(state.chats).flatMap(([id,c])=>(c.messages||[]).filter(m=>m.from!==me()).map(m=>({id:Number(id),time:Number(m.time)||0,text:m.text,mode:m.mode})));
+    const whispers=allPrivate.filter(m=>m.mode==='whisper'&&m.time>whispersSince).sort((a,b)=>b.time-a.time);
+    const beeps=allPrivate.filter(m=>m.mode!=='whisper'&&m.time>since).sort((a,b)=>b.time-a.time);
+    const groups=Object.values(state.groups).filter(g=>g.joined).flatMap(g=>(g.messages||[]).filter(m=>m.from!==me()&&Number(m.time)>groupsSince).map(m=>({id:g.id,name:g.name,time:Number(m.time),text:m.text}))).sort((a,b)=>b.time-a.time);
+    const {paw:pending,albums,dens}=pendingCatchUpInvitations();
     const unread=Object.values(state.chats).reduce((n,c)=>n+(Number(c.unread)||0),0);
-    ui.body.innerHTML=`<div class="screen paw-wide-screen"><div class="sectiontitle">📬 Smart Catch-Up</div><p class="muted">Highlights since ${new Date(since).toLocaleString()}. Summaries use messages in the recent local cache; older archived messages remain available under Chats.</p>
-      <div class="paw-stats"><div><strong>${chats.length}</strong><small>Recent private messages</small></div><div><strong>${groups.length}</strong><small>Recent group messages</small></div><div><strong>${unread}</strong><small>Unread notifications</small></div><div><strong>${pending.length+albums.length}</strong><small>Pending invitations</small></div></div>
-      <button class="secondary" data-action="markcatchup">✓ Mark caught up</button>
-      <h3>💌 Invitations</h3><div class="paw-items">${pending.map(x=>`<div class="paw-item"><b>${escapeText(bcName(x.from))}</b> invited you to ${x.type==='room'?`room ${escapeText(x.room?.Name||'')}`:x.type==='group'?`Group Den ${escapeText(x.label)}`:'chat'}<div class="flex"><button class="primary" data-paw-invite-accept="${escapeText(x.id)}">Accept</button><button class="secondary" data-paw-invite-decline="${escapeText(x.id)}">Decline</button></div></div>`).join('')}${albums.map(a=>`<div class="paw-item"><b>${escapeText(bcName(a.owner))}</b> invited you to collaborate on <b>${escapeText(a.name)}</b><div class="flex"><button class="primary" data-paw-album-accept="${escapeText(a.id)}">Join scrapbook</button><button class="secondary" data-paw-album-decline="${escapeText(a.id)}">Decline</button></div></div>`).join('')||'<p class="muted">No new invitations.</p>'}</div>
-      <h3>♡ Recent conversations</h3><div class="paw-items">${chats.slice(0,12).map(m=>`<div class="paw-item"><b>${escapeText(bcName(m.id))}</b> · ${new Date(m.time).toLocaleTimeString()}<p>${escapeText(trim(m.text,175))}</p><button class="secondary" data-contact="${m.id}">Open conversation</button></div>`).join('')||'<p class="muted">All caught up!</p>'}</div>
-      <h3>🏡 Group updates</h3><div class="paw-items">${groups.slice(0,8).map(m=>`<div class="paw-item"><b>${escapeText(m.name)}</b> · ${new Date(m.time).toLocaleTimeString()}<p>${escapeText(trim(m.text,175))}</p><button class="secondary" data-group="${escapeText(m.id)}">Open group</button></div>`).join('')||'<p class="muted">No new Group Den messages.</p>'}</div></div>`;
+    const pendingCount=pending.length+albums.length+dens.length;
+    ui.body.innerHTML=`<div class="screen paw-wide-screen"><div class="sectiontitle">📬 Smart Catch-Up</div><p class="muted">Recent locally saved messages and invitations. Each category can be marked caught up independently; older archived messages remain accessible in Chats.</p>
+      <div class="paw-stats"><div><strong>${whispers.length}</strong><small>Recent whispers</small></div><div><strong>${groups.length}</strong><small>Recent group messages</small></div><div><strong>${unread}</strong><small>Unread private notifications</small></div><div><strong>${pendingCount}</strong><small>Pending invitations</small></div></div>
+      <div class="paw-catchup-actions"><button class="secondary" data-action="markcatchup">✓ Mark everything caught up</button><button class="secondary" data-action="markwhisperscaughtup">🤫 Whispers caught up</button><button class="secondary" data-action="markgroupscaughtup">🏡 Group chats caught up</button></div>
+      <div class="paw-catchup-invites-title"><h3>💌 Invitations (${pendingCount})</h3><div class="paw-catchup-actions"><button class="primary" data-action="catchupacceptall" ${pendingCount?'':'disabled'}>✓ Accept all invites</button><button class="secondary" data-action="catchupdeclineall" ${pendingCount?'':'disabled'}>✕ Decline all invites</button></div></div>
+      <div class="paw-items">${pending.map(x=>`<div class="paw-item"><b>${escapeText(bcName(x.from))}</b> invited you to ${x.type==='room'?`room ${escapeText(x.room?.Name||'')}`:x.type==='group'?`Group Den ${escapeText(x.label)}`:'chat'}<div class="flex"><button class="primary" data-paw-invite-accept="${escapeText(x.id)}">Accept</button><button class="secondary" data-paw-invite-decline="${escapeText(x.id)}">Decline</button></div></div>`).join('')}${dens.map(g=>`<div class="paw-item"><b>${escapeText(bcName(g.creator))}</b> invited you to Group Den <b>${escapeText(g.name)}</b><div class="flex"><button class="primary" data-group-accept="${escapeText(g.id)}">Join</button><button class="secondary" data-group-decline="${escapeText(g.id)}">Decline</button></div></div>`).join('')}${albums.map(a=>`<div class="paw-item"><b>${escapeText(bcName(a.owner))}</b> invited you to collaborate on <b>${escapeText(a.name)}</b><div class="flex"><button class="primary" data-paw-album-accept="${escapeText(a.id)}">Join scrapbook</button><button class="secondary" data-paw-album-decline="${escapeText(a.id)}">Decline</button></div></div>`).join('')}${pendingCount?'':'<p class="muted">No new invitations.</p>'}</div>
+      <h3>🤫 Recent whispers</h3><div class="paw-items">${whispers.slice(0,12).map(m=>`<div class="paw-item"><b>${escapeText(bcName(m.id))}</b> · ${new Date(m.time).toLocaleTimeString()}<p>${escapeText(trim(m.text,175))}</p><button class="secondary" data-contact="${m.id}">Open conversation</button></div>`).join('')||'<p class="muted">Whispers caught up!</p>'}</div>
+      <h3>💌 Recent beeps</h3><div class="paw-items">${beeps.slice(0,8).map(m=>`<div class="paw-item"><b>${escapeText(bcName(m.id))}</b> · ${new Date(m.time).toLocaleTimeString()}<p>${escapeText(trim(m.text,175))}</p><button class="secondary" data-contact="${m.id}">Open conversation</button></div>`).join('')||'<p class="muted">No new beeps.</p>'}</div>
+      <h3>🏡 Group updates</h3><div class="paw-items">${groups.slice(0,8).map(m=>`<div class="paw-item"><b>${escapeText(m.name)}</b> · ${new Date(m.time).toLocaleTimeString()}<p>${escapeText(trim(m.text,175))}</p><button class="secondary" data-group="${escapeText(m.id)}">Open group</button></div>`).join('')||'<p class="muted">Group chats caught up!</p>'}</div></div>`;
   }
   function offerPawInvite(){
     const target=numeric(state.selected);
@@ -6458,19 +6613,24 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     notice(`✉ ${bcName(from)} sent a PawLounge invitation.`);
     if(state.open&&state.tab==='catchup')renderCatchUp();
   }
-  function answerPawInvite(id,accept){
-    const inv=state.invitations.find(i=>i.id===id);if(!inv)return;
+  function answerPawInvite(id,accept,batch=false){
+    const inv=state.invitations.find(i=>i.id===id&&i.status==='pending');if(!inv)return false;
+    // Never switch multiple BC rooms via a bulk action; and never claim an
+    // unavailable group invitation was accepted when there is no Group Den.
+    if(batch&&accept&&inv.type==='room')return false;
+    if(batch&&accept&&inv.type==='group'&&!state.groups[inv.groupId])return false;
     inv.status=accept?'accepted':'declined';saveSoon();
     if(accept){
-      if(inv.type==='chat')selectChat(inv.from);
+      if(inv.type==='chat'){if(batch)ensure(inv.from);else selectChat(inv.from);}
       else if(inv.type==='room'&&inv.room)joinRoomFromRadar(inv.room); // Existing explicit confirmation remains mandatory.
       else if(inv.type==='group'){
         const group=state.groups[inv.groupId];
-        if(group){if(!group.joined)respondGroup(group.id,true);else selectGroup(group.id);}
+        if(group){if(!group.joined)respondGroup(group.id,true,batch);else if(!batch)selectGroup(group.id);}
         else notice('A Group Den invitation from the creator is required before joining.');
       }
     }
-    if(state.open&&state.tab==='catchup')renderCatchUp();
+    if(!batch&&state.open&&state.tab==='catchup')renderCatchUp();
+    return true;
   }
   function leavePawGuestbook(){
     const target=state.profileModal?.member;
@@ -6588,8 +6748,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         scheduleSidebarUpdate();
         if((entry.kind==='chat'&&state.tab==='chats'&&state.selected===entry.to)||
            (entry.kind==='group'&&state.tab==='groups'&&state.selectedGroup===entry.to)){
-          const old=ui.body?.querySelector('.kc-outbox');
-          if(old){const tpl=document.createElement('template');tpl.innerHTML=outboxMarkup(entry.kind,entry.to).trim();old.replaceWith(tpl.content.firstElementChild);}
+          refreshOutboxPopover(entry.kind,entry.to);
         }
       }
       notice('📅 Scheduled message queued to Outbox.');
@@ -6598,7 +6757,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function scheduleMarkup(kind,id) {
     const list=state.scheduledMessages.filter(s=>s.kind===kind&&String(s.to)===String(id)&&s.status==='pending').sort((a,b)=>a.due-b.due);
-    return `<section class="paw-schedule"><div class="paw-schedule-head"><span>📅 Scheduled Messages${list.length?` (${list.length})`:''}</span><button class="secondary" data-action="schedulepaw">＋ Schedule</button></div>${list.slice(0,8).map(s=>`<div class="paw-schedule-row"><span>${escapeText(new Date(s.due).toLocaleString())} · ${escapeText(s.text.slice(0,55))}</span><button class="secondary" data-paw-cancel-schedule="${escapeText(s.id)}">Cancel</button></div>`).join('')}</section>`;
+    // Keep the message log tall: the schedule lives in a small collapsible
+    // badge only while pending items exist. A persistent Schedule shortcut
+    // is available from the slim Quick Paws strip.
+    if(!list.length)return '';
+    return `<details class="paw-schedule paw-schedule-collapsed"><summary>📅 ${list.length} scheduled message${list.length===1?'':'s'} <span aria-hidden="true">▾</span></summary><div class="paw-schedule-items">${list.slice(0,8).map(s=>`<div class="paw-schedule-row"><span>${escapeText(new Date(s.due).toLocaleString())} · ${escapeText(s.text.slice(0,55))}</span><button class="secondary" data-paw-cancel-schedule="${escapeText(s.id)}">Cancel</button></div>`).join('')}</div></details>`;
   }
   function pawPrivacyMarkup() {
     const p=state.settings;
@@ -7156,12 +7319,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const packet={type:'KCPawAlbum',v:1,action:'invite',id:a.id,owner:a.owner,name:a.name,nameUpdated:a.nameUpdated,members:[...a.members,member],cards:a.cards.slice(-8),coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt,pageLayout:a.pageLayout,pageAt:a.pageAt,bookPages:a.bookPages,bookRoles:a.bookRoles,linkedGroup:a.linkedGroup,bookUpdated:a.bookUpdated};
     if(pawSend(member,'KCPawAlbum',packet))notice('📒 Scrapbook invitation sent.');else {a.pendingInvites=(a.pendingInvites||[]).filter(n=>n!==member);saveSoon();notice('Invitation failed.');}
   }
-  function answerAlbumInvite(id,accept){
-    const a=state.sharedAlbums.find(x=>x.id===id);if(!a||a.joined)return;
-    if(accept){a.joined=true;a.members=[...new Set([...a.members,me()])];state.albumView=a.id;}
+  function answerAlbumInvite(id,accept,batch=false){
+    const a=state.sharedAlbums.find(x=>x.id===id);if(!a||a.joined||pawBookVault.locked)return false;
+    if(accept){a.joined=true;a.members=[...new Set([...a.members,me()])];if(!batch)state.albumView=a.id;}
     else state.sharedAlbums=state.sharedAlbums.filter(x=>x!==a);
     pawSend(a.owner,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'response',id:a.id,accepted:!!accept});
-    saveSoon();if(state.tab==='catchup')renderCatchUp();else if(state.tab==='pawbooks')renderPawBooks();else renderMoments();
+    saveSoon();if(!batch){if(state.tab==='catchup')renderCatchUp();else if(state.tab==='pawbooks')renderPawBooks();else renderMoments();}
+    return true;
   }
   function addMomentToAlbum(momentId){
     const moment=state.moments.find(x=>x.id===momentId);if(!moment)return;
@@ -7292,7 +7456,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return {format:'PawLounge-backup',version:1,account:state.myId,exported:new Date().toISOString(),settings:state.settings,
       chats:state.chats,groups:state.groups,profiles:state.profiles,moments:state.moments,circles:state.circles,
       sharedAlbums:state.sharedAlbums,privateBookPages:state.privateBookPages,invitations:state.invitations,pawGuestbook:state.pawGuestbook,
-      catchUpSince:state.catchUpSince,roomFavorites:state.roomFavorites,roomRecent:state.roomRecent,
+      catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince,roomFavorites:state.roomFavorites,roomRecent:state.roomRecent,
       roomSort:state.roomSort,scheduledMessages:state.scheduledMessages,messages:rows,roomHistory:state.roomHistory};
   }
   const bytesBase64=bytes=>{let out='';for(let i=0;i<bytes.length;i+=16384)out+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(out);};
@@ -7555,7 +7719,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     <p class="muted">Keyboard: Alt+K open/close, Alt+Shift+1–6 select tabs, Alt+↑/↓ move through contacts, Escape closes PawLounge, Enter sends and Shift+Enter adds a line.</p>
     <div class="smalltitle">🖱 Side panel scrolling</div>${control('panelScrollbars','Always show left and right panel scrollbars')}
     <p class="muted">Scroll the kitty name list and right widgets separately with the mouse wheel, trackpad, touch, or scrollbar. Your conversation stays in place.</p>
-    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws in Beeps and Whispers')}<p class="muted">The other player must use PawLounge. Beeps work with verified BC friends; Whispers work with anyone in your current BC room. Typing paws disappear automatically after you stop typing.</p><div class="smalltitle">🔡 PawLounge data encoding</div>${control('encodePrivateChat','Encode native whisper/beep messages for updated PawLounge recipients only')}<p class="muted">Saved settings, cached messages, and archived message text use the PL2 reversible codec. Compatible PawLounge packets use PL2 automatically. Optional encoded whispers/beeps appear as unreadable tokens in native BC and older plugins. This is obfuscation, NOT encryption; it cannot stop tampering, protect messages from a modified client, or hide data from BC. Leave this unchecked when messaging people without PawLounge v0.9.14.</p><div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
+    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws in Beeps and Whispers')}<p class="muted">The other player must use PawLounge. Beeps work with verified BC friends; Whispers work with anyone in your current BC room. Typing paws disappear automatically after you stop typing.</p><div class="smalltitle">🔡 PawLounge data encoding</div>${control('encodePrivateChat','Encode native whisper/beep messages for updated PawLounge recipients only')}<div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
     ${pawPrivacySettingsMarkup()}<section class="paw-settings-section"><div class="smalltitle">🛡 Message Integrity Shield · active</div><p class="muted">Incoming addon packets are checked for valid senders, permissions, lengths, rate limits and replays. Group delivery acknowledgments are recipient-client reports, not proof of receipt or reading. Older plugin clients have limited replay protection.</p><p class="muted">This session: ${integrity.rejects} rejected · ${integrity.duplicates} duplicates blocked · ${integrity.rateLimited} rate-limited</p></section><section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
       <p class="muted">Show a short status to your BC friends who use PawLounge. Your full Paw Profile stays separate.</p>
       <label>Status preset<select class="field" data-setting="friendStatusMode">${Object.keys(STATUS_MODES).map(mode=>`<option value="${escapeText(mode)}" ${p.friendStatusMode===mode?'selected':''}>${STATUS_MODES[mode]} ${escapeText(mode)}</option>`).join('')}</select></label>
@@ -7638,7 +7802,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.facepop !== undefined) { popFace(target); return; }
     if (target.dataset.jumpreply!==undefined) {const el=ui.shadow?.querySelector(`[data-message-id="${CSS.escape(target.dataset.jumpreply)}"]`);if(el){el.scrollIntoView({block:'center'});el.classList.add('kc-highlight-message');}else notice('Use Load older messages to find the original.');return;}
     if (target.dataset.replyMsg!==undefined) {setReplyTarget(target.dataset.replyMsg);return;}
-    if (target.dataset.bookSaveMessage!==undefined){saveMessageToBook(target.dataset.bookSaveMessage);return;}
+    if (target.dataset.bookSaveMessage!==undefined){bookAddFromConversation(target.dataset.bookSaveMessage);return;}
     if (target.dataset.saveMoment!==undefined) {saveMessageAsMoment(target.dataset.saveMoment);return;}
     if (target.dataset.reactionId!==undefined) {replyAndReact(currentConversationKind(),target.dataset.reactionId,target.dataset.emoji);return;}
     if (target.dataset.roleToggle!==undefined) {const g=currentGroup(),id=numeric(target.dataset.roleToggle);if(g?.creator===me()&&g.members.includes(id)&&id!==me()){g.moderators||=[];g.moderators=g.moderators.includes(id)?g.moderators.filter(x=>x!==id):[...g.moderators,id];syncGroup(g);saveSoon();renderGroupChat();}return;}
@@ -7672,13 +7836,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'assigncircle') assignPawCircle(state.selected);
     else if (act === 'kittyinvite') offerPawInvite();
     else if (act === 'leaveguestbook') leavePawGuestbook();
-    else if (act === 'markcatchup') {state.catchUpSince=Date.now();saveSoon();renderCatchUp();}
+    else if (act === 'markcatchup') {state.catchUpSince=Date.now();state.catchUpWhispersSince=state.catchUpSince;state.catchUpGroupsSince=state.catchUpSince;saveSoon();renderCatchUp();}
+    else if (act === 'markwhisperscaughtup') markCatchUpCategory('whispers');
+    else if (act === 'markgroupscaughtup') markCatchUpCategory('groups');
+    else if (act === 'catchupacceptall') bulkAnswerCatchUpInvitations(true);
+    else if (act === 'catchupdeclineall') bulkAnswerCatchUpInvitations(false);
     else if (act === 'newalbum') createSharedAlbum();
     else if (act === 'openpawbooks') {state.tab='pawbooks';state.albumView='';render();}
     else if (act === 'pawbooksmoments'){state.tab='moments';render();}
     else if (act === 'bookback'){state.albumView='';pawBookUI.timeline=false;pawBookUI.activity=false;renderPawBooks();}
     else if (act === 'nickname') pawNickname();
     else if (act === 'schedulepaw') schedulePawMessage();
+    else if (act === 'toggleoutbox') toggleOutboxPopover();
     else if (act === 'grouppoll') makePawPoll();
     else if (act === 'groupannouncement') pawGroupAnnouncement();
     else if (act === 'exportsecure') void exportPawBackup(true);
