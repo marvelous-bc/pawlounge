@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.10
+// @version      1.0.11
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.10';
+  const VERSION = '1.0.11';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -99,7 +99,7 @@
     { id: 'moon-sneeze', name: 'Moon Sneeze', emoji: '🤧' }
   ];
   const DEFAULT_SETTINGS = { theme: 'midnight', fontSize:'large', notifications: true, sounds: false,
-    typing: false, panelScrollbars: true, assetBase: DEFAULT_ASSET_BASE, avatar: '', signature: 'Purrs and pawprints ♡',
+    typing: false, panelScrollbars: true, zoomReferenceDpr:0, assetBase: DEFAULT_ASSET_BASE, avatar: '', signature: 'Purrs and pawprints ♡',
     pawHero: '', pawAbout: 'Professional cuddle thief ♡', pawLikes: '', pawDislikes: '', pawLookingFor: '',
     friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
@@ -1277,7 +1277,7 @@
     for (const g of Object.values(state.groups)) g.messages = (g.messages || []).slice(-MAX_MESSAGES);
     for (const old of Object.values(state.groups).sort((a,b) => (b.updated||0) - (a.updated||0)).slice(MAX_GROUPS)) delete state.groups[old.id];
     if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();
-    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
+    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: pawViewportScale.mobile&&pawViewportScale.lastDesktopRect?pawViewportScale.lastDesktopRect:state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
   }
   function loadForAccount(id) {
     if (state.myId === id) return;
@@ -3724,7 +3724,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 
 
 /* Keep grid placement correct when the viewport is narrower than 930px.
-   Old responsive rules had accidentally stacked main on top of sidebar. */
+   Old Lian-like responsive rules had accidentally stacked main on top of sidebar. */
 #kc-panel .workspace:not(.wide) .main{grid-column:3}
 #kc-panel .workspace.wide .main{grid-column:2}
 @container (max-width:740px){#kc-panel .workspace:not(.wide) .main{grid-column:2}}
@@ -5454,8 +5454,102 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .paw-catchup-invites-title h3{margin:7px 0}
 #kc-panel .paw-catchup-invites-title .paw-catchup-actions{margin:0}
 #kc-panel .paw-catchup-actions>button:disabled{opacity:.45;cursor:not-allowed}
+
+/* v1.0.11 — Browser zoom compensation (panel geometry owns scaled transform).
+   Mobile intentionally keeps scale 1 and uses larger touch-friendly controls. */
+#kc-panel{transform-origin:top left!important}
+#kc-fab{transform-origin:top left!important;transform:scale(var(--kc-zoom-factor,1))}
+#kc-fab:hover{transform:translateY(-4px) rotate(-3deg) scale(var(--kc-zoom-factor,1))}
+#kc-panel.kc-mobile{border-radius:16px!important;overflow:hidden!important}
+#kc-panel.kc-mobile .hero{height:58px!important;min-height:58px!important;max-height:58px!important;padding:3px 8px!important}
+#kc-panel.kc-mobile .brandlockup{left:6px!important;top:1px!important;width:154px!important;height:62px!important}
+#kc-panel.kc-mobile .brand-after-lockup,#kc-panel.kc-mobile .kc-deco-right-top,#kc-panel.kc-mobile .kc-deco-left-bottom,
+#kc-panel.kc-mobile .kc-deco-left-ribbon,#kc-panel.kc-mobile .herocharms,
+#kc-panel.kc-mobile .dragcue,#kc-panel.kc-mobile .kc-sculpted-frame,#kc-panel.kc-mobile .kc-resize{display:none!important}
+#kc-panel.kc-mobile .heroactions{z-index:100!important;margin-left:auto!important}
+#kc-panel.kc-mobile .closekitty{min-width:43px!important;min-height:43px!important;z-index:101!important}
+#kc-panel.kc-mobile .workspace{display:grid!important;grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr) 64px!important;position:relative!important;border-radius:0!important}
+#kc-panel.kc-mobile .workspace>.main{grid-column:1!important;grid-row:1!important;min-width:0!important;min-height:0!important}
+#kc-panel.kc-mobile .workspace>.rail{grid-column:1!important;grid-row:2!important;display:flex!important;flex-direction:row!important;gap:2px!important;overflow-x:auto!important;overflow-y:hidden!important;padding:3px 5px!important;min-width:0!important;min-height:64px!important;height:64px!important;align-items:stretch!important;border-right:0!important;border-top:1px solid var(--border)!important;scrollbar-width:none!important}
+#kc-panel.kc-mobile .workspace>.rail::-webkit-scrollbar{display:none}
+#kc-panel.kc-mobile .workspace>.rail{padding-bottom:max(3px,env(safe-area-inset-bottom,3px))!important}
+#kc-panel.kc-mobile .rail .railtab{flex:0 0 62px!important;width:62px!important;min-width:62px!important;max-width:62px!important;height:56px!important;min-height:56px!important;max-height:56px!important;padding:4px 1px!important;gap:0!important;z-index:1!important}
+#kc-panel.kc-mobile .rail .railtab .ic,#kc-panel.kc-mobile .rail .railtab .ic .asset{font-size:22px!important;width:25px!important;height:25px!important}
+#kc-panel.kc-mobile .rail .railtab .tx{font-size:10px!important;line-height:1.1!important;white-space:nowrap!important}
+#kc-panel.kc-mobile .railspacer{display:none!important}
+#kc-panel.kc-mobile .workspace>.sidebar{grid-row:1!important;grid-column:1!important;display:none!important;position:absolute!important;left:0!important;top:0!important;bottom:0!important;width:min(310px,92%)!important;height:auto!important;z-index:95!important;box-shadow:10px 0 28px #000b!important;background:#24142a!important}
+#kc-panel.kc-mobile .workspace>.sidebar.compact-open{display:flex!important}
+#kc-panel.kc-mobile .sidebar>.side-shell{padding:10px!important;gap:7px!important}
+#kc-panel.kc-mobile .main .chatlayout{grid-template-columns:minmax(0,1fr)!important;min-height:0!important}
+#kc-panel.kc-mobile .main .chatcenter{min-width:0!important;min-height:0!important}
+#kc-panel.kc-mobile .chathead{height:57px!important;min-height:57px!important;max-height:57px!important;margin:1px 2px 0!important;padding:4px 5px!important;gap:5px!important}
+#kc-panel.kc-mobile .chathead .avatar{width:35px!important;height:35px!important;flex-basis:35px!important}
+#kc-panel.kc-mobile .chathead .headtitle{font-size:13px!important;line-height:1.1!important}
+#kc-panel.kc-mobile .chathead .headsubtitle{font-size:10px!important;line-height:1.1!important}
+#kc-panel.kc-mobile .chathead .headright{gap:2px!important;max-width:43%;overflow-x:auto!important;scrollbar-width:none!important}
+#kc-panel.kc-mobile .chathead .headright .iconbutton{flex:0 0 34px!important;width:34px!important;height:38px!important}
+#kc-panel.kc-mobile .composer.chat-composer,
+#kc-panel.kc-mobile .composer.group-composer{display:grid!important;grid-template-columns:46px minmax(92px,1fr) 46px!important;grid-template-areas:'stickers mode send' 'input input input'!important;gap:5px!important;padding:5px 8px!important}
+#kc-panel.kc-mobile .composer.group-composer{grid-template-areas:'group stickers send' 'input input input'!important}
+#kc-panel.kc-mobile .composer .kc-add{grid-area:stickers!important;width:46px!important;height:42px!important;min-height:42px!important}
+#kc-panel.kc-mobile .composer .mode{grid-area:mode!important;min-width:0!important;width:100%!important;height:42px!important}
+#kc-panel.kc-mobile .composer .group-head-tag{grid-area:group!important;min-width:0!important;width:auto!important;height:42px!important}
+#kc-panel.kc-mobile .composer textarea{grid-area:input!important;width:100%!important;min-height:47px!important;max-height:95px!important;resize:none!important}
+#kc-panel.kc-mobile .composer .primary{grid-area:send!important;width:46px!important;height:42px!important;min-width:0!important;min-height:42px!important;padding:0!important}
+#kc-panel.kc-mobile .quick{padding:3px 5px!important;gap:4px!important;max-height:36px!important}
+#kc-panel.kc-mobile .quick .pill{font-size:10px!important;padding:5px 7px!important}
+#kc-panel.kc-mobile .msglog{min-height:0!important;padding:7px 9px!important}
+#kc-panel.kc-mobile .msgrow{max-width:100%!important}
+#kc-panel.kc-mobile .msgcol{max-width:100%!important}
+#kc-panel.kc-mobile .screen{padding:12px!important}
+#kc-panel.kc-mobile .settingrow{flex-wrap:wrap!important}
+#kc-panel.kc-mobile .settingrow>*:last-child{max-width:100%!important}
+#kc-panel.kc-mobile .collapse-handle.left{z-index:110!important}
+#kc-panel.kc-mobile .collapse-handle.right{z-index:110!important}
+#kc-panel.kc-mobile .companion{max-width:95%!important}
+#kc-panel.kc-mobile button,#kc-panel.kc-mobile input,#kc-panel.kc-mobile select{touch-action:manipulation}
+#kc-panel.kc-mobile .kc-profile-backdrop,#kc-panel.kc-mobile .group-create-backdrop{z-index:150!important}
 `; }
 
+  // Browser zoom changes devicePixelRatio on desktop Firefox/Chrome.
+  // Keep CSS pixels physically close to the calibrated starting size by
+  // scaling the two UI surfaces, not the game or other mods. Touch devices
+  // deliberately use natural sizing for readable tap targets.
+  const pawViewportScale={ratio:1,dpr:0,mobile:false,updates:0,lastDesktopRect:null};
+  const mobileVisibleHeight=()=>Math.max(240,Math.min(window.innerHeight,Number(window.visualViewport?.height)||window.innerHeight));
+  const isMobileLayout=()=>window.innerWidth<=720 ||
+     (window.matchMedia?.('(pointer:coarse)')?.matches&&window.innerWidth<=900);
+  function deviceZoomRatio(){
+    if(isMobileLayout())return 1;
+    const dpr=Math.max(.5,Math.min(8,Number(window.devicePixelRatio)||1));
+    const base=Number(state.settings.zoomReferenceDpr)||dpr;
+    return Math.min(1.6,Math.max(.6,base/dpr));
+  }
+  function syncZoomAndMobile(force=false){
+    const dpr=Math.max(.5,Math.min(8,Number(window.devicePixelRatio)||1));
+    const mobile=isMobileLayout(),ratio=mobile?1:deviceZoomRatio();
+    const wasMobile=pawViewportScale.mobile;
+    if(!force&&Math.abs(ratio-pawViewportScale.ratio)<.002&&mobile===wasMobile&&dpr===pawViewportScale.dpr)return;
+    if(mobile&&!wasMobile&&state.windowRect&&state.windowRect.w>=650)
+      pawViewportScale.lastDesktopRect={...state.windowRect};
+    if(!mobile&&wasMobile)
+      state.windowRect=pawViewportScale.lastDesktopRect?{...pawViewportScale.lastDesktopRect}:defaultWindowRect();
+    pawViewportScale.ratio=ratio;pawViewportScale.dpr=dpr;pawViewportScale.mobile=mobile;pawViewportScale.updates++;
+    if(!ui.panel||!ui.fab)return;
+    ui.panel.classList.toggle('kc-mobile',mobile);
+    ui.panel.style.setProperty('--kc-zoom-factor',String(ratio));
+    ui.fab.style.setProperty('--kc-zoom-factor',String(ratio));
+    // Keep the native mobile keyboard, touch targets and compact drawer usable.
+    if(mobile)state.rightDrawerOpen=false;
+    if(state.windowRect){
+      if(mobile){
+        const vW=Math.max(1,window.innerWidth),vH=mobileVisibleHeight();
+        Object.assign(state.windowRect,{x:3,y:3,w:Math.max(280,vW-6),h:Math.max(250,vH-6)});
+      }
+      applyWindowRect();
+    }
+    fitFab();
+  }
   function setTheme() {
     if (!ui.panel) return;
     const selectedTheme = VALID_THEMES.includes(state.settings.theme) ? state.settings.theme : 'midnight';
@@ -5550,6 +5644,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     shadow.querySelector('.hero')?.addEventListener('pointerdown', dragWindow);
     shadow.getElementById('kc-resize')?.addEventListener('pointerdown', resizeWindow);
     if (!state.windowRect) state.windowRect = defaultWindowRect();
+    syncZoomAndMobile(true);
     applyWindowRect();
     if (typeof ResizeObserver === 'function') {
       ui.rightArrowObserver?.disconnect();
@@ -5558,7 +5653,23 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }
     if (!state.hotkeysAttached) { document.addEventListener('keydown', hotkeys, true); state.hotkeysAttached = true; }
     if (state.fabPosition) positionFab(state.fabPosition.x, state.fabPosition.y);
-    if (!state.resizeAttached) { let pendingViewport=0; window.addEventListener('resize', () => { if (!pendingViewport) pendingViewport=requestAnimationFrame(()=>{pendingViewport=0;fitFab();applyWindowRect();syncInboxFilterBar();}); }, { passive:true }); state.resizeAttached = true; }
+    if (!state.resizeAttached) {
+      let pendingViewport=0;
+      window.addEventListener('resize',()=>{
+        if(!pendingViewport)pendingViewport=requestAnimationFrame(()=>{
+          pendingViewport=0;syncZoomAndMobile();
+          if(isMobileLayout()&&state.windowRect)Object.assign(state.windowRect,{x:3,y:3,w:Math.max(280,innerWidth-6),h:Math.max(250,mobileVisibleHeight()-6)});
+          applyWindowRect();fitFab();syncInboxFilterBar();
+        });
+      },{passive:true});
+      window.visualViewport?.addEventListener('resize',()=>{
+        if(isMobileLayout()&&state.windowRect){
+          state.windowRect.h=Math.max(250,mobileVisibleHeight()-6);
+          applyWindowRect();
+        }else syncZoomAndMobile();
+      },{passive:true});
+      state.resizeAttached=true;
+    }
     setTheme(); updateBadge(); render(); syncFabCoexistence();
     } catch (err) {
       // If startup fails partway through the UI, remove partial nodes before retrying.
@@ -5650,11 +5761,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const r = state.windowRect || defaultWindowRect();
     const viewportW = Math.max(1, document.documentElement.clientWidth || window.innerWidth);
     const viewportH = Math.max(1, document.documentElement.clientHeight || window.innerHeight);
-    const maxW = Math.max(1, viewportW - 8), maxH = Math.max(1, viewportH - 8);
+    const ratio=pawViewportScale.ratio||1;
+    const maxW=Math.max(1,(viewportW-8)/ratio),maxH=Math.max(1,(viewportH-8)/ratio);
     r.w = Math.round(Math.max(Math.min(minWinWidth(), maxW), Math.min(Number(r.w) || maxW, maxW)));
     r.h = Math.round(Math.max(Math.min(minWinHeight(), maxH), Math.min(Number(r.h) || maxH, maxH)));
-    r.x = Math.round(Math.max(4, Math.min(Number(r.x) || 0, viewportW - r.w - 4)));
-    r.y = Math.round(Math.max(4, Math.min(Number(r.y) || 0, viewportH - r.h - 4)));
+    r.x = Math.round(Math.max(4, Math.min(Number(r.x) || 0, viewportW - r.w*ratio - 4)));
+    r.y = Math.round(Math.max(4, Math.min(Number(r.y) || 0, viewportH - r.h*ratio - 4)));
     state.windowRect = r;
     ui.panel.classList.toggle('kc-short', r.h < 530);
     // A few older mockup CSS rules used !important width/height. Keep live
@@ -5666,6 +5778,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     style.setProperty('bottom', 'auto', 'important');
     style.setProperty('width', `${r.w}px`, 'important');
     style.setProperty('height', `${r.h}px`, 'important');
+    if (!ui.panel.classList.contains('kc-moving'))style.setProperty('transform',`scale(${ratio})`,'important');
     if (refreshFrame) { updateSculptedFrame(r.w, r.h); requestAnimationFrame(syncInboxFilterBar); }
     syncRightDrawerArrow();
   }
@@ -5675,8 +5788,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const id = e.pointerId;
     const origin = { ...(state.windowRect || defaultWindowRect()) };
     const x0 = e.clientX, y0 = e.clientY;
-    const maxX = Math.max(4, window.innerWidth-origin.w-4);
-    const maxY = Math.max(4, window.innerHeight-origin.h-4);
+    const maxX = Math.max(4, window.innerWidth-origin.w*pawViewportScale.ratio-4);
+    const maxY = Math.max(4, window.innerHeight-origin.h*pawViewportScale.ratio-4);
     let x = origin.x, y = origin.y, frame=0, active=true;
     const started = performance.now();
     const oldTouch = el.style.touchAction;
@@ -5688,7 +5801,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if (!active || ui.panel !== panel) return;
       // A transform is GPU-composited and leaves layout and the ornamental
       // SVG completely unchanged until the gesture is finished.
-      panel.style.setProperty('transform', `translate3d(${x-origin.x}px, ${y-origin.y}px, 0)`, 'important');
+      panel.style.setProperty('transform', `translate3d(${x-origin.x}px, ${y-origin.y}px, 0) scale(${pawViewportScale.ratio})`, 'important');
       motionRuntime.dragFrames++;
     };
     const measure = ev => {
@@ -5718,7 +5831,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       const style=panel.style;
       style.setProperty('left',`${x}px`,'important');
       style.setProperty('top',`${y}px`,'important');
-      style.removeProperty('transform');
+      style.setProperty('transform',`scale(${pawViewportScale.ratio})`,'important');
       panel.classList.remove('kc-moving');
       updateSculptedFrame(state.windowRect.w,state.windowRect.h);
       el.style.touchAction=oldTouch;
@@ -5743,8 +5856,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const viewportH = Math.max(1, document.documentElement.clientHeight || window.innerHeight);
     // Anchor to the starting top-left edge. Never move the entire window
     // in response to dragging its bottom-right handle.
-    const maxW = Math.max(minWinWidth(), viewportW - start.x - 4);
-    const maxH = Math.max(minWinHeight(), viewportH - start.y - 4);
+    const ratio=pawViewportScale.ratio||1;
+    const maxW=Math.max(minWinWidth(),(viewportW-start.x-4)/ratio);
+    const maxH=Math.max(minWinHeight(),(viewportH-start.y-4)/ratio);
     let pendingW = start.w, pendingH = start.h, animationFrame = 0, active = true;
     const started=performance.now();
     beginMotion();
@@ -5757,8 +5871,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       motionRuntime.resizeFrames++;
     };
     const measure = ev => {
-      pendingW = Math.round(Math.max(minWinWidth(), Math.min(maxW, start.w + ev.clientX - startX)));
-      pendingH = Math.round(Math.max(minWinHeight(), Math.min(maxH, start.h + ev.clientY - startY)));
+      pendingW = Math.round(Math.max(minWinWidth(), Math.min(maxW, start.w + (ev.clientX - startX)/ratio)));
+      pendingH = Math.round(Math.max(minWinHeight(), Math.min(maxH, start.h + (ev.clientY - startY)/ratio)));
       if (!animationFrame) animationFrame = requestAnimationFrame(applyPending);
     };
     const move = ev => {
@@ -5800,8 +5914,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     e.stopPropagation();
   }
   function positionFab(x, y) {
-    x = Math.max(4, Math.min(Number(x) || 0, window.innerWidth - (ui.fab?.offsetWidth || 64) - 4));
-    y = Math.max(4, Math.min(Number(y) || 0, window.innerHeight - (ui.fab?.offsetHeight || 64) - 4));
+    x = Math.max(4, Math.min(Number(x) || 0, window.innerWidth - (ui.fab?.offsetWidth || 64)*pawViewportScale.ratio - 4));
+    y = Math.max(4, Math.min(Number(y) || 0, window.innerHeight - (ui.fab?.offsetHeight || 64)*pawViewportScale.ratio - 4));
     ui.fab.style.left = `${x}px`; ui.fab.style.top = `${y}px`;
     ui.fab.style.right = 'auto'; ui.fab.style.bottom = 'auto';
     state.fabPosition = {x, y};
@@ -5856,6 +5970,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return '';
   }
   function syncFabCoexistence() {
+    if(ui.panel&&!motionRuntime.active)syncZoomAndMobile();
     const fab=ui.fab;
     if(!fab?.isConnected)return;
     fabCoexistence.checks++;
@@ -5867,9 +5982,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         const screen=String(window.CurrentScreen||'');
         // Native BC profile, wardrobe, addon and game screens draw on canvas;
         // they cannot be detected from DOM geometry.
-        if(screen&&screen!=='ChatRoom') reason=`BC screen: ${screen}`;
-        else if(screen==='ChatRoom' && window.CurrentCharacter &&
-          (window.DialogFocusItem||window.DialogMenuMode)) reason='BC character menu';
+        const module=String(window.CurrentModule||'');
+        const inChatRoom=(screen==='Online'&&module==='ChatRoom')||screen==='ChatRoom';
+        const nativeMenu=inChatRoom&&!!window.CurrentCharacter &&
+          (!!window.DialogFocusItem||!!window.DialogMenuMode);
+        // Native BC uses Online/ChatRoom, not CurrentScreen='ChatRoom'.
+        // Do not hide the only launcher just because the user is in BC.
+        if(nativeMenu)reason='BC character menu';
+        else if(screen&&screen!=='Online'&&screen!=='ChatRoom'&&screen!=='Login')reason=`BC screen: ${screen}/${module}`;
         else reason=findOverlappingForeignWindow(fab.getBoundingClientRect());
       } catch(e) {
         // UI cooperation is best-effort and must never break PawLounge.
@@ -5893,7 +6013,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const paint=()=>{
       frame=0;
       if (!active || !fab.isConnected) return;
-      fab.style.transform=`translate3d(${x-bounds.left}px,${y-bounds.top}px,0)`;
+      fab.style.transform=`translate3d(${x-bounds.left}px,${y-bounds.top}px,0) scale(${pawViewportScale.ratio})`;
       motionRuntime.fabFrames++;
     };
     const measure=ev=>{
@@ -5929,7 +6049,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       fab.style.transform='';
       void fab.offsetWidth; // only once at release; suppress stale compositor offset
       fab.classList.remove('kc-moving');
-      endMotion();syncFabCoexistence();
+      endMotion();syncZoomAndMobile();syncFabCoexistence();
       if (!moved && ev.type==='pointerup') toggle();
     };
     fab.addEventListener('pointermove',move);
@@ -5999,13 +6119,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function isCompactCollapseLayout() {
     // Container query tracks the resizable PawLounge panel, not viewport width.
-    return (ui.panel?.getBoundingClientRect().width || 9999) <= 780;
+    return (ui.panel?.offsetWidth || 9999) <= 780;
   }
   // In a compact resized window the BC profile/den details occupy a drawer,
   // rather than a permanent second chat column. Desktop collapse state is
   // preserved independently, so resizing never silently changes preferences.
   function isRightDrawerLayout() {
-    return (ui.panel?.getBoundingClientRect().width || 9999) <= 1120;
+    return (ui.panel?.offsetWidth || 9999) <= 1120;
   }
   function rightPaneIsOpen() {
     return isRightDrawerLayout() ? !!state.rightDrawerOpen : !state.rightCollapsed;
@@ -7788,6 +7908,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.body.innerHTML = `<div class="screen"><div class="sectiontitle">⚙ PawLounge Settings</div><p class="muted">Personal preferences live on this browser only. No additional server is used.</p>
     <div class="smalltitle">🎨 Cozy appearance</div><div class="settingrow"><label for="kc-theme">Colour theme</label><select class="field" id="kc-theme" data-setting="theme">${VALID_THEMES.map(t => `<option value="${t}" ${p.theme === t ? 'selected':''}>${t==='midnight'?'Velvet (default)':t[0].toUpperCase()+t.slice(1)}</option>`).join('')}</select></div>
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
+    <div class="settingrow"><span>Zoom-independent sizing</span><button class="secondary" data-action="calibratezoom" type="button">Set current zoom as 100% reference</button></div>
+    <p class="muted">Desktop browser zoom is compensated relative to this reference. Calibrate at your preferred Firefox zoom. On mobile, normal touch-friendly sizing is used.</p>
     <div class="smalltitle">🪄 Layout &amp; chat bubbles</div>
     ${control('minimalist','Minimalist mode (hide decorative artwork)')}
     ${control('layoutEdit','Enable drag-and-drop sidebar editor')}<p class="muted">When enabled, drag Now Purring, Search, Circles and Inbox filter into your preferred order. Your layout is saved locally.</p>
@@ -7929,6 +8051,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'groupannouncement') pawGroupAnnouncement();
     else if (act === 'exportsecure') void exportPawBackup(true);
     else if (act === 'importsecure') ui.shadow?.getElementById('paw-import-file')?.click();
+    else if (act === 'calibratezoom') {
+      if(isMobileLayout()){notice('Desktop zoom calibration is not needed on mobile.');return;}
+      state.settings.zoomReferenceDpr=Number(window.devicePixelRatio)||1;
+      syncZoomAndMobile(true);saveSoon();notice('PawLounge zoom reference updated.');
+    }
     else if (act === 'resetwindow') { state.windowRect = defaultWindowRect(); applyWindowRect(); saveSoon(); notice('Window size and position restored.'); }
     else if (act === 'new') { const val = window.prompt('Kitty member number (BC ID):'); if (val !== null) {
       const id = numeric(val); if (id && id !== me()) selectChat(id); else notice('Please enter a valid member number.'); } }
@@ -8084,6 +8211,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (state.myId !== id) { if (state.myId) saveNow(true); pawSecureResetSession(); motionRuntime.active=0; typingSendTimes.clear();state.typingUntil={}; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); recentRoomPortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); ui.host = null; ui.shadow = null; state.open = false; } loadForAccount(id); }
     if (ui.host && (!ui.host.isConnected || !ui.panel || !ui.shadow || !ui.fab || !ui.body || !ui.fab.isConnected)) { motionRuntime.active=0; try { ui.host.remove(); } catch {} Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null}); }
     if (!ui.host) buildUI();
+    if(!Number.isFinite(Number(state.settings.zoomReferenceDpr))||Number(state.settings.zoomReferenceDpr)<=0){
+      state.settings.zoomReferenceDpr=Number(window.devicePixelRatio)||1;
+      saveSoon();
+    }
+    syncZoomAndMobile();
     // Recover from BC or another addon replacing part of the mounted UI.
     if (ui.host && ui.shadow && !ui.shadow.getElementById('kc-resize')) {
       motionRuntime.active=0; ui.host.remove();
@@ -8147,6 +8279,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     refreshRooms: () => { if (!ui.body) safeTick(); state.tab='rooms'; toggle(true); return searchRooms('console-refresh'); },
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
+    displayDiagnostics:()=>({version:VERSION,zoomFactor:pawViewportScale.ratio,referenceDpr:state.settings.zoomReferenceDpr,currentDpr:window.devicePixelRatio,mobile:pawViewportScale.mobile,updates:pawViewportScale.updates}),
     launcherCoexistenceDiagnostics:()=>({version:VERSION,checks:fabCoexistence.checks,hiddenChecks:fabCoexistence.hidden,reason:fabCoexistence.reason,hidden:!!ui.fab?.classList.contains('kc-yielding'),screen:window.CurrentScreen||null}),
     zeroFlickerDiagnostics:()=>({...sidebarDiffStats,sideScroll:ui.menu?.querySelector('.contacts-scroll')?.scrollTop||0,filterScroll:ui.menu?.querySelector('.kc-inbox-filters')?.scrollLeft||0}),
     dataCodecDiagnostics:()=>({version:VERSION,codec:'PL2',storage:'reversible-encoded localStorage',archive:'encoded message text only; metadata indexed',packets:'PL2 with legacy JSON/KC1 receive fallback',privateChatEncoded:!!state.settings.encodePrivateChat,cryptographic:false,...pawCodecMetrics}),
