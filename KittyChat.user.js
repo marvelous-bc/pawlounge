@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.13
+// @version      1.0.14
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.13';
+  const VERSION = '1.0.14';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6042,85 +6042,163 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function fitFab() { if (state.fabPosition) positionFab(state.fabPosition.x, state.fabPosition.y); }
 
-  // v1.0.10: Cooperative floating launcher.  Another mod can own its own
-  // window; our launcher must not cover that window merely because our shadow
-  // button has a very high z-index.  Detect overlapping, VISIBLE foreign DOM
-  // windows (including dialogs inside open Shadow DOM), plus BC canvas menus.
-  // This doesn't patch BC or any third-party mod functions.
-  const fabCoexistence={reason:'',checks:0,hidden:0,alwaysShow:false};
+  // v1.0.14: BC room-safe launcher coexistence. Generic plugin overlay
+  // containers are frequently mounted on room join even when no window is
+  // open. They must NOT count as actual dialogs. When a painted foreign popup
+  // really overlaps the launcher, prefer a temporary free position to hiding.
+  const fabCoexistence={reason:'',checks:0,hidden:0,alwaysShow:false,temporary:null,
+    home:null, lastScreen:'',surfaces:[],roomTransitions:0};
   const FOREIGN_WINDOW_SELECTOR='dialog[open],[role="dialog"],[aria-modal="true"],[id*="lian" i],[class*="lian" i],[id*="modal" i],[class*="modal" i],[id*="popup" i],[class*="popup" i],[id*="overlay" i],[class*="overlay" i],[id*="window" i],[class*="window" i]';
-  function findOverlappingForeignWindow(rect) {
-    const overlapping=(box)=>box.width>=120 && box.height>=85 &&
-      box.left < rect.right+5 && box.right > rect.left-5 &&
-      box.top < rect.bottom+5 && box.bottom > rect.top-5;
-    const visited=new Set();
-    const roots=[document];
-    // Browser extensions commonly render their UIs in open shadow roots.
-    // Collect hosts from the document and one nested shadow level; the scan
-    // runs only while the launcher is closed, on a slow timer.
+  function paintedPopupSurface(node, style, box, points) {
+    const visiblyPainted=s=>{
+      if(!s||s.display==='none'||s.visibility==='hidden'||Number(s.opacity)<=.05)return false;
+      const bg=String(s.backgroundColor||'');
+      const paintedBg=s.backgroundImage!=='none' || (bg!=='transparent'&&bg!=='rgba(0, 0, 0, 0)'&&
+        !/rgba\([^)]*,\s*0(?:\.0+)?\s*\)/.test(bg));
+      const border=['Top','Right','Bottom','Left'].some(side=>
+        parseFloat(s['border'+side+'Width'])>=1&&s['border'+side+'Style']!=='none'&&
+        s['border'+side+'Color']!=='transparent');
+      return paintedBg||border||(s.boxShadow&&s.boxShadow!=='none');
+    };
+    if(node.tagName==='DIALOG' || visiblyPainted(style))return true;
+    // A fullscreen or sidebar-sized transparent mod *host* is not a window.
+    // Accept it only when an actual painted descendant intersects the button.
+    let scanned=0;
+    for(const child of node.querySelectorAll?.('*')||[]){
+      if(++scanned>110)break;
+      if(child===ui.host||child.contains?.(ui.host))continue;
+      let cr,cs;
+      try{cr=child.getBoundingClientRect();cs=getComputedStyle(child);}catch{continue;}
+      if(!cr||cr.width<90||cr.height<55||!points(cr))continue;
+      if(visiblyPainted(cs))return true;
+    }
+    return false;
+  }
+  function foreignPopupSurfaces(fabRect) {
+    const candidates=[],visited=new Set(),roots=[document];
+    const overlaps=a=>a.left<fabRect.right+4&&a.right>fabRect.left-4&&
+      a.top<fabRect.bottom+4&&a.bottom>fabRect.top-4;
     let total=0;
-    for(let rootIndex=0;rootIndex<roots.length&&rootIndex<25;rootIndex++){
-      const root=roots[rootIndex];
-      const candidates=root.querySelectorAll('body > *, :host > *, '+FOREIGN_WINDOW_SELECTOR);
-      for(const node of candidates){
+    for(let i=0;i<roots.length&&i<25;i++){
+      const root=roots[i];
+      let found;
+      try{found=root.querySelectorAll('body > *, :host > *, '+FOREIGN_WINDOW_SELECTOR);}catch{continue;}
+      for(const node of found){
         if(++total>2300)break;
         if(!node||visited.has(node)||node===ui.host||ui.host?.contains(node))continue;
         visited.add(node);
         if(node.shadowRoot&&roots.length<25)roots.push(node.shadowRoot);
-        if(!node.isConnected)continue;
-        if(node.matches?.('canvas,svg,img,video,style,script,link,template'))continue;
+        if(!node.isConnected||node.matches?.('canvas,svg,img,video,style,script,link,template'))continue;
         let style;
-        try {style=getComputedStyle(node);}catch {continue;}
-        if(!style||style.display==='none'||style.visibility==='hidden'||Number(style.opacity)<0.05)continue;
-        const position=style.position;
-        const z=parseInt(style.zIndex,10)||0;
+        try{style=getComputedStyle(node);}catch{continue;}
+        if(!style||style.display==='none'||style.visibility==='hidden'||Number(style.opacity)<=.05)continue;
         const label=`${node.id||''} ${typeof node.className==='string'?node.className:''}`;
-        const namedWindow=/(?:lian(?:chat)?|modal|popup|overlay|dialog|floating[-_ ]?window|addon[-_ ]?menu)/i.test(label);
         const modal=node.matches?.('dialog[open],[role="dialog"],[aria-modal="true"]');
-        // We only yield for a *specific visible window*. Broad BC canvas
-        // wrappers, invisible overlay roots, document-sized screens and UI
-        // holders should never hide the only way to open PawLounge.
+        const namedWindow=/(?:lian(?:chat)?|modal|popup|overlay|dialog|floating[-_ ]?window|addon[-_ ]?menu)/i.test(label);
         if(!modal&&!namedWindow)continue;
         if(node===document.body||node===document.documentElement)continue;
-        if(namedWindow&&!modal&&/^(?:chatroom|online|main|game|canvas|screen|container|information|information-sheet)$/i.test(String(node.id||'')))continue;
-        let box;
-        try {box=node.getBoundingClientRect();}catch {continue;}
-        if(!overlapping(box))continue;
-        if(box.width>=innerWidth*.9 && box.height>=innerHeight*.9)continue;
-        // Non-dialog popups need an independently positioned window surface.
-        // A named container inside the normal BC layout is not a popup.
+        const position=style.position;
         if(!modal&&!['fixed','absolute','sticky'].includes(position))continue;
-        if(namedWindow&&(box.width<150||box.height<100)&&!modal)continue;
-        return `${node.id||node.tagName.toLowerCase()}`.slice(0,80);
+        if(!modal&&/^(?:chatroom|online|main|game|canvas|screen|container|information|information-sheet)$/i.test(String(node.id||'')))continue;
+        let box;
+        try{box=node.getBoundingClientRect();}catch{continue;}
+        if(!box||box.width<120||box.height<85||!overlaps(box))continue;
+        // A full-page addon host is NOT itself a popup. However, many
+        // third-party mods mount a real, smaller popup *inside* that host.
+        // Detect the actual painted child rather than hiding behind the root.
+        if(box.width>=innerWidth*.9&&box.height>=innerHeight*.9){
+          let nestedCount=0;
+          for(const child of node.querySelectorAll?.('*')||[]){
+            if(++nestedCount>160)break;
+            if(child.matches?.('canvas,svg,img,video,style,script,link,template'))continue;
+            let cb,cs;
+            try{cb=child.getBoundingClientRect();cs=getComputedStyle(child);}catch{continue;}
+            if(!cb||cb.width<135||cb.height<90||
+              (cb.width>=innerWidth*.9&&cb.height>=innerHeight*.9)||!overlaps(cb))continue;
+            if(cs.display==='none'||cs.visibility==='hidden'||Number(cs.opacity)<=.05)continue;
+            if(!paintedPopupSurface(child,cs,cb,overlaps))continue;
+            candidates.push({node:child,box:cb,
+              name:String(child.id||node.id||'addon-popup').slice(0,80)});
+            break;
+          }
+          continue;
+        }
+        if(!paintedPopupSurface(node,style,box,overlaps))continue;
+        candidates.push({node,box,name:String(node.id||node.tagName.toLowerCase()).slice(0,80)});
       }
       if(total>2300)break;
     }
-    return '';
+    return candidates;
+  }
+  function defaultFabHomeRect() {
+    const ratio=pawViewportScale.ratio||1;
+    const w=(ui.fab?.offsetWidth||64)*ratio,h=(ui.fab?.offsetHeight||64)*ratio;
+    const x=state.fabPosition?.x??Math.max(4,innerWidth-w-16);
+    const y=state.fabPosition?.y??Math.max(4,innerHeight-h-100);
+    const left=Math.max(4,Math.min(x,innerWidth-w-4));
+    const top=Math.max(4,Math.min(y,innerHeight-h-4));
+    return {left,top,right:left+w,bottom:top+h,width:w,height:h};
+  }
+  function fabRectAt(x,y,w,h){return {left:x,top:y,right:x+w,bottom:y+h,width:w,height:h};}
+  function restoreFabHome(){
+    if(!fabCoexistence.temporary||!ui.fab)return;
+    const fab=ui.fab;
+    fabCoexistence.temporary=null;
+    if(state.fabPosition){positionFab(state.fabPosition.x,state.fabPosition.y);}
+    else{fab.style.removeProperty('left');fab.style.removeProperty('top');
+      fab.style.removeProperty('right');fab.style.removeProperty('bottom');}
   }
   function syncFabCoexistence() {
     if(ui.panel&&!motionRuntime.active)syncZoomAndMobile();
     const fab=ui.fab;
     if(!fab?.isConnected)return;
     fabCoexistence.checks++;
-    // Never hide the launcher midway through a drag; the next check handles it.
     if(fab.classList.contains('kc-moving'))return;
-    let reason='';
-    if(!state.open&&!fabCoexistence.alwaysShow){
-      try {
-        // CurrentScreen changes across BC login, lobby and chat room. Do not
-        // hide the launcher from screen names: the previous allowlist wrongly
-        // hid PawLounge throughout normal signed-in screens. Furthermore,
-        // CurrentCharacter / DialogMenuMode may remain populated after a
-        // dialog closes; neither proves a visible native popup exists.
-        reason=findOverlappingForeignWindow(fab.getBoundingClientRect());
-      } catch(e) {
-        // UI cooperation is best-effort and must never break PawLounge.
-        reason='';
+    const room=window.CurrentScreen==='ChatRoom' ||
+      (window.CurrentScreen==='Online'&&window.CurrentModule==='ChatRoom');
+    const screen=room?'room':String(window.CurrentScreen||'');
+    if(fabCoexistence.lastScreen!==screen){fabCoexistence.lastScreen=screen;
+      fabCoexistence.roomTransitions+=room?1:0;restoreFabHome();}
+    if(state.open||fabCoexistence.alwaysShow){restoreFabHome();
+      fab.classList.remove('kc-yielding');fabCoexistence.reason='';fabCoexistence.surfaces=[];
+      fab.setAttribute('aria-hidden',state.open?'true':'false');return;}
+    let surfaces=[];
+    try{surfaces=foreignPopupSurfaces(defaultFabHomeRect());}catch{surfaces=[];}
+    fabCoexistence.surfaces=surfaces.map(s=>s.name);
+    let reason='',shouldHide=false;
+    if(surfaces.length){
+      reason=surfaces[0].name;
+      const home=defaultFabHomeRect();
+      const margin=10,w=home.width,h=home.height;
+      const positions=[
+        [margin,Math.max(margin,innerHeight-h-margin)],
+        [Math.max(margin,innerWidth-w-margin),margin],
+        [margin,margin],
+        [Math.max(margin,innerWidth-w-margin),Math.max(margin,innerHeight-h-margin)],
+        [Math.max(margin,(innerWidth-w)/2),margin]
+      ];
+      // Check a proposed alternate position against *all* popup surfaces;
+      // only move to positions that are outside their actual bounds.
+      const clear=([x,y])=>x>=0&&y>=0&&x+w<=innerWidth&&y+h<=innerHeight&&
+        surfaces.every(s=>x+w<=s.box.left-4||x>=s.box.right+4||
+          y+h<=s.box.top-4||y>=s.box.bottom+4);
+      const available=positions.find(clear);
+      if(available){
+        const [x,y]=available;
+        fab.style.left=`${Math.round(x)}px`;fab.style.top=`${Math.round(y)}px`;
+        fab.style.right='auto';fab.style.bottom='auto';
+        fabCoexistence.temporary={x,y};
+        reason=`moved away from ${reason}`;
+      }else {
+        restoreFabHome();shouldHide=true;
       }
-    }
-    const hidden=!!reason && !state.open;
+    }else restoreFabHome();
+    const hidden=shouldHide&&!state.open;
     fab.classList.toggle('kc-yielding',hidden);
-    fab.setAttribute('aria-hidden',state.open||hidden?'true':'false');
+    fab.setAttribute('aria-hidden',hidden?'true':'false');
+    // Another mod might alter display/visibility during a room transition.
+    // The closed PawLounge launcher must remain displayable and interactive.
+    if(!hidden&&fab.style.display==='none')fab.style.display='flex';
     fabCoexistence.reason=reason;
     if(hidden)fabCoexistence.hidden++;
   }
@@ -6162,6 +6240,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       fab.removeEventListener('lostpointercapture',end);
       try { if (fab.hasPointerCapture(id)) fab.releasePointerCapture(id); } catch {}
       if (moved) {
+        fabCoexistence.temporary=null;
         // Commit absolute coordinates without reading layout again.
         fab.style.left=`${x}px`;fab.style.top=`${y}px`;
         fab.style.right='auto';fab.style.bottom='auto';
@@ -8335,7 +8414,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function tick() {
     const id = me();
     if (!id) { if (!ui.host && document.body) buildUI(); return; }
-    if (state.myId !== id) { if (state.myId) saveNow(true); pawSecureResetSession(); motionRuntime.active=0; typingSendTimes.clear();state.typingUntil={}; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); recentRoomPortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); ui.host = null; ui.shadow = null; state.open = false; } loadForAccount(id); }
+    if (state.myId !== id) { if (state.myId) saveNow(true); pawSecureResetSession(); motionRuntime.active=0; typingSendTimes.clear();state.typingUntil={}; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); recentRoomPortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null,input:null}); state.open = false; fabCoexistence.temporary=null; } loadForAccount(id); }
     if (ui.host && (!ui.host.isConnected || !ui.panel || !ui.shadow || !ui.fab || !ui.body || !ui.fab.isConnected)) { motionRuntime.active=0; try { ui.host.remove(); } catch {} Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null}); }
     if (!ui.host) buildUI();
     if(!Number.isFinite(Number(state.settings.zoomReferenceDpr))||Number(state.settings.zoomReferenceDpr)<=0){
@@ -8407,7 +8486,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
     displayDiagnostics:()=>({version:VERSION,zoomFactor:pawViewportScale.ratio,referenceDpr:state.settings.zoomReferenceDpr,currentDpr:window.devicePixelRatio,mobile:pawViewportScale.mobile,updates:pawViewportScale.updates}),
-    launcherCoexistenceDiagnostics:()=>({version:VERSION,checks:fabCoexistence.checks,hiddenChecks:fabCoexistence.hidden,reason:fabCoexistence.reason,hidden:!!ui.fab?.classList.contains('kc-yielding'),screen:window.CurrentScreen||null,hostLayer:ui.host?getComputedStyle(ui.host).zIndex:null,visible:!!ui.fab?.isConnected&&!ui.fab?.classList.contains('kc-yielding'),alwaysShow:fabCoexistence.alwaysShow}),
+    launcherCoexistenceDiagnostics:()=>({version:VERSION,checks:fabCoexistence.checks,hiddenChecks:fabCoexistence.hidden,reason:fabCoexistence.reason,hidden:!!ui.fab?.classList.contains('kc-yielding'),temporaryPosition:fabCoexistence.temporary,foreignSurfaces:[...fabCoexistence.surfaces],roomTransitions:fabCoexistence.roomTransitions,screen:window.CurrentScreen||null,hostLayer:ui.host?getComputedStyle(ui.host).zIndex:null,visible:!!ui.fab?.isConnected&&!ui.fab?.classList.contains('kc-yielding'),alwaysShow:fabCoexistence.alwaysShow}),
+    recoverLauncher:()=>{fabCoexistence.alwaysShow=true;if(ui.host&&!ui.host.isConnected){try{ui.host.remove();}catch{}Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null});}if(!ui.host&&document.body)buildUI();restoreFabHome();setTheme();syncFabCoexistence();return !!ui.fab?.isConnected;},
     alwaysShowLauncher:(enable=true)=>{fabCoexistence.alwaysShow=!!enable;syncFabCoexistence();return fabCoexistence.alwaysShow;},
     zeroFlickerDiagnostics:()=>({...sidebarDiffStats,sideScroll:ui.menu?.querySelector('.contacts-scroll')?.scrollTop||0,filterScroll:ui.menu?.querySelector('.kc-inbox-filters')?.scrollLeft||0}),
     dataCodecDiagnostics:()=>({version:VERSION,codec:'PL2',storage:'reversible-encoded localStorage',archive:'encoded message text only; metadata indexed',packets:'PL2 with legacy JSON/KC1 receive fallback',privateChatEncoded:!!state.settings.encodePrivateChat,cryptographic:false,...pawCodecMetrics}),
@@ -8475,6 +8555,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       getComputedStyle(ui.fab).display !== 'none' && getComputedStyle(ui.fab).visibility !== 'hidden' &&
       getComputedStyle(ui.fab).opacity !== '0',
     launcherHiddenReason: fabCoexistence.reason,
+    launcherTemporaryPosition:fabCoexistence.temporary,
+    launcherForeignSurfaces:[...fabCoexistence.surfaces],
     launcherDisplay:ui.fab?.isConnected ? getComputedStyle(ui.fab).display : 'absent',
     screen:String(window.CurrentScreen||''), module:String(window.CurrentModule||''),
     panelOpen: !!state.open, windowRect: state.windowRect,
