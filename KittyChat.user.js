@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.15
+// @version      1.0.16
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.15';
+  const VERSION = '1.0.16';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6096,6 +6096,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         const modal=node.matches?.('dialog[open],[role="dialog"],[aria-modal="true"]');
         const namedWindow=/(?:lian(?:chat)?|modal|popup|overlay|dialog|floating[-_ ]?window|addon[-_ ]?menu)/i.test(label);
         if(!modal&&!namedWindow)continue;
+        // A BC room canvas or its letterbox container is never an addon popup.
+        if(node.matches?.('#MainCanvas,#ChatRoomCanvas,#gameCanvas,[id="game"],[id="main-game"],canvas'))continue;
         if(node===document.body||node===document.documentElement)continue;
         const position=style.position;
         if(!modal&&!['fixed','absolute','sticky'].includes(position))continue;
@@ -6148,20 +6150,53 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else{fab.style.removeProperty('left');fab.style.removeProperty('top');
       fab.style.removeProperty('right');fab.style.removeProperty('bottom');}
   }
-  // v1.0.15: BC's room interface and third-party room addons can create a
+  // v1.0.16: BC's room interface and third-party room addons can create a
   // new stacking context above a Shadow DOM launcher. A working JS runtime and
   // connected shadow host do not prove that its launcher is actually visible.
   // Mount a *single* independent, light-DOM room button at document root. It
   // mirrors the same saved coordinates and action but cannot be buried in the
   // zero-sized shadow host. No timers, global hooks or other mods are patched.
-  const roomLauncher={button:null,repairs:0,lastReason:'',moves:0};
+  const roomLauncher={button:null,repairs:0,lastReason:'',moves:0,topLayer:false,topLayerErrors:0};
+  // A z-index cannot escape all CSS stacking contexts and cannot outrank
+  // browser top-layer content. popover=manual permits a freely draggable
+  // button on the actual BC room canvas *and* in letterboxed black margins.
+  function roomLauncherTopLayer(button,visible=true){
+    if(!button?.isConnected)return;
+    if(!visible){
+      try{if(button.matches(':popover-open'))button.hidePopover();}catch{}
+      roomLauncher.topLayer=false;return;
+    }
+    if(typeof button.showPopover!=='function')return;
+    try{
+      if(!button.matches(':popover-open'))button.showPopover();
+      roomLauncher.topLayer=button.matches(':popover-open');
+    }catch(err){
+      roomLauncher.topLayer=false;roomLauncher.topLayerErrors++;
+      // Older embedded browsers may not support popovers. Retain the fixed,
+      // root-level button as a safe fallback rather than failing to load.
+    }
+  }
+  function roomLauncherViewportRect(){
+    const scale=pawViewportScale.ratio||1;
+    const width=64*scale;
+    const fallback=defaultFabHomeRect();
+    // Never read position from the hidden shadow FAB in a BC room. It may
+    // live inside a resized/translated BC stacking context after room entry.
+    // Our saved absolute viewport coords are authoritative.
+    const desired=fabCoexistence.temporary||state.fabPosition;
+    const x=Number.isFinite(Number(desired?.x))?Number(desired.x):fallback.left;
+    const y=Number.isFinite(Number(desired?.y))?Number(desired.y):fallback.top;
+    return {x:Math.round(Math.max(4,Math.min(Math.max(4,innerWidth-width-4),x))),
+      y:Math.round(Math.max(4,Math.min(Math.max(4,innerHeight-width-4),y))),
+      scale,width};
+  }
   function roomLauncherActive(){
     return window.CurrentScreen==='ChatRoom'||
       (window.CurrentScreen==='Online'&&window.CurrentModule==='ChatRoom');
   }
   function removeRoomLauncher(){
     const old=roomLauncher.button;
-    if(old){try{old.remove();}catch{}roomLauncher.button=null;}
+    if(old){roomLauncherTopLayer(old,false);try{old.remove();}catch{}roomLauncher.button=null;}
     if(ui.fab){ui.fab.style.removeProperty('visibility');ui.fab.style.removeProperty('pointer-events');}
     if(ui.host){
       ui.host.style.setProperty('z-index','2147483000','important');
@@ -6171,10 +6206,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function makeRoomLauncher(){
     const button=document.createElement('button');
     button.id='kc-room-launcher';
+    button.setAttribute('popover','manual');
     button.type='button';
     button.setAttribute('aria-label','Open PawLounge');
     button.title='PawLounge · drag to reposition, tap to open';
-    button.style.cssText='all:initial!important;box-sizing:border-box!important;position:fixed!important;z-index:2147483647!important;width:64px!important;height:64px!important;display:flex!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;cursor:grab!important;touch-action:none!important;user-select:none!important;filter:drop-shadow(0 7px 8px #190b24ae)!important;pointer-events:auto!important;';
+    button.style.cssText='all:initial!important;box-sizing:border-box!important;position:fixed!important;inset:auto!important;margin:0!important;z-index:2147483647!important;width:64px!important;height:64px!important;display:flex!important;align-items:center!important;justify-content:center!important;border:0!important;background:transparent!important;cursor:grab!important;touch-action:none!important;user-select:none!important;filter:drop-shadow(0 7px 8px #190b24ae)!important;pointer-events:auto!important;';
     const icon=ui.fab?.querySelector('.asset')?.cloneNode(true);
     if(icon){
       icon.style.cssText='display:inline-flex!important;align-items:center!important;justify-content:center!important;position:relative!important;overflow:hidden!important;width:64px!important;height:64px!important;pointer-events:none!important';
@@ -6216,6 +6252,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(moved&&!interrupted){
         const x=Number.parseFloat(button.style.left)||4,y=Number.parseFloat(button.style.top)||4;
         if(ui.fab)positionFab(x,y);
+        state.fabPosition={x,y};
         fabCoexistence.temporary=null;roomLauncher.moves++;saveSoon();
       } else if(!moved&&!interrupted)toggle(true);
       try{if(button.hasPointerCapture(e.pointerId))button.releasePointerCapture(e.pointerId);}catch{}
@@ -6242,6 +6279,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       document.documentElement.insertBefore(ui.host,button);
     // Opening the full panel intentionally hides both launch buttons.
     if(state.open){
+      roomLauncherTopLayer(button,false);
       button.style.setProperty('display','none','important');
       ui.fab.style.setProperty('visibility','hidden','important');
       ui.fab.style.setProperty('pointer-events','none','important');
@@ -6253,13 +6291,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.fab.style.setProperty('visibility','hidden','important');
     ui.fab.style.setProperty('pointer-events','none','important');
     if(ui.host)ui.host.style.setProperty('z-index','2147483647','important');
-    const r=ui.fab.getBoundingClientRect();
-    const scale=pawViewportScale.ratio||1;
-    const w=64*scale;
-    let x=Number.isFinite(r.left)?r.left:defaultFabHomeRect().left;
-    let y=Number.isFinite(r.top)?r.top:defaultFabHomeRect().top;
-    x=Math.max(4,Math.min(innerWidth-w-4,x));
-    y=Math.max(4,Math.min(innerHeight-w-4,y));
+    const {x,y,scale}=roomLauncherViewportRect();
     button.style.setProperty('left',`${Math.round(x)}px`,'important');
     button.style.setProperty('top',`${Math.round(y)}px`,'important');
     button.style.setProperty('width','64px','important');
@@ -6269,6 +6301,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     button.style.setProperty('visibility','visible','important');
     button.style.setProperty('opacity','1','important');
     button.style.setProperty('display','flex','important');
+    roomLauncherTopLayer(button,true);
     const counter=button.querySelector('.kc-room-counter');
     if(counter){counter.textContent=ui.badge?.textContent||'';
       counter.style.setProperty('display',ui.badge?.classList.contains('hidden')?'none':'inline-block');}
@@ -6280,7 +6313,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(hit&&hit!==button&&!button.contains(hit)&&
        (hit.matches?.('canvas,#MainCanvas,#ChatRoomCanvas')||
         hit.closest?.('#bc-app,#ChatRoomCanvas'))&&
-       button.parentNode===document.documentElement){
+       button.parentNode===document.documentElement && !roomLauncher.topLayer){
       document.documentElement.appendChild(button);
       roomLauncher.repairs++;
     }
@@ -8625,7 +8658,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
     displayDiagnostics:()=>({version:VERSION,zoomFactor:pawViewportScale.ratio,referenceDpr:state.settings.zoomReferenceDpr,currentDpr:window.devicePixelRatio,mobile:pawViewportScale.mobile,updates:pawViewportScale.updates}),
     roomLauncherDiagnostics:()=>({version:VERSION,active:roomLauncherActive(),mounted:!!roomLauncher.button?.isConnected,
-      repairs:roomLauncher.repairs,moves:roomLauncher.moves,
+      repairs:roomLauncher.repairs,moves:roomLauncher.moves,topLayer:roomLauncher.topLayer,topLayerErrors:roomLauncher.topLayerErrors,
+      savedPosition:state.fabPosition,temporaryPosition:fabCoexistence.temporary,
       rect:(()=>{const r=roomLauncher.button?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null;})(),
       nodeOnTop:(()=>{const r=roomLauncher.button?.getBoundingClientRect();if(!r)return null;
         const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
