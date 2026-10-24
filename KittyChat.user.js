@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.3
+// @version      0.9.4
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.3';
+  const VERSION = '0.9.4';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -4841,8 +4841,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function renderSidebar() {
     if (!ui.menu) return;
-    // v0.8.16 only exposes the default All inbox view.
-    if (state.contactsMode !== 'all') state.contactsMode = 'all';
+    // v0.9.4: The old v0.8.16 simplification incorrectly removed the
+    // entire inbox-filter strip. Keep the original choices and ensure any
+    // stale/unknown mode falls back safely to All.
+    const inboxModes = ['all','unread','favorites','later','requests','muted','pinned'];
+    if (!inboxModes.includes(state.contactsMode)) state.contactsMode = 'all';
     const confirmedFriends=new Set(myFriends());
     for(const [id,c] of Object.entries(state.chats)) if(c?.requestPending && confirmedFriends.has(Number(id))){c.requestPending=false;c.requestAccepted=true;saveSoon();}
     const currentLeft = ui.menu.querySelector('.contacts-scroll');
@@ -4871,8 +4874,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         ${heroId ? `<div class="side-mainline">${avatar(heroId)}<div style="min-width:0;flex:1"><div style="font-size:15px;font-weight:900">${escapeText(name(heroId))}</div><div class="muted">${escapeText(heroLast?.text || (onlineMembers.has(heroId) ? 'Together in the same room ♡' : 'A cozy connection'))}</div>${statusMarkup(heroId)}</div><span class="hero-heart">♡</span></div>` : '<div class="muted">Pick a kitty to start purring ♡</div>'}</div>
       <div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
       <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option><option value="__paw_bc_friends__" ${state.circleFilter==='__paw_bc_friends__'?'selected':''}>🐈 BC Friends only</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
-      <div class="kc-inbox-filter-wrap kc-single-inbox-filter">
-        <div class="side-filters kc-inbox-filters" aria-label="Inbox filter"><button type="button" class="filterbtn active" data-filter="all" aria-pressed="true">All</button></div>
+      <div class="kc-inbox-filter-wrap">
+        <div class="side-filters kc-inbox-filters" aria-label="Inbox filters">${[['all','All'],['unread','♡ Unread'],['favorites','💗 Favorites'],['later','⏰ Later'],['requests','✉ Requests'],['muted','🔕 Muted'],['pinned','📌 Pinned']].map(([key,label])=>`<button type="button" class="filterbtn ${state.contactsMode===key?'active':''}" data-filter="${key}" aria-pressed="${state.contactsMode===key}">${label}</button>`).join('')}</div>
+        <div class="kc-filter-scroll-controls" aria-label="Scroll inbox filters">
+          <button type="button" class="kc-filter-scroll-btn" data-action="inboxscrollleft" title="Previous filters" aria-label="Scroll filters left">‹</button>
+          <div class="kc-filter-scroll-track" role="scrollbar" tabindex="0" aria-label="Inbox filters horizontal scrollbar" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="kc-filter-scroll-thumb"></div></div>
+          <button type="button" class="kc-filter-scroll-btn" data-action="inboxscrollright" title="Next filters" aria-label="Scroll filters right">›</button>
+        </div>
       </div>
       <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names, contacts and groups">
         <div class="side-list">${items.map(contactButton).join('') || '<div class="muted">No kitties found yet.</div>'}</div>
@@ -5963,7 +5971,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.group){selectGroup(target.dataset.group);return;}
     if (target.dataset.groupAccept){respondGroup(target.dataset.groupAccept,true);return;}
     if (target.dataset.groupDecline){respondGroup(target.dataset.groupDecline,false);return;}
-    if (target.dataset.filter) { state.contactsMode = 'all'; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
+    if (target.dataset.filter) { const mode=target.dataset.filter; if(!['all','unread','favorites','later','requests','muted','pinned'].includes(mode))return; state.contactsMode = mode; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
     if (target.dataset.quick !== undefined) { (currentGroup()?sendGroupMessage:sendText)(state.settings.shortcuts[Number(target.dataset.quick)]); return; }
     if (target.dataset.react !== undefined) { const chosen=window.prompt('Reaction emoji: 💗 🐾 😽 ✨ 😹','💗');if(chosen)replyAndReact(currentConversationKind(),target.dataset.react,trim(chosen,12));return; }
     if (target.dataset.sticker) { const st = STICKERS.find(x => x.id === target.dataset.sticker); if (!st) return; if (!currentGroup() && !state.chats[state.selected]) { notice('Choose a kitty or Group Den before sending a sticker.'); return; } (currentGroup()?sendGroupMessage:sendText)(`🐱 Kittychat sticker: ${st.name} ${st.emoji}`); return; }
