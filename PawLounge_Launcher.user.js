@@ -6,17 +6,11 @@
 // @version      1.3.0
 // @description  Fetch a fresh, uncached PawLounge build from GitHub whenever Bondage Club loads.
 // @author       marvelous-bc
-// @match        *://bondageprojects.elementfx.com/*
-// @match        *://www.bondageprojects.elementfx.com/*
-// @match        *://*.bondageprojects.elementfx.com/*
-// @match        *://bondageprojects.com/*
-// @match        *://www.bondageprojects.com/*
-// @match        *://*.bondageprojects.com/*
-// @match        *://bondage-europe.com/*
-// @match        *://www.bondage-europe.com/*
-// @match        *://bondage-asia.com/*
-// @match        *://www.bondage-asia.com/*
-// @match        *://*.bondage-asia.com/*
+// @match        https://*.bondageprojects.elementfx.com/R*
+// @match        https://*.bondageprojects.com/R*
+// @match        https://*.bondage-europe.com/R*
+// @match        https://*.bondageeurope.com/R*
+// @match        https://*.bondage-asia.com/club/*
 // @inject-into  page
 // @run-at       document-end
 // @grant        none
