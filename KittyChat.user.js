@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.2
+// @version      0.9.3
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.2';
+  const VERSION = '0.9.3';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -4106,6 +4106,155 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .msgrow.other .msgbubble{background:color-mix(in srgb,var(--bubble2) var(--paw-bubble-opacity,95%),transparent)!important}
 #kc-panel.paw-minimalist .kc-deco,#kc-panel.paw-minimalist .kc-deco-left-bottom,#kc-panel.paw-minimalist .kc-deco-right-top,#kc-panel.paw-minimalist .brandlockup,#kc-panel.paw-minimalist .brand-after-lockup,#kc-panel.paw-minimalist .chat-float-kitten{display:none!important}
 #kc-panel.paw-minimalist .hero{background:var(--bg)!important}
+/* v0.9.3 — Keep the contacts/chat grid coherent at resized window sizes.
+   Earlier viewport breakpoint rules were hiding the sidebar even when the
+   resizable panel still had room. The native 3-column grid must win over
+   those rules; otherwise the collapse arrow/composer render underneath the
+   contacts overlay and can disappear from view. */
+@container kc-pawlounge-shell (min-width:781px){
+  #kc-panel .workspace:not(.wide)>.rail{
+    grid-column:1!important;grid-row:1!important;
+  }
+  #kc-panel:not(.left-collapsed) .workspace:not(.wide)>.sidebar{
+    display:flex!important;grid-column:2!important;grid-row:1!important;
+    position:relative!important;
+  }
+  #kc-panel .workspace:not(.wide)>.main{
+    display:flex!important;grid-column:3!important;grid-row:1!important;
+    min-width:0!important;overflow:hidden!important;
+  }
+  #kc-panel .chatcenter>.collapse-handle.left{
+    display:flex!important;visibility:visible!important;opacity:1!important;
+    left:8px!important;z-index:75!important;
+  }
+}
+/* Compact-width overlay retains its dedicated sidebar toggle. */
+@container kc-pawlounge-shell (max-width:780px){
+  #kc-panel .workspace:not(.wide)>.main{grid-column:2!important}
+  #kc-panel .chatcenter>.collapse-handle.left{
+    display:flex!important;visibility:visible!important;opacity:1!important;
+  }
+}
+
+/* v0.9.3 — clearer, softer type without sacrificing compact contact density.
+   Use local/browser system fonts, never a network-loaded font. Text hierarchy
+   is scoped to PawLounge and keeps light themes, bright message bubbles,
+   notification colors and existing text-size preferences readable. */
+#kc-panel{
+  --paw-text-main:#fff9fd;
+  --paw-text-secondary:#f3d6e8;
+  --paw-text-muted:#e8c0d8;
+  --paw-text-shadow:0 1px 2px #100611b8;
+  font-family:'Trebuchet MS','Segoe UI',system-ui,sans-serif!important;
+  font-feature-settings:'kern' 1;
+  text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:antialiased;
+}
+#kc-panel.theme-lavender{
+  --paw-text-main:#fdf8ff;--paw-text-secondary:#eae0fc;
+  --paw-text-muted:#d5c6ef;
+}
+#kc-panel.theme-pink{
+  --paw-text-main:#51213d;--paw-text-secondary:#653653;
+  --paw-text-muted:#815b75;--paw-text-shadow:none;
+}
+#kc-panel.theme-cream{
+  --paw-text-main:#543c2c;--paw-text-secondary:#72513d;
+  --paw-text-muted:#836c58;--paw-text-shadow:none;
+}
+#kc-panel button,#kc-panel input,#kc-panel textarea,#kc-panel select{
+  font-family:inherit!important;
+}
+/* Names provide the primary visual anchors in dense lists and open chats. */
+#kc-panel .contact .nameline,#kc-panel .headtitle,
+#kc-panel .group-name,#kc-panel .side-mainline b{
+  color:var(--paw-text-main)!important;
+  font-weight:850!important;
+  letter-spacing:-.18px!important;
+  text-shadow:var(--paw-text-shadow)!important;
+}
+#kc-panel .contact .nameline{font-size:13.5px!important;line-height:1.2!important}
+#kc-panel.text-large .contact .nameline{font-size:14.5px!important}
+#kc-panel.text-extra .contact .nameline{font-size:16px!important}
+#kc-panel .contact .preview,#kc-panel .group-sub{
+  color:var(--paw-text-secondary)!important;
+  font-weight:520!important;
+  letter-spacing:.03px!important;
+  line-height:1.3!important;
+  text-shadow:var(--paw-text-shadow)!important;
+}
+#kc-panel .contact .preview{font-size:11.5px!important}
+#kc-panel.text-large .contact .preview{font-size:12.5px!important}
+#kc-panel.text-extra .contact .preview{font-size:14px!important}
+/* Strong enough to read at a glance, subordinate to the contact name. */
+#kc-panel .contact .time,#kc-panel .headsubtitle,
+#kc-panel .muted,#kc-panel .msgmeta{
+  color:var(--paw-text-muted)!important;
+  font-weight:530!important;
+  text-shadow:var(--paw-text-shadow)!important;
+}
+#kc-panel .headsubtitle{font-size:12px!important;line-height:1.36!important}
+#kc-panel .msgmeta{font-size:11px!important;line-height:1.35!important}
+#kc-panel .side-card-title,#kc-panel .groupbar b{
+  color:#ff9aca!important;
+  font-weight:850!important;
+  text-shadow:0 1px 2px #1a0618aa!important;
+  letter-spacing:-.15px!important;
+}
+#kc-panel.theme-pink .side-card-title,#kc-panel.theme-pink .groupbar b{color:#a33270!important;text-shadow:none!important}
+#kc-panel.theme-cream .side-card-title,#kc-panel.theme-cream .groupbar b{color:#865025!important;text-shadow:none!important}
+#kc-panel .railtab .tx{font-weight:800!important;text-shadow:0 1px 2px #130817b0!important}
+#kc-panel .filterbtn,#kc-panel .secondary,#kc-panel .quick .pill{
+  font-weight:690!important;
+  letter-spacing:.05px!important;
+}
+#kc-panel .search,#kc-panel textarea.field,#kc-panel .composer .field{
+  color:var(--paw-text-main)!important;
+  font-weight:540!important;
+  letter-spacing:.08px!important;
+}
+#kc-panel .search::placeholder,#kc-panel textarea::placeholder,#kc-panel .field::placeholder{
+  color:var(--paw-text-muted)!important;
+  opacity:.95!important;
+  font-weight:450!important;
+}
+/* Preserve the user's personalized bubble shape/opacity and the outgoing
+   bubble's dark-on-pink readability. Improve only actual message typography. */
+#kc-panel .msgbubble{
+  font-family:inherit!important;
+  font-weight:535!important;
+  line-height:1.52!important;
+  letter-spacing:.07px!important;
+}
+#kc-panel .msgrow.other .msgbubble{
+  color:var(--paw-text-main)!important;
+  text-shadow:var(--paw-text-shadow)!important;
+}
+/* The earlier Social Studio opacity rule used a dark mauve background with
+   dark foreground text in the default theme. Restore the intended bright
+   pink bubble while honoring the opacity control and themed palettes. */
+#kc-panel .msgrow.mine .msgbubble{
+  background:color-mix(in srgb,#f48bb7 var(--paw-bubble-opacity,95%),transparent)!important;
+  color:#351226!important;
+  text-shadow:none!important;
+}
+#kc-panel.theme-lavender .msgrow.mine .msgbubble{
+  background:color-mix(in srgb,#d5baf6 var(--paw-bubble-opacity,95%),transparent)!important;
+  color:#2a153d!important;
+}
+#kc-panel.theme-pink .msgrow.mine .msgbubble{
+  background:color-mix(in srgb,#ffd7e9 var(--paw-bubble-opacity,95%),transparent)!important;
+  color:#51213d!important;
+}
+#kc-panel.theme-cream .msgrow.mine .msgbubble{
+  background:color-mix(in srgb,#f5dfbb var(--paw-bubble-opacity,95%),transparent)!important;
+  color:#543c2c!important;
+}
+#kc-panel .chatlayout[data-paw-chat-theme="rose"] .msgrow.mine .msgbubble{
+  background:color-mix(in srgb,#ff9bbf var(--paw-bubble-opacity,95%),transparent)!important;
+  color:#491728!important;
+}
+
 `; }
 
   function setTheme() {
