@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.0
+// @version      0.9.1
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.0';
+  const VERSION = '0.9.1';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -1845,6 +1845,9 @@
       ctx.restore();
       canvas.classList.add('is-painted');
       canvas.parentElement?.classList.add('kc-has-mugshot');
+      // The first complete remote portrait becomes the stable crop for this
+      // contact until manual refresh or the next account/session switch.
+      if (member) rememberSteadyRemotePortrait(member,canvas);
       portraitRuntime.painted++;
       if (member) portraitCropRuntime.last.set(member,{outcome:'painted',inspected,empty,partial,source:bestSource,...best});
       return true;
@@ -1899,6 +1902,41 @@
   // raw pixel memory. A small LRU caused random default-avatar fallbacks when
   // visiting multiple chats; closing the messenger must not discard portraits.
   const MAX_OFFLINE_PORTRAITS = 96;
+  // v0.9.1: Freeze completed portraits *only for contacts outside the current
+  // BC room*. A sidebar refresh used to reconstruct every canvas, causing the
+  // saved WCE character to shift/crop or briefly revert to its fallback image.
+  // This is a bounded session-only pixel cache (not localStorage/IndexedDB).
+  // Live in-room members still render through BC's normal live path.
+  const steadyRemotePortraits = new Map();
+  function steadyRemotePortrait(member) {
+    return member && !hasActualLivePresence(member) ? steadyRemotePortraits.get(member) || null : null;
+  }
+  function rememberSteadyRemotePortrait(member, source) {
+    if (!member || hasActualLivePresence(member) || steadyRemotePortraits.has(member) ||
+        !source || !source.width || !source.height) return false;
+    try {
+      const copy=document.createElement('canvas');
+      copy.width=128;copy.height=128;
+      const ctx=copy.getContext('2d');
+      if (!ctx) return false;
+      ctx.drawImage(source,0,0,copy.width,copy.height);
+      steadyRemotePortraits.set(member,copy);
+      while (steadyRemotePortraits.size > MAX_OFFLINE_PORTRAITS)
+        steadyRemotePortraits.delete(steadyRemotePortraits.keys().next().value);
+      return true;
+    } catch { return false; }
+  }
+  function paintSteadyRemotePortraits(root) {
+    if (!root) return 0;
+    let painted=0;
+    for (const canvas of root.querySelectorAll('.kc-bc-mugshot:not(.is-painted)')) {
+      const member=numeric(canvas.dataset.kcPortrait);
+      const saved=steadyRemotePortrait(member) ||
+        (!hasActualLivePresence(member) ? wceSnapshotRuntime.temporaryPortraits.get(member) : null);
+      if (saved && clonePaintedPortrait(saved,canvas,member)) painted++;
+    }
+    return painted;
+  }
   function cachedWcePortrait(member) {
     const cached=wceSnapshotRuntime.temporaryPortraits.get(member);
     if (!cached) return null;
@@ -1979,10 +2017,12 @@
   }
   function applyWcePortraitToVisible(member, painted) {
     if (!ui.shadow || !state.open || !painted) return 0;
+    if (!hasActualLivePresence(member)) rememberSteadyRemotePortrait(member,painted);
+    const stable=steadyRemotePortrait(member) || painted;
     let count=0;
     for (const target of ui.shadow.querySelectorAll(`.kc-bc-mugshot[data-kc-portrait="${member}"]`)) {
       if (!target.isConnected || target.classList.contains('is-painted')) continue;
-      if (clonePaintedPortrait(painted,target,member)) count++;
+      if (clonePaintedPortrait(stable,target,member)) count++;
     }
     if (count) portraitRuntime.unresolved.delete(member);
     return count;
@@ -1991,7 +2031,7 @@
     if (!member || !state.open || wceSnapshotRuntime.pending.has(member)) return;
     // A character selected by BC is not necessarily online. Offline saved
     // portraits must still work when CurrentCharacter references that person.
-    if (hasActualLivePresence(member)) return;
+    if (hasActualLivePresence(member) || steadyRemotePortraits.has(member)) return;
     const cached=cachedWcePortrait(member);
     if (cached) { applyWcePortraitToVisible(member,cached); return; }
     // Rendering many WCE characters concurrently overloaded BC's renderer,
@@ -2075,7 +2115,8 @@
     const img = new Image();
     img.onload = () => {
       portraitRuntime.pending.delete(canvas);
-      if (canvas.isConnected) drawPortraitLayers(canvas, [img]);
+      if (canvas.isConnected && !canvas.classList.contains('is-painted') &&
+          drawPortraitLayers(canvas,[img],member)) syncPaintedPortraitCopies(member);
     };
     img.onerror = () => { portraitRuntime.pending.delete(canvas); };
     img.src = url;
@@ -2222,10 +2263,12 @@
       // CurrentCharacter can retain a previously viewed *offline* member and
       // otherwise suppress or overwrite their saved WCE portrait.
       const live = hasActualLivePresence(member) ? findLiveCharacter(member) : null;
+      if (live) steadyRemotePortraits.delete(member);
       // Prioritize cached WCE portraits for anyone not actually sharing our
       // live room. A stale BC CurrentCharacter should never mask an offline
       // snapshot. Cached bitmaps also eliminate fallback flicker on rerenders.
-      const offlineCached=!hasActualLivePresence(member) && cachedWcePortrait(member);
+      const offlineCached=!hasActualLivePresence(member) &&
+        (steadyRemotePortrait(member) || cachedWcePortrait(member));
       if (offlineCached) {
         applyWcePortraitToVisible(member,offlineCached);
         continue;
@@ -2278,15 +2321,11 @@
   }
   function schedulePortraits() {
     if (!state.open || !ui.shadow || motionRuntime.active) return;
-    // Re-apply cached snapshots immediately after DOM replacement (including
-    // the featured contact, sidebar, message bubbles and profile panel).
-    // This is only 128px canvas copying; no BC character rendering involved.
-    for (const canvas of ui.shadow.querySelectorAll('.kc-bc-mugshot:not(.is-painted)')) {
-      const member=numeric(canvas.dataset.kcPortrait);
-      if (!member || hasActualLivePresence(member)) continue;
-      const cached=wceSnapshotRuntime.temporaryPortraits.get(member);
-      if (cached) clonePaintedPortrait(cached,canvas,member);
-    }
+    // Synchronous copy: prevents fallback-image flashing across panel redraws.
+    // Only remote portraits are stabilized; characters in the room remain live.
+    paintSteadyRemotePortraits(ui.shadow);
+    for (const member of steadyRemotePortraits.keys())
+      if (hasActualLivePresence(member)) steadyRemotePortraits.delete(member);
     if (portraitRuntime.queued) return;
     portraitRuntime.queued = true;
     // BC can finish drawing a character *after* the first render. tick() calls
@@ -2312,6 +2351,7 @@
       wceSavedSnapshot:{installed:wceIsInstalled(),database:'bce-past-profiles',
         dbLastCheck:wceSnapshotRuntime.dbLastCheck,
         cachedInSession:wceSnapshotRuntime.temporaryPortraits.has(member),
+        stableRemotePortrait:steadyRemotePortraits.has(member),
         cachedMembers:wceSnapshotRuntime.temporaryPortraits.size,
         currentlyLoading:wceSnapshotRuntime.pending.has(member),
         isInLiveRoom:hasActualLivePresence(member),
@@ -4697,6 +4737,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       </div>
       <button class="new-kitty" data-action="new">＋ Add a kitty by member #</button>
     </div>`;
+    paintSteadyRemotePortraits(ui.menu);
     restoreSideScroll('left');
     const newInboxFilters = ui.menu.querySelector('.kc-inbox-filters');
     if (newInboxFilters) newInboxFilters.scrollLeft = inboxFilterScroll;
@@ -5940,7 +5981,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function tick() {
     const id = me();
     if (!id) { if (!ui.host && document.body) buildUI(); return; }
-    if (state.myId !== id) { if (state.myId) saveNow(true); motionRuntime.active=0; wceSnapshotRuntime.temporaryPortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); ui.host = null; ui.shadow = null; state.open = false; } loadForAccount(id); }
+    if (state.myId !== id) { if (state.myId) saveNow(true); motionRuntime.active=0; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); ui.host = null; ui.shadow = null; state.open = false; } loadForAccount(id); }
     if (ui.host && (!ui.host.isConnected || !ui.panel || !ui.shadow || !ui.fab || !ui.body || !ui.fab.isConnected)) { motionRuntime.active=0; try { ui.host.remove(); } catch {} Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null}); }
     if (!ui.host) buildUI();
     // Recover from BC or another addon replacing part of the mounted UI.
@@ -5976,7 +6017,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     open: () => { safeTick(); toggle(true); }, close: () => toggle(false),
     select: id => { if (!me()) return false; const n = numeric(id); if (!n) return false; selectChat(n); toggle(true); return true; },
     setAssetBase: url => { if (!/^https:\/\/[^\s]+\/$/.test(url)) return false; state.settings.assetBase=url; saveSoon(); render(); return true; },
-    refreshMugshots: () => { if (!ui.shadow) return 0; wceSnapshotRuntime.temporaryPortraits.clear(); wceSnapshotRuntime.attempts.clear(); for (const c of ui.shadow.querySelectorAll('.kc-bc-mugshot')) {c.classList.remove('is-painted'); c.parentElement?.classList.remove('kc-has-mugshot');} schedulePortraits(); return ui.shadow.querySelectorAll('.kc-bc-mugshot').length; },
+    refreshMugshots: () => { if (!ui.shadow) return 0; steadyRemotePortraits.clear(); wceSnapshotRuntime.temporaryPortraits.clear(); wceSnapshotRuntime.attempts.clear(); for (const c of ui.shadow.querySelectorAll('.kc-bc-mugshot')) {c.classList.remove('is-painted'); c.parentElement?.classList.remove('kc-has-mugshot');} schedulePortraits(); return ui.shadow.querySelectorAll('.kc-bc-mugshot').length; },
     mugshotDiagnostics,
     mugshotReport: id => {
       const d=mugshotDiagnostics(id);
