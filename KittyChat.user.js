@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.8.17
+// @version      0.9.0
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.8.17';
+  const VERSION = '0.9.0';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -111,7 +111,8 @@
     pawHero: '', pawAbout: 'Professional cuddle thief ♡', pawLikes: '', pawDislikes: '', pawLookingFor: '',
     friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
-    shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'] };
+    shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
+    quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','kc-fav-dock','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
@@ -121,7 +122,7 @@
     roomError: '', roomLoading: false, roomSearched: false, roomCounts: {}, roomSearchWarnings: [], roomSearchTrigger: 'not-started', roomLastStarted: 0, roomLastFinished: 0, open: false, contactsMode: 'all',
     composerMode: 'beep', typingUntil: {}, lastTypingSent: 0, lastSave: null,
     hooks: [], mod: null, suppressOutgoing: false, recentFingerprints: new Map(),
-    started: false, nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0 };
+    started: false, scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0 };
   // Friend-status packets are private Kittychat control messages, not public
   // chat/beeps. Keep all delivery state in memory; only settings/received status
   // are saved with existing Kittychat account data.
@@ -654,7 +655,7 @@
     for (const old of entries.slice(MAX_CONVERSATIONS)) delete state.chats[old.id];
     for (const g of Object.values(state.groups)) g.messages = (g.messages || []).slice(-MAX_MESSAGES);
     for (const old of Object.values(state.groups).sort((a,b) => (b.updated||0) - (a.updated||0)).slice(MAX_GROUPS)) delete state.groups[old.id];
-    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince, sharedAlbums:state.sharedAlbums.slice(-30), invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
+    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince, sharedAlbums:state.sharedAlbums.slice(-30), invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
   }
   function loadForAccount(id) {
     if (state.myId === id) return;
@@ -662,8 +663,9 @@
     statusWire.dispatchTimer=null;statusWire.pending=[];statusWire.queued.clear();
     statusWire.requested.clear();statusWire.responded.clear();statusWire.bootAccount=0;
     state.myId = id;
-    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.sharedAlbums=[];state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
+    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.sharedAlbums=[];state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
     const loaded = safeRead(dataKey(), {});
+    state.scheduledMessages=(Array.isArray(loaded.scheduledMessages)?loaded.scheduledMessages:[]).slice(-100).map(x=>({id:trim(x.id,70),kind:x.kind==='group'?'group':'chat',to:x.kind==='group'?trim(x.to,80):numeric(x.to),text:trim(x.text,x.kind==='group'?MAX_GROUP_TEXT:2000),mode:x.mode==='whisper'?'whisper':'beep',due:Number(x.due),status:['pending','sent','missed','cancelled'].includes(x.status)?x.status:'cancelled',sentAt:Number(x.sentAt)||0})).filter(x=>x.id&&x.to&&x.text&&Number.isFinite(x.due));
     state.moments=(Array.isArray(loaded.moments)?loaded.moments:[]).slice(-MOMENT_LIMIT).map(m=>normalizeMoment(m)).filter(Boolean);
     state.circles=(Array.isArray(loaded.circles)?loaded.circles:[]).slice(0,30).map(c=>({id:trim(c.id,40),name:trim(c.name,45),members:[...new Set((Array.isArray(c.members)?c.members:[]).map(numeric).filter(Boolean))].slice(0,150),shareStatus:c.shareStatus!==false,shareProfile:c.shareProfile!==false,quiet:c.quiet===true})).filter(c=>/^circle_[\w-]{4,32}$/.test(c.id)&&c.name);
     state.catchUpSince=Number.isFinite(Number(loaded.catchUpSince))?Number(loaded.catchUpSince):Date.now();
@@ -714,6 +716,11 @@
     if (!Object.hasOwn(STATUS_MODES,state.settings.friendStatusMode)) state.settings.friendStatusMode='Available';
     state.settings.friendStatusText=trim(state.settings.friendStatusText || '',100);
     state.settings.shareFriendStatus=state.settings.shareFriendStatus!==false;
+    if(!validHour(state.settings.quietStart))state.settings.quietStart='22:00';
+    if(!validHour(state.settings.quietEnd))state.settings.quietEnd='08:00';
+    if(!['rounded','square','cloud'].includes(state.settings.bubbleShape))state.settings.bubbleShape='rounded';
+    state.settings.bubbleOpacity=Math.max(50,Math.min(100,Number(state.settings.bubbleOpacity)||95));
+    state.settings.sidebarOrder=[...new Set((Array.isArray(state.settings.sidebarOrder)?state.settings.sidebarOrder:PAW_SECTIONS).filter(s=>PAW_SECTIONS.includes(s)))];
     state.chats = loaded.chats && typeof loaded.chats === 'object' ? loaded.chats : {};
     state.selected = numeric(loaded.lastSelected) || 0;
     state.selectedGroup = typeof loaded.lastSelectedGroup === 'string' ? loaded.lastSelectedGroup : '';
@@ -732,7 +739,10 @@
       state.groups[gid] = { id:gid, creator, name:trim(raw.name,46)||'Kitty Den', members,
         accepted:[...new Set((Array.isArray(raw.accepted) ? raw.accepted : []).map(numeric).filter(n => members.includes(n)))],
         joined:!!raw.joined, draft:trim(raw.draft||'',MAX_GROUP_TEXT), unread:Math.min(999,Math.max(0,Number(raw.unread)||0)),
-        updated:Number(raw.updated)||Date.now(), moderators:(Array.isArray(raw.moderators)?raw.moderators:[]).map(numeric).filter(n=>members.includes(n) && n!==creator), receipts:raw.receipts && typeof raw.receipts==='object' ? Object.fromEntries(Object.entries(raw.receipts).slice(-90).map(([k,v])=>[trim(k,70),Array.isArray(v)?v.map(numeric).filter(n=>members.includes(n)):[]])) : {}, messages:(Array.isArray(raw.messages)?raw.messages:[]).slice(-MAX_MESSAGES)
+        updated:Number(raw.updated)||Date.now(), moderators:(Array.isArray(raw.moderators)?raw.moderators:[]).map(numeric).filter(n=>members.includes(n) && n!==creator),
+        roles:Object.fromEntries(Object.entries(raw.roles||{}).filter(([k,v])=>members.includes(numeric(k))&&PAW_ROLE_NAMES.includes(v)).slice(0,MAX_GROUP_MEMBERS)),
+        announcement:raw.announcement?{text:trim(raw.announcement.text,220),from:numeric(raw.announcement.from),at:Number(raw.announcement.at)||0}:null,
+        polls:(Array.isArray(raw.polls)?raw.polls:[]).slice(-25).map(normalizePawPoll).filter(Boolean), receipts:raw.receipts && typeof raw.receipts==='object' ? Object.fromEntries(Object.entries(raw.receipts).slice(-90).map(([k,v])=>[trim(k,70),Array.isArray(v)?v.map(numeric).filter(n=>members.includes(n)):[]])) : {}, messages:(Array.isArray(raw.messages)?raw.messages:[]).slice(-MAX_MESSAGES)
           .filter(m=>m && typeof m.text==='string' && members.includes(numeric(m.from)))
           .map(m=>({id:trim(m.id,70),text:trim(m.text,MAX_GROUP_TEXT),from:numeric(m.from),time:Number(m.time)||Date.now(),replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions)})) };
     }
@@ -789,7 +799,7 @@
     if (from!==me() && !myFriends().includes(member) && !chat.requestAccepted) chat.requestPending=true;
     if (from !== me() && !(state.open && state.tab === 'chats' && state.selected === member)) {
       chat.unread = Math.min(999, (chat.unread || 0) + 1);
-      if (state.settings.notifications && !chat.muted && !chat.requestPending && !(chat.snoozeUntil>Date.now())) {
+      if (state.settings.notifications && !inPawQuietHours() && !chat.muted && !chat.requestPending && !(chat.snoozeUntil>Date.now())) {
         if (state.settings.sounds) makeChime();
         notice(`🐾 New message from ${name(member)}`);
       }
@@ -862,14 +872,14 @@
     g.receipts ||= {}; if (from===me()) {g.receipts[mid]=[];const keys=Object.keys(g.receipts);if(keys.length>80)delete g.receipts[keys[0]];}
     if (!recovered && from!==me() && !(state.open && state.selectedGroup===g.id && state.tab==='chats')) {
       g.unread=Math.min(999,(g.unread||0)+1);
-      if (state.settings.notifications) notice(`🐾 New message in ${g.name}`);
+      if (state.settings.notifications && !inPawQuietHours()) notice(`🐾 New message in ${g.name}`);
     }
     saveSoon(); updateBadge();
     if (state.open) {renderSidebar(); if(state.selectedGroup===g.id) renderChat();}
   }
   function syncGroup(g) {
     if (g.creator !== me()) return;
-    const packet = {t:'sync',id:g.id,accepted:g.accepted,mods:g.moderators||[],name:g.name};
+    const packet = {t:'sync',id:g.id,accepted:g.accepted,mods:g.moderators||[],name:g.name,roles:g.roles||{},announcement:g.announcement||null};
     for (const member of g.accepted) if (member!==me()) sendGroupWire(member,packet,`🐾 Kittychat group update: ${g.name}`);
   }
   function receiveGroupBeep(data, from) {
@@ -898,6 +908,8 @@
       g.accepted=[...new Set(p.accepted.map(numeric).filter(n=>g.members.includes(n)))];
       g.moderators=Array.isArray(p.mods)?p.mods.map(numeric).filter(n=>g.members.includes(n)&&n!==g.creator):[];
       g.name=trim(p.name||g.name,46);
+      g.roles=Object.fromEntries(Object.entries(p.roles||{}).filter(([k,v])=>g.members.includes(numeric(k))&&PAW_ROLE_NAMES.includes(v)));
+      if(p.announcement&&typeof p.announcement==='object'&&Number(p.announcement.at)>Number(g.announcement?.at||0))g.announcement={text:trim(p.announcement.text,220),from:numeric(p.announcement.from),at:Number(p.announcement.at)};
       if (g.joined && !g.accepted.includes(me())) g.accepted.push(me());
       saveSoon();if(state.open)render();
     } else if (p.t==='msg' && g.joined && (g.accepted.includes(from)||from===g.creator)) {
@@ -907,6 +919,19 @@
       }
     } else if (p.t==='ack' && typeof p.mid==='string' && g.accepted.includes(from)) {
       if (g.messages.some(m=>m.id===p.mid && m.from===me())) {g.receipts ||= {};g.receipts[p.mid]=[...new Set([...(g.receipts[p.mid]||[]),from])];saveSoon();if(state.open&&state.selectedGroup===g.id){const receipt=ui.shadow?.querySelector(`[data-group-receipt="${CSS.escape(p.mid)}"]`);if(receipt)receipt.textContent=`· ✓ ${g.receipts[p.mid].length}/${Math.max(0,g.accepted.length-1)} acknowledged`;else renderGroupChat();}}
+    } else if(p.t==='announcement'&&g.joined&&(from===g.creator||g.moderators?.includes(from)||g.roles?.[from]==='Organizer')){
+      const a=p.announcement;
+      if(a&&typeof a==='object'&&numeric(a.from)===from&&Number.isSafeInteger(Number(a.at))&&Number(a.at)>Number(g.announcement?.at||0)){
+        g.announcement={text:trim(a.text,220),from,at:Number(a.at)};saveSoon();if(state.open&&state.selectedGroup===g.id)renderGroupChat();
+      }
+    } else if(p.t==='poll'&&g.joined&&g.accepted.includes(from)){
+      const poll=normalizePawPoll(p.poll);
+      if(poll&&poll.from===from&&!g.polls?.some(x=>x.id===poll.id)){
+        g.polls ||= [];g.polls.push(poll);g.polls=g.polls.slice(-25);saveSoon();if(state.open&&state.selectedGroup===g.id)renderGroupChat();
+      }
+    } else if(p.t==='pollvote'&&g.joined&&g.accepted.includes(from)){
+      const poll=g.polls?.find(x=>x.id===p.pollId),index=Number(p.index);
+      if(poll&&Number.isInteger(index)&&index>=0&&index<poll.options.length){poll.votes ||= {};poll.votes[from]=index;saveSoon();if(state.open&&state.selectedGroup===g.id)renderGroupChat();}
     } else if(p.t==='react' && typeof p.mid==='string' && typeof p.emoji==='string') {
       void applyReaction('group',g.id,p.mid,from,p.emoji,!!p.remove);
     } else if(p.t==='historyRequest' && g.joined && g.accepted.includes(from) && typeof p.after==='number') {
@@ -923,6 +948,13 @@
       g.accepted=g.accepted.filter(n=>n!==from);syncGroup(g);saveSoon();if(state.open)render();
     }
     return true;
+  }
+  function normalizePawPoll(x) {
+    if(!x||typeof x!=='object'||!/^poll_[\w-]{5,45}$/.test(trim(x.id,80))||!numeric(x.from))return null;
+    const options=(Array.isArray(x.options)?x.options:[]).slice(0,5).map(v=>trim(v,65)).filter(Boolean);
+    if(options.length<2||options.length>5||new Set(options).size!==options.length||!trim(x.question,130))return null;
+    const votes=Object.fromEntries(Object.entries(x.votes||{}).slice(0,10).filter(([id,n])=>numeric(id)&&Number.isInteger(Number(n))&&n>=0&&n<options.length).map(([k,v])=>[numeric(k),Number(v)]));
+    return {id:trim(x.id,80),from:numeric(x.from),question:trim(x.question,130),options,votes,at:Number(x.at)||Date.now()};
   }
   function createGroup(title, members) {
     title=trim(title,46);
@@ -3949,6 +3981,97 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   border-radius:15px!important;
 }
 
+
+/* v0.8.19 — Keep the decorative PawLounge lockup within the header instead
+   of letting its lower half obscure Now Purring or the first rail button.
+   Retain transparent artwork, unmodified sidebar/card scrolling, and all
+   collapse handles. A wider header is unnecessary: recover space by sizing
+   the logo proportionally and reserving only 24px more height. */
+#kc-panel .hero{
+  height:126px!important;min-height:126px!important;max-height:126px!important;
+}
+#kc-panel .brandlockup.paw-image-brandlockup{
+  left:-7px!important;top:-13px!important;
+  width:304px!important;height:139px!important;
+  overflow:visible!important;pointer-events:none!important;
+}
+#kc-panel .brand-after-lockup{
+  left:312px!important;top:88px!important;
+  max-width:calc(100% - 510px)!important;
+}
+@container kc-pawlounge-shell (max-width:1280px){
+  #kc-panel .hero{height:119px!important;min-height:119px!important;max-height:119px!important}
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-6px!important;top:-11px!important;width:282px!important;height:129px!important;
+  }
+  #kc-panel .brand-after-lockup{left:291px!important;top:84px!important;max-width:calc(100% - 450px)!important}
+}
+@container kc-pawlounge-shell (max-width:920px){
+  #kc-panel .hero{height:106px!important;min-height:106px!important;max-height:106px!important}
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-4px!important;top:-7px!important;width:240px!important;height:110px!important;
+  }
+  #kc-panel .brand-after-lockup{left:249px!important;top:76px!important;max-width:calc(100% - 365px)!important}
+}
+@container kc-pawlounge-shell (max-width:780px){
+  #kc-panel .hero{height:101px!important;min-height:101px!important;max-height:101px!important}
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-3px!important;top:-2px!important;width:220px!important;height:101px!important;
+  }
+  #kc-panel .brand-after-lockup{display:none!important}
+}
+@container kc-pawlounge-shell (max-width:480px){
+  #kc-panel .hero{height:85px!important;min-height:85px!important;max-height:85px!important}
+  #kc-panel .brandlockup.paw-image-brandlockup{
+    left:-3px!important;top:-1px!important;width:180px!important;height:83px!important;
+  }
+}
+/* Height-constrained popups remain usable and keep the short mode's condensed
+   sidebar, with the logo still fully clear of the first contacts and tabs. */
+#kc-panel.kc-short .hero{height:75px!important;min-height:75px!important;max-height:75px!important}
+#kc-panel.kc-short .brandlockup.paw-image-brandlockup{
+  left:-2px!important;top:-5px!important;width:170px!important;height:78px!important;
+}
+#kc-panel.kc-short .brand-after-lockup{display:none!important}
+/* v0.9.0 — PawLounge Social Studio */
+#kc-panel .kc-fav-dock{min-height:40px;border-radius:12px;padding:5px 8px;background:#3a2139a6;border:1px solid var(--border);overflow:hidden}
+#kc-panel .paw-small-label{font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.2px}
+#kc-panel .paw-fav-row{display:flex;gap:5px;overflow-x:auto;min-width:0;padding:2px 0}
+#kc-panel .paw-fav{display:flex;align-items:center;min-width:46px;max-width:80px;flex:0 0 auto;flex-direction:column;gap:1px;border:0;background:transparent;color:var(--ink);font-size:10px}
+#kc-panel .paw-fav .avatar{width:29px!important;height:29px!important;min-width:29px!important;min-height:29px!important}
+#kc-panel .paw-fav span{max-width:75px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#kc-panel .paw-draggable{cursor:grab!important;outline:1px dashed var(--accent);outline-offset:1px}
+#kc-panel .paw-schedule{margin:2px 10px;padding:6px 9px;background:#28182a99;border:1px solid var(--border);border-radius:11px;max-height:124px;overflow-y:auto;font-size:11px}
+#kc-panel .paw-schedule-head,.paw-schedule-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#kc-panel .paw-schedule button{font-size:10px;padding:3px 6px}
+#kc-panel .paw-schedule-row span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#kc-panel .paw-nickname{font-size:11px;padding:2px 5px;vertical-align:middle}
+#kc-panel .paw-cover{position:relative;overflow:hidden;border:2px solid #e991bd;border-radius:16px;background:linear-gradient(135deg,var(--paw-cover),#22142c);min-height:120px;margin:8px 0;display:flex;align-items:end;justify-content:center;box-shadow:0 4px 14px #0004}
+#kc-panel .paw-cover img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.65}
+#kc-panel .paw-cover-label{position:relative;z-index:1;text-shadow:0 1px 7px #000;padding:16px;font-size:22px;color:white;text-align:center;font-weight:900}
+#kc-panel .paw-cover-polaroid{border:9px solid #fff1f6;border-bottom-width:22px;border-radius:4px}
+#kc-panel .paw-cover-floral{border:4px double #f8a8d1;border-radius:30px}
+#kc-panel .paw-album-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+#kc-panel .paw-page-layout-list{display:flex;flex-direction:column}
+#kc-panel .paw-page-layout-polaroid{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+#kc-panel .paw-page{min-width:0;background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:9px}
+#kc-panel .paw-page-layout-polaroid .paw-page{border:8px solid #fff2f7;border-bottom-width:16px;color:#2c1530;border-radius:3px}
+#kc-panel .paw-page img{display:block;max-width:100%;max-height:240px;object-fit:contain}
+#kc-panel .paw-memory-actions{display:flex;flex-wrap:wrap;gap:3px}
+#kc-panel .paw-memory-actions button{padding:3px 6px;font-size:11px}
+#kc-panel .paw-memory-comment{border-top:1px solid var(--border);font-size:11px;padding:4px 2px;word-break:break-word}
+#kc-panel .paw-den-extras{display:flex;flex-direction:column;gap:8px}
+#kc-panel .paw-poll{border:1px solid var(--border);border-radius:9px;padding:7px;display:flex;flex-direction:column;gap:4px}
+#kc-panel .paw-poll-choice{border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--ink);text-align:left;padding:5px}
+#kc-panel .paw-poll-choice.selected{background:var(--accent);color:var(--bg)}
+#kc-panel .paw-privacy{border:1px solid var(--border);border-radius:10px;padding:12px;margin:12px 0;display:flex;flex-direction:column;gap:5px;font-size:12px}
+#kc-panel .paw-privacy h3{margin:0 0 3px}
+#kc-panel[data-paw-bubble-shape="square"] .msgbubble{border-radius:5px!important}
+#kc-panel[data-paw-bubble-shape="cloud"] .msgbubble{border-radius:28px 28px 24px 8px!important}
+#kc-panel .msgrow.mine .msgbubble{background:color-mix(in srgb,var(--bubble) var(--paw-bubble-opacity,95%),transparent)!important}
+#kc-panel .msgrow.other .msgbubble{background:color-mix(in srgb,var(--bubble2) var(--paw-bubble-opacity,95%),transparent)!important}
+#kc-panel.paw-minimalist .kc-deco,#kc-panel.paw-minimalist .kc-deco-left-bottom,#kc-panel.paw-minimalist .kc-deco-right-top,#kc-panel.paw-minimalist .brandlockup,#kc-panel.paw-minimalist .brand-after-lockup,#kc-panel.paw-minimalist .chat-float-kitten{display:none!important}
+#kc-panel.paw-minimalist .hero{background:var(--bg)!important}
 `; }
 
   function setTheme() {
@@ -3964,6 +4087,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       ui.panel.classList.add(sizeClass);
     }
     ui.panel.classList.toggle('panel-scrollbars-visible', state.settings.panelScrollbars !== false);
+    ui.panel.classList.toggle('paw-minimalist',!!state.settings.minimalist);
+    ui.panel.dataset.pawBubbleShape=state.settings.bubbleShape;
+    ui.panel.style.setProperty('--paw-bubble-opacity',`${state.settings.bubbleOpacity}%`);
     ui.panel.classList.toggle('left-collapsed', !!state.leftCollapsed);
     ui.panel.classList.toggle('right-collapsed', !!state.rightCollapsed);
     ui.panel.classList.toggle('open', state.open);
@@ -4023,6 +4149,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     shadow.addEventListener('input', inputUI);
     shadow.addEventListener('change', changeUI);
     shadow.addEventListener('keydown', keyUI);
+    shadow.addEventListener('dragstart', pawDragStart);
+    shadow.addEventListener('dragover', pawDragOver);
+    shadow.addEventListener('drop', pawDrop);
+    shadow.addEventListener('dragend',()=>{pawDragSection='';});
     shadow.addEventListener('scroll', captureSideScroll, true);
     shadow.addEventListener('scroll', onInboxFilterScroll, true);
     shadow.addEventListener('pointerdown', dragInboxFilterBar);
@@ -4556,7 +4686,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.menu.innerHTML = `<div class="side-shell">
       <div class="side-card"><div class="side-card-title">Now Purring ♡</div>
         ${heroId ? `<div class="side-mainline">${avatar(heroId)}<div style="min-width:0;flex:1"><div style="font-size:15px;font-weight:900">${escapeText(name(heroId))}</div><div class="muted">${escapeText(heroLast?.text || (onlineMembers.has(heroId) ? 'Together in the same room ♡' : 'A cozy connection'))}</div>${statusMarkup(heroId)}</div><span class="hero-heart">♡</span></div>` : '<div class="muted">Pick a kitty to start purring ♡</div>'}</div>
-      <div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
+      ${pawFavoriteDock()}<div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
       <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option><option value="__paw_bc_friends__" ${state.circleFilter==='__paw_bc_friends__'?'selected':''}>🐈 BC Friends only</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
       <div class="kc-inbox-filter-wrap kc-single-inbox-filter">
         <div class="side-filters kc-inbox-filters" aria-label="Inbox filter"><button type="button" class="filterbtn active" data-filter="all" aria-pressed="true">All</button></div>
@@ -4570,7 +4700,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     restoreSideScroll('left');
     const newInboxFilters = ui.menu.querySelector('.kc-inbox-filters');
     if (newInboxFilters) newInboxFilters.scrollLeft = inboxFilterScroll;
-    syncInboxFilterBar();
+    syncInboxFilterBar();pawSidebarSort();
   }
   function renderChat() {
     const oldComposer = ui.shadow?.getElementById('kc-compose');
@@ -4585,13 +4715,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const lastSticker = (c.messages || []).slice().reverse().find(m => sticker(m.text));
     const lastStickerInfo = lastSticker ? sticker(lastSticker.text) : null;
     ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button><div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
-      <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
+      ${scheduleMarkup('chat',id)}<div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(s => `<button class="stickerbtn" data-sticker="${s.id}" title="Send ${s.name}">${asset(`sticker-${s.id}.png`,'',s.emoji)}<small>${s.name}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option></select>
       <textarea class="field" id="kc-compose" maxlength="2000" rows="1" placeholder="Write a little meow...">${escapeText(c.draft || '')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div></section>
       <aside class="companion" tabindex="0" aria-label="Scrollable profile, stickers, room and actions">
         <section class="compcard profilehero"><button class="kitty-profile-avatar facepop-btn" type="button" data-facepop="profile-face" title="Pat the kitty face">${avatar(id)}<span class="kitty-heartbadge">${c.favorite ? '♥' : '♡'}</span></button>
-          <div class="profilename">${escapeText(name(id))} ♡</div>
+          <div class="profilename">${escapeText(name(id))} ♡ <button class="secondary paw-nickname" data-action="nickname" title="Private nickname">✎</button></div>
           <div class="profile-number">#${id}${inRoom(id) ? ' · <span class="kconline">● Together in BC</span>' : ''}</div>
           <div class="statusline">${p.signature ? escapeText(p.signature) : 'A cozy connection ♡'}</div><div class="kc-side-status">${statusMarkup(id)}</div>
           <div class="profilebuttons"><button class="secondary profile-action" data-action="profile" title="Share your Paw Profile">🐾 Share Profile</button><button class="secondary profile-action" data-action="viewpawprofile" title="View saved Paw Profile">♡ Paw Profile</button><button class="iconbutton" data-action="favorite" title="Favourite">${c.favorite ? '💗':'♡'}</button><button class="iconbutton" data-action="pin" title="Pin">${c.pinned ? '📌' : asset('ui-pin.svg','','📌')}</button><button class="iconbutton" data-action="menu" title="More actions">···</button></div>
@@ -4638,12 +4768,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const groupMessages=historyDisplayMessages('group',g.id,g.messages);
     ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button><button class="collapse-handle right" data-action="togglerightpanel" title="${state.rightCollapsed ? 'Expand right panel' : 'Collapse right panel'}"><span class="arr">${state.rightCollapsed ? '‹' : '›'}</span></button>
       <div class="chathead"><div style="font-size:36px">🏡</div><div class="headblock"><div class="headtitle">${escapeText(g.name)}</div><div class="headsubtitle">PawLounge Group Den · ${g.accepted.length}/${g.members.length} members joined</div></div><button class="secondary" data-action="leavegroup">Leave group</button></div>
-      <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':bcName(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} acknowledged</span>` : ''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
+      <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':name(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} acknowledged</span>` : ''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
       <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(st=>`<button class="stickerbtn" data-sticker="${st.id}">${asset(`sticker-${st.id}.png`,'',st.emoji)}<small>${escapeText(st.name)}</small></button>`).join('')}</div>
-      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>
-      </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members"><div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(bcName(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button>` : ''}</small></div></div></div>`).join('')}</div>
-      <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask members for up to eight of their recent sent messages">↻ Recover recent messages</button><p class="muted">Acknowledged counts require recipients using this version of Kittychat. Recovery is best-effort and limited to recent messages.</p></div></aside></div>`;
+      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}
+      </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members"><div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div></div>`).join('')}</div>
+      <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask members for up to eight of their recent sent messages">↻ Recover recent messages</button><p class="muted">Acknowledged counts require recipients using this version of Kittychat. Recovery is best-effort and limited to recent messages.</p></div>${pawGroupExtras(g)}</aside></div>`;
     ui.input=ui.shadow.getElementById('kc-compose');renderReplyBar();
     const logEl=ui.shadow.getElementById('kc-log'); if(logEl)logEl.scrollTop=preserveTop ? previousTop+(logEl.scrollHeight-previousHeight) : logEl.scrollHeight;
     restoreSideScroll('right');
@@ -4745,8 +4875,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const id=trim(raw?.id,80),owner=numeric(raw?.owner);
     if(!/^album_[\w-]{5,45}$/.test(id)||!owner)return null;
     const members=[...new Set([owner,...(Array.isArray(raw?.members)?raw.members:[]).map(numeric)].filter(Boolean))].slice(0,8);
-    const cards=(Array.isArray(raw.cards)?raw.cards:[]).slice(-60).map(c=>normalizeMoment(c)).filter(Boolean);
-    return {id,owner,name:trim(raw.name,70)||'Paw Scrapbook',members,joined:!!raw.joined,cards,updated:Number(raw.updated)||Date.now()};
+    const cards=(Array.isArray(raw.cards)?raw.cards:[]).slice(-60).map(normalizePawCard).filter(Boolean);
+    const nameUpdated=Number(raw.nameUpdated);
+    return {id,owner,name:trim(raw.name,70)||'Paw Scrapbook',nameUpdated:Number.isSafeInteger(nameUpdated)&&nameUpdated>0?nameUpdated:0,members,joined:!!raw.joined,cards,coverColor:Object.hasOwn(PAW_COVER_COLORS,raw.coverColor)?raw.coverColor:'rose',coverImage:safeImg(raw.coverImage),coverFrame:['classic','polaroid','floral'].includes(raw.coverFrame)?raw.coverFrame:'classic',coverAt:Number(raw.coverAt)||0,pageLayout:PAW_PAGE_LAYOUTS.includes(raw.pageLayout)?raw.pageLayout:'grid',pageAt:Number(raw.pageAt)||0,updated:Number(raw.updated)||Date.now()};
   }
   function pawSend(member,type,body){
     member=numeric(member);
@@ -4853,16 +4984,287 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const e=normalizeGuestEntry({...o.entry,from});if(!e||state.pawGuestbook.some(x=>x.id===e.id))return;
     state.pawGuestbook.push(e);state.pawGuestbook=state.pawGuestbook.slice(-50);saveSoon();notice(`🐾 ${bcName(from)} left a guestbook pawprint.`);
   }
+  // Only the owner sets the shared album title. An independent name timestamp
+  // prevents older rename packets from reverting newer titles; saved card
+  // timestamps must not interfere with renames.
+  function acceptAlbumName(album,packet){
+    const title=trim(packet?.name,70);
+    const changedAt=Number(packet?.nameUpdated);
+    if(!title||!Number.isSafeInteger(changedAt)||changedAt<=0||
+       changedAt<=Number(album.nameUpdated||0))return false;
+    album.name=title;
+    album.nameUpdated=changedAt;
+    return true;
+  }
+  function renameSharedAlbum(albumId){
+    const album=state.sharedAlbums.find(a=>a.id===albumId&&a.joined&&a.owner===me());
+    if(!album)return notice('Only the scrapbook owner can rename it.');
+    const answer=window.prompt('Rename shared scrapbook (1–70 characters):',album.name);
+    if(answer===null)return;
+    const newName=trim(answer,70);
+    if(!newName)return notice('Please enter a scrapbook name.');
+    if(newName===album.name)return;
+    album.name=newName;
+    album.nameUpdated=Math.max(Date.now(),Number(album.nameUpdated||0)+1);
+    album.updated=Date.now();
+    saveNow(true);
+    renderMoments();
+    let failed=0;
+    for(const member of album.members){
+      if(member===me())continue;
+      if(!pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'rename',id:album.id,
+           name:album.name,nameUpdated:album.nameUpdated}))failed++;
+    }
+    notice(`📒 Scrapbook renamed to “${album.name}”.${failed?' Some collaborators could not be sent the new name.':''}`);
+  }
+  // v0.9.0 social workspace additions. BC friends/beeps remain the transport;
+  // all new cross-client packets are bounded, opt-in and authenticated by sender.
+  const PAW_COVER_COLORS = Object.freeze({rose:'#663451',plum:'#342342',midnight:'#202038',lavender:'#584b79',forest:'#29493e',gold:'#67513a'});
+  const PAW_PAGE_LAYOUTS = Object.freeze(['grid','list','polaroid']);
+  const PAW_ROLE_NAMES = Object.freeze(['Member','Organizer','Keeper']);
+  const PAW_SECTIONS = ['side-card','kc-fav-dock','side-search','paw-circle-row','kc-inbox-filter-wrap'];
+  let pawDragSection = '';
+  const validHour = v => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+  function inPawQuietHours(date=new Date()) {
+    const a=state.settings.quietStart, b=state.settings.quietEnd;
+    if (!state.settings.quietHours || !validHour(a) || !validHour(b) || a===b) return false;
+    const now=date.getHours()*60+date.getMinutes();
+    const x=Number(a.slice(0,2))*60+Number(a.slice(3));
+    const y=Number(b.slice(0,2))*60+Number(b.slice(3));
+    return x<y ? now>=x&&now<y : now>=x||now<y;
+  }
+  function pawNickname() {
+    if(!state.selected || currentGroup())return;
+    const c=ensure(state.selected);if(!c)return;
+    const value=window.prompt('Private nickname for this kitty (leave blank to use BC name):',c.nickname||'');
+    if(value===null)return;
+    c.nickname=trim(value,70);saveSoon();render();
+  }
+  function schedulePawMessage() {
+    const g=currentGroup(),recipient=g?g.id:state.selected;
+    if(!recipient)return notice('Choose a conversation first.');
+    const text=window.prompt('Message to send later (only while logged in and connected):',ui.input?.value||'');
+    if(text===null)return;
+    const content=trim(text,g?MAX_GROUP_TEXT:2000);
+    if(!content)return notice('Message cannot be empty.');
+    const candidate=new Date(Date.now()+10*60000);
+    const suggestion=new Date(candidate.getTime()-candidate.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    const when=window.prompt('Local delivery time YYYY-MM-DD HH:MM (up to 30 days ahead). Missed messages expire after 10 minutes:',suggestion.replace('T',' '));
+    if(when===null)return;
+    if(!/^\d{4}-\d\d-\d\d[ T]\d\d:\d\d$/.test(when))return notice('Enter a date like 2026-11-03 19:30.');
+    const due=new Date(when.replace(' ','T')).getTime();
+    if(!Number.isFinite(due)||due<Date.now()+10000||due>Date.now()+30*86400000)return notice('Choose a time from 10 seconds to 30 days in the future.');
+    if(state.scheduledMessages.length>=80)return notice('Maximum 80 scheduled messages.');
+    state.scheduledMessages.push({id:uniquePawId('scheduled'),kind:g?'group':'chat',to:recipient,text:content,mode:state.composerMode==='whisper'?'whisper':'beep',due,status:'pending'});
+    saveNow(true); renderChat();notice(`📅 Message scheduled for ${new Date(due).toLocaleString()}. Keep BC connected.`);
+  }
+  function cancelPawSchedule(id) {
+    const entry=state.scheduledMessages.find(m=>m.id===id&&m.status==='pending');
+    if(!entry)return;
+    entry.status='cancelled';saveNow(true);renderChat();
+  }
+  function deliverScheduledMessages() {
+    if(!state.myId || me()!==state.myId || typeof window.ServerSend!=='function')return;
+    const now=Date.now();
+    for(const entry of state.scheduledMessages) {
+      if(entry.status!=='pending'||entry.due>now)continue;
+      if(now-entry.due>10*60000){entry.status='missed';saveNow(true);continue;}
+      let success=false;
+      if(entry.kind==='chat') {
+        const member=numeric(entry.to);
+        if(entry.mode==='whisper') {
+          if(inRoom(member)&&typeof window.ChatRoomSendWhisper==='function') {
+            try{window.ChatRoomSendWhisper(member,entry.text);appendMessage(member,entry.text,me(),'whisper','local');success=true;}catch(err){console.warn('[PawLounge] Scheduled whisper failed',err);}
+          }
+        }else if(myFriends().includes(member)) {
+          try{if(typeof window.ServerSendBeepMessage==='function')window.ServerSendBeepMessage(member,entry.text,{});
+            else window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:'',IsSecret:true,Message:entry.text});
+            appendMessage(member,entry.text,me(),'beep','local');success=true;
+          }catch(err){console.warn('[PawLounge] Scheduled beep failed',err);}
+        }
+      } else {
+        const g=state.groups[entry.to];
+        if(g?.joined&&g.accepted.includes(me())) {
+          const mid=groupId(); let sent=0;
+          for(const id of g.accepted)if(id!==me()&&sendGroupWire(id,{t:'msg',id:g.id,mid,text:entry.text},`🐾 [${g.name}] ${bcName(me())}: ${entry.text}`))sent++;
+          if(sent){addGroupMessage(g,me(),entry.text,mid);success=true;}
+        }
+      }
+      if(success){entry.status='sent';entry.sentAt=now;saveNow(true);if(state.open){renderSidebar();if(state.tab==='chats')renderChat();}notice('📅 Scheduled PawLounge message sent.');}
+    }
+    if(state.scheduledMessages.length>100){state.scheduledMessages=state.scheduledMessages.filter(x=>x.status==='pending').concat(state.scheduledMessages.filter(x=>x.status!=='pending').slice(-30));saveSoon();}
+  }
+  function scheduleMarkup(kind,id) {
+    const list=state.scheduledMessages.filter(s=>s.kind===kind&&String(s.to)===String(id)&&s.status==='pending').sort((a,b)=>a.due-b.due);
+    return `<section class="paw-schedule"><div class="paw-schedule-head"><span>📅 Scheduled Messages${list.length?` (${list.length})`:''}</span><button class="secondary" data-action="schedulepaw">＋ Schedule</button></div>${list.slice(0,8).map(s=>`<div class="paw-schedule-row"><span>${escapeText(new Date(s.due).toLocaleString())} · ${escapeText(s.text.slice(0,55))}</span><button class="secondary" data-paw-cancel-schedule="${escapeText(s.id)}">Cancel</button></div>`).join('')}</section>`;
+  }
+  function pawPrivacyMarkup() {
+    const p=state.settings;
+    const active=state.circles.filter(c=>c.shareProfile!==false).length;
+    return `<section class="paw-privacy"><h3>🔒 Privacy Dashboard</h3>
+    <div>Profile: <b>Shared manually only</b> · Guestbook: <b>${p.pawGuestbookOpen?'Open to friends':'Closed'}</b></div>
+    <div>Friend status: <b>${p.shareFriendStatus?'Shared to compatible BC friends':'Hidden from friends'}</b></div>
+    <div>Typing indicators: <b>${p.typing?'On':'Off'}</b> · Message notifications: <b>${p.notifications?'On':'Off'}</b></div>
+    <div>Quiet hours: <b>${p.quietHours?`${escapeText(p.quietStart)}–${escapeText(p.quietEnd)}`:'Off'}</b></div>
+    <div>Saved locally: <b>${Object.keys(state.chats).length} chats, ${state.moments.length} moments, ${state.sharedAlbums.length} scrapbooks, ${active} profile-enabled circles</b></div>
+    <p class="muted">BC servers deliver beeps/whispers. PawLounge stores cached messages and backups locally; invited collaborators hold their own copies. Hiding this window never changes native BC online status.</p></section>`;
+  }
+  function pawFavoriteDock() {
+    const list=Object.values(state.chats).filter(c=>c.favorite).slice(0,8);
+    if(!list.length&&!state.settings.layoutEdit)return '';
+    return `<div class="kc-fav-dock"><div class="paw-small-label">💗 Favorite Kitties</div><div class="paw-fav-row">${list.map(c=>`<button class="paw-fav" data-contact="${c.id}" title="${escapeText(name(c.id))}">${avatar(c.id)}<span>${escapeText(name(c.id))}</span></button>`).join('')||'<span class="muted">♡ Favorite a kitty to pin them here</span>'}</div></div>`;
+  }
+  function pawSidebarSort() {
+    const shell=ui.menu?.querySelector('.side-shell');if(!shell)return;
+    const order=(Array.isArray(state.settings.sidebarOrder)?state.settings.sidebarOrder:PAW_SECTIONS).filter(s=>PAW_SECTIONS.includes(s));
+    const anchor=shell.querySelector('.contacts-scroll');
+    if(!anchor)return;
+    for(const cls of [...new Set([...order,...PAW_SECTIONS])]){
+      const el=shell.querySelector('.'+cls);if(!el)continue;
+      el.dataset.pawSection=cls;
+      el.draggable=!!state.settings.layoutEdit;
+      el.classList.toggle('paw-draggable',!!state.settings.layoutEdit);
+      shell.insertBefore(el,anchor);
+    }
+  }
+  function pawDragStart(e) {
+    if(!state.settings.layoutEdit)return;
+    const section=e.target?.closest?.('[data-paw-section]');if(!section)return;
+    pawDragSection=section.dataset.pawSection;
+    try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',pawDragSection);}catch{}
+  }
+  function pawDragOver(e) {if(state.settings.layoutEdit&&pawDragSection&&e.target?.closest?.('[data-paw-section]'))e.preventDefault();}
+  function pawDrop(e) {
+    if(!state.settings.layoutEdit||!pawDragSection)return;
+    const dest=e.target?.closest?.('[data-paw-section]');
+    if(!dest||dest.dataset.pawSection===pawDragSection)return;
+    e.preventDefault();
+    const order=PAW_SECTIONS.filter(s=>ui.menu.querySelector(`[data-paw-section="${s}"]`));
+    order.sort((a,b)=>{const els=[...ui.menu.querySelectorAll('[data-paw-section]')];return els.findIndex(el=>el.dataset.pawSection===a)-els.findIndex(el=>el.dataset.pawSection===b);});
+    const from=order.indexOf(pawDragSection),to=order.indexOf(dest.dataset.pawSection);
+    if(from<0||to<0)return;
+    order.splice(from,1);order.splice(to,0,pawDragSection);
+    state.settings.sidebarOrder=order;saveSoon();pawSidebarSort();
+  }
+  function normalizePawCard(c) {
+    const base=normalizeMoment(c);if(!base)return null;
+    const reactions=c?.reactions&&typeof c.reactions==='object'&&!Array.isArray(c.reactions)?c.reactions:{};
+    base.reactions=Object.fromEntries(Object.entries(reactions).filter(([e,v])=>['💗','⭐','🐾'].includes(e)&&Array.isArray(v)).map(([e,v])=>[e,[...new Set(v.map(numeric).filter(Boolean))].slice(0,8)]));
+    base.comments=(Array.isArray(c?.comments)?c.comments:[]).slice(-24).map(x=>({id:trim(x.id,65),from:numeric(x.from),text:trim(x.text,180),at:Number(x.at)||Date.now()})).filter(x=>x.id&&x.from&&x.text);
+    return base;
+  }
+  function pawAlbumBroadcast(a,action,body) {
+    for(const member of a.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action,id:a.id,...body});
+  }
+  function customizePawCover(albumId) {
+    const a=state.sharedAlbums.find(x=>x.id===albumId&&x.owner===me()&&x.joined);if(!a)return;
+    const tone=window.prompt('Cover color: rose / plum / midnight / lavender / forest / gold',a.coverColor||'rose');
+    if(tone===null)return;
+    if(!Object.hasOwn(PAW_COVER_COLORS,tone))return notice('Choose one of the listed cover colors.');
+    const image=window.prompt('Optional cover image HTTPS URL (leave blank for color only):',a.coverImage||'');
+    if(image===null)return;
+    if(trim(image,500)&&!/^https:\/\/[^\s]+$/i.test(trim(image,500)))return notice('Cover picture must be an HTTPS URL.');
+    const frame=window.prompt('Cover frame: classic / polaroid / floral',a.coverFrame||'classic');
+    if(frame===null)return;
+    if(!['classic','polaroid','floral'].includes(frame))return notice('Choose classic, polaroid or floral.');
+    Object.assign(a,{coverColor:tone,coverImage:trim(image,500),coverFrame:frame,coverAt:Date.now(),updated:Date.now()});
+    pawAlbumBroadcast(a,'cover',{owner:a.owner,coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt});
+    saveSoon();renderMoments();
+  }
+  function changePawPageLayout(albumId) {
+    const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.owner===me());if(!a)return;
+    const style=window.prompt('Memory page layout: grid / list / polaroid',a.pageLayout||'grid');
+    if(style===null)return;
+    if(!PAW_PAGE_LAYOUTS.includes(style))return notice('Choose grid, list or polaroid.');
+    a.pageLayout=style;a.updated=Date.now();a.pageAt=Date.now();
+    pawAlbumBroadcast(a,'layout',{owner:a.owner,layout:style,pageAt:a.pageAt,cardIds:a.cards.map(c=>c.id)});
+    saveSoon();renderMoments();
+  }
+  function movePawCard(albumId,cardId,delta) {
+    const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.owner===me());if(!a)return;
+    const index=a.cards.findIndex(c=>c.id===cardId),next=index+delta;
+    if(index<0||next<0||next>=a.cards.length)return;
+    [a.cards[index],a.cards[next]]=[a.cards[next],a.cards[index]];
+    a.updated=Date.now();a.pageAt=Math.max(Date.now(),(a.pageAt||0)+1);
+    pawAlbumBroadcast(a,'layout',{owner:a.owner,layout:a.pageLayout||'grid',pageAt:a.pageAt,cardIds:a.cards.map(c=>c.id)});
+    saveSoon();renderMoments();
+  }
+  function reactPawCard(albumId,cardId,emoji) {
+    const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.members.includes(me()));
+    const c=a?.cards.find(x=>x.id===cardId);if(!c||!['💗','⭐','🐾'].includes(emoji))return;
+    c.reactions ||= {};const list=c.reactions[emoji] ||= [];
+    const remove=list.includes(me());c.reactions[emoji]=remove?list.filter(x=>x!==me()):[...new Set([...list,me()])];
+    pawAlbumBroadcast(a,'react',{cardId,emoji,remove});saveSoon();renderMoments();
+  }
+  function commentPawCard(albumId,cardId) {
+    const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.members.includes(me()));
+    const c=a?.cards.find(x=>x.id===cardId);if(!c)return;
+    const text=window.prompt('Comment on this memory (max 180 characters):','');
+    if(text===null||!trim(text,180))return;
+    const comment={id:uniquePawId('reply'),from:me(),text:trim(text,180),at:Date.now()};
+    c.comments ||= [];c.comments.push(comment);c.comments=c.comments.slice(-24);
+    pawAlbumBroadcast(a,'comment',{cardId,comment});saveSoon();renderMoments();
+  }
+  function pawCoverMarkup(a) {
+    const color=PAW_COVER_COLORS[a.coverColor]||PAW_COVER_COLORS.rose;
+    const img=a.coverImage&&/^https:\/\/[^\s]+$/i.test(a.coverImage)?`<img src="${escapeText(a.coverImage)}" loading="lazy" alt="Scrapbook cover"/>`:'';
+    return `<div class="paw-cover paw-cover-${escapeText(a.coverFrame||'classic')}" style="--paw-cover:${color}">${img}<div class="paw-cover-label">📒 ${escapeText(a.name)}</div></div>`;
+  }
+  function pawCardMarkup(a,c) {
+    const reactions=['💗','⭐','🐾'].map(e=>`<button class="secondary" data-paw-card-react="${escapeText(a.id)}|${escapeText(c.id)}|${e}" title="React">${e} ${c.reactions?.[e]?.length||0}</button>`).join('');
+    return `<article class="paw-page"><b>${escapeText(c.title)}</b><p>${escapeText(c.text)}</p>${c.image?`<img src="${escapeText(c.image)}" loading="lazy" alt="Scrapbook picture"/>`:''}<div class="paw-memory-actions">${reactions}<button class="secondary" data-paw-card-comment="${escapeText(a.id)}|${escapeText(c.id)}">💬 Comment</button>${a.owner===me()?`<button class="secondary" data-paw-card-move="${escapeText(a.id)}|${escapeText(c.id)}|-1" title="Previous page">←</button><button class="secondary" data-paw-card-move="${escapeText(a.id)}|${escapeText(c.id)}|1" title="Next page">→</button>`:''}</div>
+    ${(c.comments||[]).slice(-8).map(m=>`<div class="paw-memory-comment"><b>${escapeText(name(m.from))}:</b> ${escapeText(m.text)}</div>`).join('')}</article>`;
+  }
+  function pawGroupBroadcast(g,p,summary='PawLounge group update') {
+    for(const member of g.accepted)if(member!==me())sendGroupWire(member,{id:g.id,...p},summary,true);
+  }
+  function pawGroupAnnouncement() {
+    const g=currentGroup();if(!g||!g.joined||!(g.creator===me()||g.moderators?.includes(me())||g.roles?.[me()]==='Organizer'))return;
+    const text=window.prompt('Pin a group announcement (blank removes it):',g.announcement?.text||'');if(text===null)return;
+    const a={text:trim(text,220),from:me(),at:Math.max(Date.now(),Number(g.announcement?.at||0)+1)};
+    g.announcement=a;pawGroupBroadcast(g,{t:'announcement',announcement:a},`📌 ${g.name}: ${a.text||'Announcement cleared'}`);saveSoon();renderGroupChat();
+  }
+  function pawGroupRole(member) {
+    const g=currentGroup();if(!g||g.creator!==me()||!g.members.includes(member)||member===me())return;
+    const value=window.prompt('Role: Member / Organizer / Keeper (decorative; Moderator remains separate):',g.roles?.[member]||'Member');
+    if(value===null)return;
+    if(!PAW_ROLE_NAMES.includes(value))return notice('Choose Member, Organizer or Keeper.');
+    g.roles ||= {};g.roles[member]=value;syncGroup(g);saveSoon();renderGroupChat();
+  }
+  function makePawPoll() {
+    const g=currentGroup();if(!g?.joined||!g.accepted.includes(me()))return;
+    if((g.polls||[]).length>=25)return notice('This group has reached its poll limit.');
+    const question=window.prompt('Group poll question (max 130 characters):','');if(question===null||!trim(question,130))return;
+    const choices=window.prompt('Poll choices separated by | (2–5 options, max 65 characters each):','Yes | No | Maybe');if(choices===null)return;
+    const options=choices.split('|').map(s=>trim(s,65)).filter(Boolean);
+    if(options.length<2||options.length>5||new Set(options).size!==options.length)return notice('Enter 2 to 5 unique poll choices.');
+    const poll={id:uniquePawId('poll'),from:me(),question:trim(question,130),options,votes:{},at:Date.now()};
+    g.polls ||= [];g.polls.push(poll);pawGroupBroadcast(g,{t:'poll',poll},`📊 New poll: ${poll.question}`);saveSoon();renderGroupChat();
+  }
+  function votePawPoll(pollId,index) {
+    const g=currentGroup(),p=g?.polls?.find(x=>x.id===pollId);
+    if(!p||!g.joined||!g.accepted.includes(me())||!Number.isInteger(index)||index<0||index>=p.options.length)return;
+    p.votes ||= {};p.votes[me()]=index;
+    pawGroupBroadcast(g,{t:'pollvote',pollId,index},`📊 ${bcName(me())} voted in ${g.name}`);
+    saveSoon();renderGroupChat();
+  }
+  function pawGroupExtras(g) {
+    const admin=g.creator===me()||g.moderators?.includes(me())||g.roles?.[me()]==='Organizer';
+    return `<section class="compcard paw-den-extras"><h3>📌 Group Announcement</h3><p>${escapeText(g.announcement?.text||'Nothing pinned yet.')}</p>${g.announcement?.text?`<small>By ${escapeText(name(g.announcement.from))}</small>`:''}${admin?'<button class="secondary" data-action="groupannouncement">✎ Edit announcement</button>':''}</section>
+    <section class="compcard paw-den-extras"><h3>📊 Group Polls</h3><button class="secondary" data-action="grouppoll">＋ Create poll</button>${(g.polls||[]).slice(-10).reverse().map(p=>`<div class="paw-poll"><b>${escapeText(p.question)}</b>${p.options.map((opt,i)=>`<button class="paw-poll-choice ${p.votes?.[me()]===i?'selected':''}" data-paw-vote="${escapeText(p.id)}|${i}">${escapeText(opt)} · ${Object.values(p.votes||{}).filter(v=>v===i).length}</button>`).join('')}</div>`).join('')||'<div class="muted">No polls yet.</div>'}</section>`;
+  }
+  function pawPrivacySettingsMarkup() {return pawPrivacyMarkup();}
+
   function createSharedAlbum(){
     if(state.sharedAlbums.length>=30)return notice('Maximum 30 scrapbooks.');
     const name=window.prompt('Shared scrapbook title (max 70 characters):','Our Paw Moments ♡');if(!name?.trim())return;
-    const a=normalizeAlbum({id:uniquePawId('album'),owner:me(),name,members:[me()],joined:true,cards:[],updated:Date.now()});
+    const a=normalizeAlbum({id:uniquePawId('album'),owner:me(),name,nameUpdated:Date.now(),members:[me()],joined:true,cards:[],updated:Date.now()});
     state.sharedAlbums.push(a);state.albumView=a.id;saveSoon();renderMoments();
   }
   function renderSharedAlbums(){
     return `<section class="paw-albums"><h3>📒 Shared Scrapbooks</h3><div class="paw-items">${state.sharedAlbums.map(a=>`<div class="paw-item"><b>${escapeText(a.name)}</b> <span class="muted">· ${a.members.length} member(s) · ${a.cards.length} moments</span>
-      ${a.joined?`<div class="flex"><button class="secondary" data-paw-album="${escapeText(a.id)}">${state.albumView===a.id?'✓ Viewing':'View album'}</button>${a.owner===me()?`<button class="secondary" data-paw-album-invite="${escapeText(a.id)}">✉ Invite collaborator</button>`:''}<button class="secondary paw-album-leave" data-paw-album-leave="${escapeText(a.id)}" title="${a.owner===me()?'Transfer or close this scrapbook':'Leave this scrapbook'}">${a.owner===me()?(a.members.length>1?'↪ Transfer &amp; leave':'✕ Delete scrapbook'):'↩ Leave scrapbook'}</button></div>`:'<span class="muted">Invitation pending — see Catch Up</span>'}
-      ${a.joined&&state.albumView===a.id?`<div class="paw-album-cards">${a.cards.map(c=>`<div><b>${escapeText(c.title)}</b><p>${escapeText(c.text)}</p>${c.image?`<img src="${escapeText(c.image)}" loading="lazy" alt="Scrapbook picture"/>`:''}</div>`).join('')||'<p class="muted">Add Paw Moments below to this scrapbook.</p>'}</div>`:''}</div>`).join('')||'<p class="muted">Create a shared scrapbook to collect memories with friends.</p>'}</div></section>`;
+      ${a.joined?`<div class="flex"><button class="secondary" data-paw-album="${escapeText(a.id)}">${state.albumView===a.id?'✓ Viewing':'View album'}</button>${a.owner===me()?`<button class="secondary" data-paw-album-rename="${escapeText(a.id)}" title="Rename for all collaborators">✎ Rename</button><button class="secondary" data-paw-cover="${escapeText(a.id)}">🎨 Cover</button><button class="secondary" data-paw-pages="${escapeText(a.id)}">▦ Pages</button><button class="secondary" data-paw-album-invite="${escapeText(a.id)}">✉ Invite collaborator</button>`:''}<button class="secondary paw-album-leave" data-paw-album-leave="${escapeText(a.id)}" title="${a.owner===me()?'Transfer or close this scrapbook':'Leave this scrapbook'}">${a.owner===me()?(a.members.length>1?'↪ Transfer &amp; leave':'✕ Delete scrapbook'):'↩ Leave scrapbook'}</button></div>`:'<span class="muted">Invitation pending — see Catch Up</span>'}
+      ${a.joined&&state.albumView===a.id?`${pawCoverMarkup(a)}<div class="paw-album-cards paw-page-layout-${a.pageLayout||'grid'}">${a.cards.map(c=>pawCardMarkup(a,c)).join('')||'<p class="muted">Add Paw Moments below to this scrapbook.</p>'}</div>`:''}</div>`).join('')||'<p class="muted">Create a shared scrapbook to collect memories with friends.</p>'}</div></section>`;
   }
   // Shared Scrapbooks are separate from Group Dens (which already have Leave Group).
   // Keep private Paw Moments only when explicitly requested. For owners with other
@@ -4895,7 +5297,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     let sent=0,failed=0;
     let transfer=null;
     if(owned&&successor){
-      transfer={type:'KCPawAlbum',v:1,action:'owner-transfer',id:a.id,owner:successor,members:others};
+      transfer={type:'KCPawAlbum',v:1,action:'owner-transfer',id:a.id,owner:successor,members:others,name:a.name,nameUpdated:a.nameUpdated};
       // A failed transfer must not orphan the scrapbook. Only remove ourselves
       // after the selected new owner has successfully been sent the notice.
       if(!pawSend(successor,'KCPawAlbum',transfer)){
@@ -4938,7 +5340,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!member||!myFriends().includes(member)||member===me())return notice('Choose a BC friend.');
     if(a.members.includes(member))return notice('Already collaborating.');
     if(a.members.length>=8)return notice('Maximum 8 collaborators per scrapbook.');
-    const packet={type:'KCPawAlbum',v:1,action:'invite',id:a.id,owner:a.owner,name:a.name,members:[...a.members,member],cards:a.cards.slice(-8)};
+    const packet={type:'KCPawAlbum',v:1,action:'invite',id:a.id,owner:a.owner,name:a.name,nameUpdated:a.nameUpdated,members:[...a.members,member],cards:a.cards.slice(-8),coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt,pageLayout:a.pageLayout,pageAt:a.pageAt};
     if(pawSend(member,'KCPawAlbum',packet))notice('📒 Scrapbook invitation sent.');else notice('Invitation failed.');
   }
   function answerAlbumInvite(id,accept){
@@ -4968,18 +5370,23 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     let album=state.sharedAlbums.find(x=>x.id===id);
     if(p.action==='invite'){
       if(numeric(p.owner)!==from||album)return;
-      const normalized=normalizeAlbum({id,owner:from,name:p.name,members:p.members,joined:false,cards:p.cards||[],updated:Date.now()});
+      const normalized=normalizeAlbum({id,owner:from,name:p.name,nameUpdated:p.nameUpdated,members:p.members,joined:false,cards:p.cards||[],coverColor:p.coverColor,coverImage:p.coverImage,coverFrame:p.coverFrame,coverAt:p.coverAt,pageLayout:p.pageLayout,pageAt:p.pageAt,updated:Date.now()});
       if(!normalized||!normalized.members.includes(me()))return;
       state.sharedAlbums.push(normalized);state.sharedAlbums=state.sharedAlbums.slice(-30);
       notice(`📒 ${bcName(from)} invited you to a Shared Scrapbook.`);
+    }else if(p.action==='rename'&&album&&from===album.owner){
+      if(!acceptAlbumName(album,p))return;
+      album.updated=Date.now();
+      notice(`📒 ${bcName(from)} renamed the scrapbook to “${album.name}”.`);
     }else if(p.action==='response'&&album&&album.owner===me()){
       if(p.accepted===true&&!album.members.includes(from)){album.members.push(from);if(album.members.length>8)album.members=album.members.slice(0,8);}
       if(p.accepted!==true)album.members=album.members.filter(id=>id!==from);
       album.updated=Date.now();
       // Sync the new collaborator list with everyone who has already joined.
-      for(const member of album.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id:album.id,owner:me(),members:album.members});
+      for(const member of album.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id:album.id,owner:me(),members:album.members,name:album.name,nameUpdated:album.nameUpdated});
     }else if(p.action==='sync'&&album&&from===album.owner&&Array.isArray(p.members)){
       album.members=[...new Set([album.owner,...p.members.map(numeric).filter(Boolean)])].slice(0,8);album.updated=Date.now();
+      acceptAlbumName(album,p);
       if(album.joined&&!album.members.includes(me())){
         state.sharedAlbums=state.sharedAlbums.filter(x=>x.id!==id);
         if(state.albumView===id)state.albumView='';
@@ -4990,7 +5397,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(album.owner===me()){
         // The owner updates the rest of the collaborators after someone leaves.
         for(const member of album.members)if(member!==me())
-          pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id,owner:me(),members:album.members});
+          pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id,owner:me(),members:album.members,name:album.name,nameUpdated:album.nameUpdated});
       }
     }else if(p.action==='owner-transfer'&&album?.joined&&from===album.owner&&Array.isArray(p.members)){
       const incoming=[...new Set(p.members.map(numeric).filter(Boolean))].slice(0,8);
@@ -4998,13 +5405,34 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       // Only the former owner may transfer, and the successor must have been
       // an existing member. The departing owner must not remain on the list.
       if(!album.members.includes(successor)||successor===from||!incoming.includes(successor)||incoming.includes(from))return;
+      acceptAlbumName(album,p);
       album.owner=successor;album.members=incoming;album.updated=Date.now();
       if(!incoming.includes(me())){
         state.sharedAlbums=state.sharedAlbums.filter(x=>x.id!==id);
         if(state.albumView===id)state.albumView='';
       }else notice(`📒 ${bcName(successor)} now owns “${album.name}”.`);
+    }else if(p.action==='cover'&&album?.joined&&from===album.owner&&Number(p.coverAt)>Number(album.coverAt||0)){
+      if(!Object.hasOwn(PAW_COVER_COLORS,p.coverColor)||!['classic','polaroid','floral'].includes(p.coverFrame))return;
+      const img=trim(p.coverImage,500);if(img&&!/^https:\/\/[^\s]+$/i.test(img))return;
+      Object.assign(album,{coverColor:p.coverColor,coverImage:img,coverFrame:p.coverFrame,coverAt:Number(p.coverAt)});
+    }else if(p.action==='layout'&&album?.joined&&from===album.owner&&Number(p.pageAt)>Number(album.pageAt||0)){
+      if(!PAW_PAGE_LAYOUTS.includes(p.layout)||!Array.isArray(p.cardIds))return;
+      album.pageLayout=p.layout;album.pageAt=Number(p.pageAt);
+      const order=p.cardIds.slice(0,60).map(x=>trim(x,80));
+      album.cards.sort((a,b)=>{const x=order.indexOf(a.id),y=order.indexOf(b.id);return (x<0?999:x)-(y<0?999:y);});
+    }else if(p.action==='react'&&album?.joined&&album.members.includes(from)){
+      const c=album.cards.find(x=>x.id===p.cardId);
+      if(!c||!['💗','⭐','🐾'].includes(p.emoji)||typeof p.remove!=='boolean')return;
+      c.reactions ||= {};const current=c.reactions[p.emoji]||[];
+      c.reactions[p.emoji]=p.remove?current.filter(x=>x!==from):[...new Set([...current,from])].slice(0,8);
+    }else if(p.action==='comment'&&album?.joined&&album.members.includes(from)){
+      const c=album.cards.find(x=>x.id===p.cardId),raw=p.comment;
+      if(!c||!raw||numeric(raw.from)!==from||!/^reply_[\w-]{4,45}$/.test(trim(raw.id,65)))return;
+      const text=trim(raw.text,180);if(!text)return;
+      c.comments ||= [];if(c.comments.some(x=>x.id===raw.id))return;
+      c.comments.push({id:trim(raw.id,65),from,text,at:Number(raw.at)||Date.now()});c.comments=c.comments.slice(-24);
     }else if(p.action==='card'&&album?.joined&&album.members.includes(from)){
-      const card=normalizeMoment(p.card);if(!card||album.cards.some(x=>x.id===card.id))return;
+      const card=normalizePawCard(p.card);if(!card||album.cards.some(x=>x.id===card.id))return;
       album.cards.push(card);album.cards=album.cards.slice(-60);album.updated=Date.now();notice(`♡ ${bcName(from)} added a scrapbook memory.`);
     }else return;
     saveSoon();if(state.open&&(state.tab==='moments'||state.tab==='catchup'))render();
@@ -5021,7 +5449,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       chats:state.chats,groups:state.groups,profiles:state.profiles,moments:state.moments,circles:state.circles,
       sharedAlbums:state.sharedAlbums,invitations:state.invitations,pawGuestbook:state.pawGuestbook,
       catchUpSince:state.catchUpSince,roomFavorites:state.roomFavorites,roomRecent:state.roomRecent,
-      roomSort:state.roomSort,messages:rows,roomHistory:state.roomHistory};
+      roomSort:state.roomSort,scheduledMessages:state.scheduledMessages,messages:rows,roomHistory:state.roomHistory};
   }
   const bytesBase64=bytes=>{let out='';for(let i=0;i<bytes.length;i+=16384)out+=String.fromCharCode(...bytes.subarray(i,i+16384));return btoa(out);};
   const base64Bytes=value=>Uint8Array.from(atob(value),c=>c.charCodeAt(0));
@@ -5272,10 +5700,16 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.body.innerHTML = `<div class="screen"><div class="sectiontitle">⚙ PawLounge Settings</div><p class="muted">Personal preferences live on this browser only. No additional server is used.</p>
     <div class="smalltitle">🎨 Cozy appearance</div><div class="settingrow"><label for="kc-theme">Colour theme</label><select class="field" id="kc-theme" data-setting="theme">${VALID_THEMES.map(t => `<option value="${t}" ${p.theme === t ? 'selected':''}>${t==='midnight'?'Velvet (default)':t[0].toUpperCase()+t.slice(1)}</option>`).join('')}</select></div>
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
+    <div class="smalltitle">🪄 Layout &amp; chat bubbles</div>
+    ${control('minimalist','Minimalist mode (hide decorative artwork)')}
+    ${control('layoutEdit','Enable drag-and-drop sidebar editor')}<p class="muted">When enabled, drag Now Purring, Favorites, Search, Circles and Inbox filter into your preferred order. Your layout is saved locally.</p>
+    <label>Message bubble shape<select class="field" data-setting="bubbleShape">${[['rounded','Rounded'],['square','Squared'],['cloud','Cloudy']].map(([v,t])=>`<option value="${v}" ${p.bubbleShape===v?'selected':''}>${t}</option>`).join('')}</select></label>
+    <label>Bubble opacity: ${p.bubbleOpacity}% <input type="range" min="50" max="100" step="5" value="${p.bubbleOpacity}" data-setting="bubbleOpacity"/></label>
+    <p class="muted">Keyboard: Alt+K open/close, Alt+Shift+1–6 select tabs, Alt+↑/↓ move through contacts, Escape closes PawLounge, Enter sends and Shift+Enter adds a line.</p>
     <div class="smalltitle">🖱 Side panel scrolling</div>${control('panelScrollbars','Always show left and right panel scrollbars')}
     <p class="muted">Scroll the kitty name list and right widgets separately with the mouse wheel, trackpad, touch, or scrollbar. Your conversation stays in place.</p>
-    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws to verified PawLounge friends')}
-    <section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
+    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws to verified PawLounge friends')}<div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
+    ${pawPrivacySettingsMarkup()}<section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
       <p class="muted">Show a short status to your BC friends who use PawLounge. Your full Paw Profile stays separate.</p>
       <label>Status preset<select class="field" data-setting="friendStatusMode">${Object.keys(STATUS_MODES).map(mode=>`<option value="${escapeText(mode)}" ${p.friendStatusMode===mode?'selected':''}>${STATUS_MODES[mode]} ${escapeText(mode)}</option>`).join('')}</select></label>
       <label>Custom status message<input class="field" data-setting="friendStatusText" value="${escapeText(p.friendStatusText)}" placeholder="Cuddles welcome ♡" maxlength="100"/></label>
@@ -5318,12 +5752,21 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return sent;
   }
   function clickUI(e) {
-    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline]');
+    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role]');
     if (!target) return;
     if(target.dataset.pawCircleToggle!==undefined){const [id,field]=target.dataset.pawCircleToggle.split(':');togglePawCircleFlag(id,field);return;}
     if(target.dataset.pawCircleDelete!==undefined){const id=target.dataset.pawCircleDelete;if(window.confirm('Delete this friend circle?')){state.circles=state.circles.filter(c=>c.id!==id);if(state.circleFilter===id)state.circleFilter='';saveSoon();renderCircles();}return;}
+    if(target.dataset.pawCancelSchedule!==undefined){cancelPawSchedule(target.dataset.pawCancelSchedule);return;}
+    if(target.dataset.pawCover!==undefined){customizePawCover(target.dataset.pawCover);return;}
+    if(target.dataset.pawPages!==undefined){changePawPageLayout(target.dataset.pawPages);return;}
+    if(target.dataset.pawCardReact!==undefined){const [a,c,emoji]=target.dataset.pawCardReact.split('|');reactPawCard(a,c,emoji);return;}
+    if(target.dataset.pawCardComment!==undefined){const [a,c]=target.dataset.pawCardComment.split('|');commentPawCard(a,c);return;}
+    if(target.dataset.pawCardMove!==undefined){const [a,c,delta]=target.dataset.pawCardMove.split('|');movePawCard(a,c,Number(delta));return;}
+    if(target.dataset.pawVote!==undefined){const [id,index]=target.dataset.pawVote.split('|');votePawPoll(id,Number(index));return;}
+    if(target.dataset.pawRole!==undefined){pawGroupRole(numeric(target.dataset.pawRole));return;}
     if(target.dataset.pawAlbum!==undefined){state.albumView=target.dataset.pawAlbum;renderMoments();return;}
     if(target.dataset.pawAlbumInvite!==undefined){inviteAlbumFriend(target.dataset.pawAlbumInvite);return;}
+    if(target.dataset.pawAlbumRename!==undefined){renameSharedAlbum(target.dataset.pawAlbumRename);return;}
     if(target.dataset.pawAlbumLeave!==undefined){leaveSharedAlbum(target.dataset.pawAlbumLeave);return;}
     if(target.dataset.pawAlbumMoment!==undefined){addMomentToAlbum(target.dataset.pawAlbumMoment);return;}
     if(target.dataset.pawAlbumAccept!==undefined){answerAlbumInvite(target.dataset.pawAlbumAccept,true);return;}
@@ -5360,6 +5803,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'leaveguestbook') leavePawGuestbook();
     else if (act === 'markcatchup') {state.catchUpSince=Date.now();saveSoon();renderCatchUp();}
     else if (act === 'newalbum') createSharedAlbum();
+    else if (act === 'nickname') pawNickname();
+    else if (act === 'schedulepaw') schedulePawMessage();
+    else if (act === 'grouppoll') makePawPoll();
+    else if (act === 'groupannouncement') pawGroupAnnouncement();
     else if (act === 'exportsecure') void exportPawBackup(true);
     else if (act === 'importsecure') ui.shadow?.getElementById('paw-import-file')?.click();
     else if (act === 'resetwindow') { state.windowRect = defaultWindowRect(); applyWindowRect(); saveSoon(); notice('Window size and position restored.'); }
@@ -5452,7 +5899,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       else { const view=ui.shadow?.querySelector('.kc-status-example'); if(view) view.textContent=`Your status: ${statusLabel(me()) || 'Hidden from friends'}`; }
     }
     if (k === 'panelScrollbars') setTheme();
-    if (k === 'theme' || k === 'fontSize' || k === 'assetBase') render();
+    if (['minimalist','layoutEdit','bubbleShape','bubbleOpacity'].includes(k)) {setTheme();if(k==='layoutEdit')render();}
+    if(['quietStart','quietEnd'].includes(k)&&!validHour(value)){state.settings[k]=DEFAULT_SETTINGS[k];notice('Use a valid HH:MM time.');}
+    if (k === 'theme' || k === 'fontSize' || k === 'assetBase' || k==='minimalist' || k==='bubbleShape' || k==='bubbleOpacity') render();
   }
   function keyUI(e) {
     if (e.target?.classList?.contains('kc-filter-scroll-track')) {
@@ -5465,6 +5914,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         syncInboxFilterBar();
         return;
       }
+    }
+    if(e.altKey&&!e.ctrlKey&&!e.metaKey&&['ArrowUp','ArrowDown'].includes(e.key)&&state.tab==='chats'){
+      const items=contactItems();const pos=items.indexOf(state.selected),next=items[Math.max(0,Math.min(items.length-1,pos+(e.key==='ArrowDown'?1:-1)))];
+      if(next){e.preventDefault();e.stopPropagation();selectChat(next);}return;
+    }
+    if(!e.ctrlKey&&e.shiftKey&&e.altKey&&!e.metaKey&&/^[1-6]$/.test(e.key)&&!e.target?.matches?.('input,textarea,select')){
+      const tab=['chats','catchup','rooms','stickers','moments','settings'][Number(e.key)-1];
+      if(tab){e.preventDefault();e.stopPropagation();state.tab=tab;render();return;}
     }
     if (e.key === 'Escape' && state.profileModal) { e.stopPropagation(); closeProfileModal(); return; }
     if (e.key === 'Escape' && state.open) { e.stopPropagation(); toggle(false); return; }
@@ -5499,6 +5956,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if (state.settings.shareFriendStatus) publishFriendStatus(false);
     }
     restoreSubbycatRoomHistory();
+    deliverScheduledMessages();
     if (state.open && state.tab === 'rooms' && !state.roomLoading && state.roomError.startsWith('BC room search has not loaded yet.') && typeof window.ServerRoomSearch === 'function') void searchRooms('bc-search-ready');
     if (state.open) schedulePortraits();
     if (state.open && state.tab === 'chats' && !state.selected && !state.selectedGroup && (Object.keys(state.chats).length || myFriends().length)) render();
@@ -5533,6 +5991,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     roomHistoryDiagnostics:() => ({version:VERSION, room:window.ChatRoomData?.Name || null, tracking:inHistoryRoom(), stored:state.roomHistory.length, visible:!!document.getElementById('kc-subbycat-previous-session'), restores:roomReplay.restoreCount, limit:20}),
     refreshRooms: () => { if (!ui.body) safeTick(); state.tab='rooms'; toggle(true); return searchRooms('console-refresh'); },
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomspace'), selected:state.roomSpace || 'All', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
+    socialStudioDiagnostics:()=>({version:VERSION,pendingScheduled:state.scheduledMessages.filter(x=>x.status==='pending').length,quietHours:inPawQuietHours(),favoriteFriends:Object.values(state.chats).filter(x=>x.favorite).length,groupPolls:Object.values(state.groups).reduce((sum,g)=>sum+(g.polls||[]).length,0),scrapbooks:state.sharedAlbums.length,layoutEdit:state.settings.layoutEdit}),
     expansionDiagnostics: () => ({version:VERSION,roomSort:state.roomSort,roomFavorites:state.roomFavorites.length,recentRooms:state.roomRecent.length,moments:state.moments.length,replyActive:!!state.replyTarget,inboxFilter:state.contactsMode,pendingRequests:Object.values(state.chats).filter(c=>c.requestPending).length,replyLater:Object.values(state.chats).filter(c=>c.replyLater).length,moderatorAssignments:Object.values(state.groups).reduce((n,g)=>n+(g.moderators?.length||0),0)}),
     friendStatusDiagnostics: () => ({version:VERSION,mode:state.settings.friendStatusMode,
       text:state.settings.friendStatusText,sharing:state.settings.shareFriendStatus,
