@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.16
+// @version      1.0.17
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.16';
+  const VERSION = '1.0.17';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6047,7 +6047,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // open. They must NOT count as actual dialogs. When a painted foreign popup
   // really overlaps the launcher, prefer a temporary free position to hiding.
   const fabCoexistence={reason:'',checks:0,hidden:0,alwaysShow:false,temporary:null,
-    home:null, lastScreen:'',surfaces:[],roomTransitions:0};
+    home:null, lastScreen:'',surfaces:[],roomTransitions:0,manualRoomPopupKey:'',popupKey:''};
   const FOREIGN_WINDOW_SELECTOR='dialog[open],[role="dialog"],[aria-modal="true"],[id*="lian" i],[class*="lian" i],[id*="modal" i],[class*="modal" i],[id*="popup" i],[class*="popup" i],[id*="overlay" i],[class*="overlay" i],[id*="window" i],[class*="window" i]';
   function paintedPopupSurface(node, style, box, points) {
     const visiblyPainted=s=>{
@@ -6156,7 +6156,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // Mount a *single* independent, light-DOM room button at document root. It
   // mirrors the same saved coordinates and action but cannot be buried in the
   // zero-sized shadow host. No timers, global hooks or other mods are patched.
-  const roomLauncher={button:null,repairs:0,lastReason:'',moves:0,topLayer:false,topLayerErrors:0};
+  const roomLauncher={button:null,repairs:0,lastReason:'',moves:0,topLayer:false,topLayerErrors:0,dragging:false};
   // A z-index cannot escape all CSS stacking contexts and cannot outrank
   // browser top-layer content. popover=manual permits a freely draggable
   // button on the actual BC room canvas *and* in letterboxed black margins.
@@ -6230,7 +6230,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     let drag=null;
     button.addEventListener('pointerdown',e=>{
       if(e.pointerType==='mouse'&&e.button!==0)return;
-      drag={id:e.pointerId,startX:e.clientX,startY:e.clientY,x:Number.parseFloat(button.style.left)||0,y:Number.parseFloat(button.style.top)||0,moved:false};
+      // The 800ms coexistence poll must not overwrite a live pointer drag.
+      roomLauncher.dragging=true;
+      const point=button.getBoundingClientRect();
+      drag={id:e.pointerId,startX:e.clientX,startY:e.clientY,x:point.left,y:point.top,moved:false};
       try{button.setPointerCapture(e.pointerId);}catch{}
       e.preventDefault();e.stopPropagation();
     });
@@ -6249,11 +6252,16 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     function finish(e){
       if(!drag||e.pointerId!==drag.id)return;
       const moved=drag.moved,interrupted=e.type!=='pointerup';drag=null;
+      roomLauncher.dragging=false;
       if(moved&&!interrupted){
         const x=Number.parseFloat(button.style.left)||4,y=Number.parseFloat(button.style.top)||4;
         if(ui.fab)positionFab(x,y);
         state.fabPosition={x,y};
-        fabCoexistence.temporary=null;roomLauncher.moves++;saveSoon();
+        fabCoexistence.temporary=null;
+        // Manual drag wins over the same popup(s) for as long as they remain
+        // open. This prevents the button snapping back on the next poll.
+        fabCoexistence.manualRoomPopupKey=fabCoexistence.popupKey;
+        roomLauncher.moves++;saveSoon();
       } else if(!moved&&!interrupted)toggle(true);
       try{if(button.hasPointerCapture(e.pointerId))button.releasePointerCapture(e.pointerId);}catch{}
       if(!interrupted)syncFabCoexistence();
@@ -6272,6 +6280,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(roomLauncher.button)removeRoomLauncher();return;
     }
     const button=roomLauncher.button?.isConnected?roomLauncher.button:makeRoomLauncher();
+    // Do not reset left/top, popover state, or stacking while the user drags.
+    if(roomLauncher.dragging)return;
     // Move the main panel's Shadow DOM host to the same document-root layer
     // as the room button. Otherwise a room-created stacking context can hide
     // the entire panel after the user taps the rescue button.
@@ -6318,12 +6328,33 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       roomLauncher.repairs++;
     }
   }
+  // Only true open dialogs should force a room launcher move. A number of
+  // addons leave painted overlays, canvases and entire application roots in
+  // ChatRoom permanently, even with their actual window closed.
+  function roomConfirmedPopup(surface){
+    const node=surface?.node;
+    if(!node?.isConnected)return false;
+    if(node.matches?.('dialog[open],[role="dialog"],[aria-modal="true"]'))return true;
+    let parent=node;
+    for(let i=0;parent&&i<12;i++){
+      const ident=`${parent.id||''} ${typeof parent.className==='string'?parent.className:''}`;
+      if(/lian(?:chat)?|(?:^|[\s_-])(?:modal|popup|dialog|addon[-_]?menu|floating[-_]?window)(?:$|[\s_-])/i.test(ident))return true;
+      parent=parent.parentElement || parent.getRootNode?.()?.host || null;
+    }
+    return false;
+  }
+  function roomPopupSignature(surfaces){
+    return surfaces.map(s=>{
+      const node=s.node;
+      return `${node?.id||''}|${typeof node?.className==='string'?node.className:''}|${Math.round(s.box.width)}x${Math.round(s.box.height)}`;
+    }).sort().join(';');
+  }
   function syncFabCoexistence() {
     if(ui.panel&&!motionRuntime.active)syncZoomAndMobile();
     const fab=ui.fab;
     if(!fab?.isConnected){syncRoomLauncher();return;}
     fabCoexistence.checks++;
-    if(fab.classList.contains('kc-moving')){syncRoomLauncher();return;}
+    if(fab.classList.contains('kc-moving')||roomLauncher.dragging)return;
     const room=window.CurrentScreen==='ChatRoom' ||
       (window.CurrentScreen==='Online'&&window.CurrentModule==='ChatRoom');
     const screen=room?'room':String(window.CurrentScreen||'');
@@ -6334,19 +6365,31 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       fab.setAttribute('aria-hidden',state.open?'true':'false');syncRoomLauncher();return;}
     let surfaces=[];
     try{surfaces=foreignPopupSurfaces(defaultFabHomeRect());}catch{surfaces=[];}
+    // ChatRoom has permanent pseudo-popup layers: discard those false positives.
+    if(room)surfaces=surfaces.filter(roomConfirmedPopup);
+    const popupKey=room?roomPopupSignature(surfaces):'';
+    fabCoexistence.popupKey=popupKey;
+    if(!popupKey)fabCoexistence.manualRoomPopupKey='';
+    // A drag is an explicit choice that overrides auto-avoidance while these
+    // exact popup surfaces remain mounted. When they close, restore normal.
+    if(room&&popupKey&&fabCoexistence.manualRoomPopupKey===popupKey)surfaces=[];
     fabCoexistence.surfaces=surfaces.map(s=>s.name);
     let reason='',shouldHide=false;
     if(surfaces.length){
       reason=surfaces[0].name;
       const home=defaultFabHomeRect();
       const margin=10,w=home.width,h=home.height;
+      // Prefer the nearest clear position; bottom-left must never be the
+      // unconditional first choice just because a suspicious room element exists.
       const positions=[
-        [margin,Math.max(margin,innerHeight-h-margin)],
-        [Math.max(margin,innerWidth-w-margin),margin],
+        [home.left,home.top],
         [margin,margin],
+        [Math.max(margin,innerWidth-w-margin),margin],
+        [margin,Math.max(margin,innerHeight-h-margin)],
         [Math.max(margin,innerWidth-w-margin),Math.max(margin,innerHeight-h-margin)],
         [Math.max(margin,(innerWidth-w)/2),margin]
-      ];
+      ].sort((a,b)=>(a[0]-home.left)**2+(a[1]-home.top)**2-
+                    ((b[0]-home.left)**2+(b[1]-home.top)**2));
       // Check a proposed alternate position against *all* popup surfaces;
       // only move to positions that are outside their actual bounds.
       const clear=([x,y])=>x>=0&&y>=0&&x+w<=innerWidth&&y+h<=innerHeight&&
@@ -8659,6 +8702,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     displayDiagnostics:()=>({version:VERSION,zoomFactor:pawViewportScale.ratio,referenceDpr:state.settings.zoomReferenceDpr,currentDpr:window.devicePixelRatio,mobile:pawViewportScale.mobile,updates:pawViewportScale.updates}),
     roomLauncherDiagnostics:()=>({version:VERSION,active:roomLauncherActive(),mounted:!!roomLauncher.button?.isConnected,
       repairs:roomLauncher.repairs,moves:roomLauncher.moves,topLayer:roomLauncher.topLayer,topLayerErrors:roomLauncher.topLayerErrors,
+      dragging:roomLauncher.dragging,popupKey:fabCoexistence.popupKey,manualPopupOverride:fabCoexistence.manualRoomPopupKey,
+      detectedPopups:[...fabCoexistence.surfaces],
       savedPosition:state.fabPosition,temporaryPosition:fabCoexistence.temporary,
       rect:(()=>{const r=roomLauncher.button?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null;})(),
       nodeOnTop:(()=>{const r=roomLauncher.button?.getBoundingClientRect();if(!r)return null;
