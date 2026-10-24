@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.1
+// @version      0.9.2
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.1';
+  const VERSION = '0.9.2';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -112,7 +112,7 @@
     friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
     shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
-    quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','kc-fav-dock','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
+    quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
@@ -4074,12 +4074,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 }
 #kc-panel.kc-short .brand-after-lockup{display:none!important}
 /* v0.9.0 — PawLounge Social Studio */
-#kc-panel .kc-fav-dock{min-height:40px;border-radius:12px;padding:5px 8px;background:#3a2139a6;border:1px solid var(--border);overflow:hidden}
-#kc-panel .paw-small-label{font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.2px}
-#kc-panel .paw-fav-row{display:flex;gap:5px;overflow-x:auto;min-width:0;padding:2px 0}
-#kc-panel .paw-fav{display:flex;align-items:center;min-width:46px;max-width:80px;flex:0 0 auto;flex-direction:column;gap:1px;border:0;background:transparent;color:var(--ink);font-size:10px}
-#kc-panel .paw-fav .avatar{width:29px!important;height:29px!important;min-width:29px!important;min-height:29px!important}
-#kc-panel .paw-fav span{max-width:75px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 #kc-panel .paw-draggable{cursor:grab!important;outline:1px dashed var(--accent);outline-offset:1px}
 #kc-panel .paw-schedule{margin:2px 10px;padding:6px 9px;background:#28182a99;border:1px solid var(--border);border-radius:11px;max-height:124px;overflow-y:auto;font-size:11px}
 #kc-panel .paw-schedule-head,.paw-schedule-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -4726,7 +4720,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.menu.innerHTML = `<div class="side-shell">
       <div class="side-card"><div class="side-card-title">Now Purring ♡</div>
         ${heroId ? `<div class="side-mainline">${avatar(heroId)}<div style="min-width:0;flex:1"><div style="font-size:15px;font-weight:900">${escapeText(name(heroId))}</div><div class="muted">${escapeText(heroLast?.text || (onlineMembers.has(heroId) ? 'Together in the same room ♡' : 'A cozy connection'))}</div>${statusMarkup(heroId)}</div><span class="hero-heart">♡</span></div>` : '<div class="muted">Pick a kitty to start purring ♡</div>'}</div>
-      ${pawFavoriteDock()}<div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
+      <div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
       <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option><option value="__paw_bc_friends__" ${state.circleFilter==='__paw_bc_friends__'?'selected':''}>🐈 BC Friends only</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
       <div class="kc-inbox-filter-wrap kc-single-inbox-filter">
         <div class="side-filters kc-inbox-filters" aria-label="Inbox filter"><button type="button" class="filterbtn active" data-filter="all" aria-pressed="true">All</button></div>
@@ -5063,7 +5057,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   const PAW_COVER_COLORS = Object.freeze({rose:'#663451',plum:'#342342',midnight:'#202038',lavender:'#584b79',forest:'#29493e',gold:'#67513a'});
   const PAW_PAGE_LAYOUTS = Object.freeze(['grid','list','polaroid']);
   const PAW_ROLE_NAMES = Object.freeze(['Member','Organizer','Keeper']);
-  const PAW_SECTIONS = ['side-card','kc-fav-dock','side-search','paw-circle-row','kc-inbox-filter-wrap'];
+  const PAW_SECTIONS = ['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'];
   let pawDragSection = '';
   const validHour = v => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
   function inPawQuietHours(date=new Date()) {
@@ -5149,11 +5143,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     <div>Quiet hours: <b>${p.quietHours?`${escapeText(p.quietStart)}–${escapeText(p.quietEnd)}`:'Off'}</b></div>
     <div>Saved locally: <b>${Object.keys(state.chats).length} chats, ${state.moments.length} moments, ${state.sharedAlbums.length} scrapbooks, ${active} profile-enabled circles</b></div>
     <p class="muted">BC servers deliver beeps/whispers. PawLounge stores cached messages and backups locally; invited collaborators hold their own copies. Hiding this window never changes native BC online status.</p></section>`;
-  }
-  function pawFavoriteDock() {
-    const list=Object.values(state.chats).filter(c=>c.favorite).slice(0,8);
-    if(!list.length&&!state.settings.layoutEdit)return '';
-    return `<div class="kc-fav-dock"><div class="paw-small-label">💗 Favorite Kitties</div><div class="paw-fav-row">${list.map(c=>`<button class="paw-fav" data-contact="${c.id}" title="${escapeText(name(c.id))}">${avatar(c.id)}<span>${escapeText(name(c.id))}</span></button>`).join('')||'<span class="muted">♡ Favorite a kitty to pin them here</span>'}</div></div>`;
   }
   function pawSidebarSort() {
     const shell=ui.menu?.querySelector('.side-shell');if(!shell)return;
@@ -5743,7 +5732,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
     <div class="smalltitle">🪄 Layout &amp; chat bubbles</div>
     ${control('minimalist','Minimalist mode (hide decorative artwork)')}
-    ${control('layoutEdit','Enable drag-and-drop sidebar editor')}<p class="muted">When enabled, drag Now Purring, Favorites, Search, Circles and Inbox filter into your preferred order. Your layout is saved locally.</p>
+    ${control('layoutEdit','Enable drag-and-drop sidebar editor')}<p class="muted">When enabled, drag Now Purring, Search, Circles and Inbox filter into your preferred order. Your layout is saved locally.</p>
     <label>Message bubble shape<select class="field" data-setting="bubbleShape">${[['rounded','Rounded'],['square','Squared'],['cloud','Cloudy']].map(([v,t])=>`<option value="${v}" ${p.bubbleShape===v?'selected':''}>${t}</option>`).join('')}</select></label>
     <label>Bubble opacity: ${p.bubbleOpacity}% <input type="range" min="50" max="100" step="5" value="${p.bubbleOpacity}" data-setting="bubbleOpacity"/></label>
     <p class="muted">Keyboard: Alt+K open/close, Alt+Shift+1–6 select tabs, Alt+↑/↓ move through contacts, Escape closes PawLounge, Enter sends and Shift+Enter adds a line.</p>
