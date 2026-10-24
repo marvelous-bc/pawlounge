@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.7
+// @version      0.9.10
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.7';
+  const VERSION = '0.9.10';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -118,7 +118,7 @@
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
     title: null, subtitle: null, input: null, menu: null, status: null, rightArrowObserver: null };
   const state = { myId: 0, settings: { ...DEFAULT_SETTINGS }, chats: {}, profiles: {}, groups: {}, selectedGroup: '', groupCreateOpen: false, windowRect: null,
-    selected: 0, roomHistory: [], tab: 'chats', search: '', roomSearch: '', roomSort: 'most', roomFavorites: [], roomRecent: [], rooms: [], moments: [], replyTarget:null, momentView:null,
+    selected: 0, roomHistory: [], tab: 'chats', search: '', groupSearch: '', roomSearch: '', roomSort: 'most', roomFavorites: [], roomRecent: [], rooms: [], moments: [], replyTarget:null, momentView:null,
     roomError: '', roomLoading: false, roomSearched: false, roomCounts: {}, roomSearchWarnings: [], roomSearchTrigger: 'not-started', roomLastStarted: 0, roomLastFinished: 0, open: false, contactsMode: 'all',
     composerMode: 'beep', typingUntil: {}, lastTypingSent: 0, lastSave: null,
     hooks: [], mod: null, suppressOutgoing: false, recentFingerprints: new Map(),
@@ -156,6 +156,23 @@
   const inRoom = id => window.CurrentScreen === 'ChatRoom' && Array.isArray(window.ChatRoomCharacter) &&
     window.ChatRoomCharacter.some(p => p?.MemberNumber === id);
   const myFriends = () => Array.isArray(window.Player?.FriendList) ? window.Player.FriendList.map(x => numeric(typeof x === 'object' ? (x?.MemberNumber ?? x?.memberNumber ?? x?.ID) : x)).filter(Boolean) : [];
+  // Native BC room roster: no PawLounge installation or friend relationship is
+  // required. Only inspect the roster while actually inside the ChatRoom screen;
+  // BC can retain ChatRoomCharacter when the character leaves a room.
+  function currentRoomRoster() {
+    if (window.CurrentScreen !== 'ChatRoom' || !Array.isArray(window.ChatRoomCharacter)) return [];
+    const seen=new Set();
+    return window.ChatRoomCharacter.filter(character=>{
+      const id=numeric(character?.MemberNumber);
+      if(!id||id===me()||seen.has(id))return false;
+      seen.add(id);
+      return true;
+    });
+  }
+  function roomRosterSignature() {
+    return window.CurrentScreen==='ChatRoom' ? 'room:' + trim(window.ChatRoomData?.Name||'',110) + ':' +
+      currentRoomRoster().map(character=>`${numeric(character.MemberNumber)}:${trim(character.Nickname||character.Name||'',80)}`).sort().join('|') : 'not-in-room';
+  }
 
   function statusView(member) {
     if (numeric(member) === me()) return state.settings.shareFriendStatus ? {
@@ -345,9 +362,9 @@
     for (const m of recent) if(m.id===mid) m.reactions=reactions;
     for (const m of state.historyOlder) if(m.id===mid) m.reactions=reactions;
     archiveMessages(state.myId,kind,conversation,[msg]);saveSoon();
-    if (state.open && state.tab==='chats') {
-      if (kind==='group' && state.selectedGroup===conversation) renderGroupChat();
-      if (kind==='chat' && state.selected===Number(conversation) && !currentGroup()) renderMessages();
+    if (state.open && (state.tab==='chats'||state.tab==='groups')) {
+      if (kind==='group' && state.tab==='groups' && state.selectedGroup===conversation) renderGroupChat();
+      if (kind==='chat' && state.tab==='chats' && state.selected===Number(conversation)) renderMessages();
     }
   }
   // Whisper IDs travel in the native BC Dictionary, leaving whisper text untouched.
@@ -592,9 +609,9 @@
     } finally {
       if (epoch===state.historyEpoch) {
         state.historyLoading=false;
-        if (state.open && state.tab==='chats') {
-          if (kind==='chat' && state.selected===Number(conversation)) renderMessages();
-          if (kind==='group' && state.selectedGroup===conversation) renderGroupChat();
+        if (state.open && (state.tab==='chats'||state.tab==='groups')) {
+          if (kind==='chat' && state.tab==='chats' && state.selected===Number(conversation)) renderMessages();
+          if (kind==='group' && state.tab==='groups' && state.selectedGroup===conversation) renderGroupChat();
         }
       }
     }
@@ -617,8 +634,8 @@
     finally {
       if (epoch===state.historyEpoch) {
         state.historyLoading=false;
-        if (kind==='chat' && state.selected===Number(conversation)) renderMessages(true);
-        if (kind==='group' && state.selectedGroup===conversation) renderGroupChat(true);
+        if (kind==='chat' && state.tab==='chats' && state.selected===Number(conversation)) renderMessages(true);
+        if (kind==='group' && state.tab==='groups' && state.selectedGroup===conversation) renderGroupChat(true);
       }
     }
   }
@@ -939,7 +956,7 @@
     }
     return 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2,16);
   };
-  const currentGroup = () => state.selectedGroup ? state.groups[state.selectedGroup] : null;
+  const currentGroup = () => state.tab==='groups' && state.selectedGroup ? state.groups[state.selectedGroup] : null;
   function addGroupMessage(g, from, text, id, reply=null, originalTime=null, recovered=false) {
     if (!g || !g.joined || !g.members.includes(from) || !g.accepted.includes(from)) return;
     const mid=trim(id,70), content=trim(text,MAX_GROUP_TEXT);
@@ -952,12 +969,12 @@
     archiveMessages(state.myId,'group',g.id,[message]);
     g.messages = g.messages.slice(-MAX_MESSAGES); g.updated=Date.now();
     g.receipts ||= {}; if (from===me()) {g.receipts[mid]=[];const keys=Object.keys(g.receipts);if(keys.length>80)delete g.receipts[keys[0]];}
-    if (!recovered && from!==me() && !(state.open && state.selectedGroup===g.id && state.tab==='chats')) {
+    if (!recovered && from!==me() && !(state.open && state.selectedGroup===g.id && state.tab==='groups')) {
       g.unread=Math.min(999,(g.unread||0)+1);
       if (state.settings.notifications && !inPawQuietHours()) notice(`🐾 New message in ${g.name}`);
     }
     saveSoon(); updateBadge();
-    if (state.open) {renderSidebar(); if(state.selectedGroup===g.id) renderChat();}
+    if (state.open && state.tab==='groups') {renderSidebar(); if(state.selectedGroup===g.id) renderChat();}
   }
   function syncGroup(g) {
     if (g.creator !== me()) return;
@@ -974,7 +991,7 @@
       if (!state.groups[p.id]) {
         state.groups[p.id] = {id:p.id,creator:from,name:trim(p.name,46)||'Kitty Den',members,
           accepted:[from], joined:false,draft:'',unread:1, updated:Date.now(),messages:[],moderators:[],receipts:{}};
-        notice(`💌 Group invitation from ${bcName(from)} — open Chats to accept`);
+        notice(`💌 Group invitation from ${bcName(from)} — open Groups to accept`);
       }
       saveSoon();updateBadge();if(state.open)render();
       return true;
@@ -1000,20 +1017,20 @@
         if(from!==me() && g.accepted.includes(me()))sendGroupWire(from,{t:'ack',id:g.id,mid:p.mid},'✓ Delivery acknowledged',true);
       }
     } else if (p.t==='ack' && typeof p.mid==='string' && g.accepted.includes(from)) {
-      if (g.messages.some(m=>m.id===p.mid && m.from===me())) {g.receipts ||= {};g.receipts[p.mid]=[...new Set([...(g.receipts[p.mid]||[]),from])];saveSoon();if(state.open&&state.selectedGroup===g.id){const receipt=ui.shadow?.querySelector(`[data-group-receipt="${CSS.escape(p.mid)}"]`);if(receipt)receipt.textContent=`· ✓ ${g.receipts[p.mid].length}/${Math.max(0,g.accepted.length-1)} acknowledged`;else renderGroupChat();}}
+      if (g.messages.some(m=>m.id===p.mid && m.from===me())) {g.receipts ||= {};g.receipts[p.mid]=[...new Set([...(g.receipts[p.mid]||[]),from])];saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id){const receipt=ui.shadow?.querySelector(`[data-group-receipt="${CSS.escape(p.mid)}"]`);if(receipt)receipt.textContent=`· ✓ ${g.receipts[p.mid].length}/${Math.max(0,g.accepted.length-1)} acknowledged`;else renderGroupChat();}}
     } else if(p.t==='announcement'&&g.joined&&(from===g.creator||g.moderators?.includes(from)||g.roles?.[from]==='Organizer')){
       const a=p.announcement;
       if(a&&typeof a==='object'&&numeric(a.from)===from&&Number.isSafeInteger(Number(a.at))&&Number(a.at)>Number(g.announcement?.at||0)){
-        g.announcement={text:trim(a.text,220),from,at:Number(a.at)};saveSoon();if(state.open&&state.selectedGroup===g.id)renderGroupChat();
+        g.announcement={text:trim(a.text,220),from,at:Number(a.at)};saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();
       }
     } else if(p.t==='poll'&&g.joined&&g.accepted.includes(from)){
       const poll=normalizePawPoll(p.poll);
       if(poll&&poll.from===from&&!g.polls?.some(x=>x.id===poll.id)){
-        g.polls ||= [];g.polls.push(poll);g.polls=g.polls.slice(-25);saveSoon();if(state.open&&state.selectedGroup===g.id)renderGroupChat();
+        g.polls ||= [];g.polls.push(poll);g.polls=g.polls.slice(-25);saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();
       }
     } else if(p.t==='pollvote'&&g.joined&&g.accepted.includes(from)){
       const poll=g.polls?.find(x=>x.id===p.pollId),index=Number(p.index);
-      if(poll&&Number.isInteger(index)&&index>=0&&index<poll.options.length){poll.votes ||= {};poll.votes[from]=index;saveSoon();if(state.open&&state.selectedGroup===g.id)renderGroupChat();}
+      if(poll&&Number.isInteger(index)&&index>=0&&index<poll.options.length){poll.votes ||= {};poll.votes[from]=index;saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();}
     } else if(p.t==='react' && typeof p.mid==='string' && typeof p.emoji==='string') {
       void applyReaction('group',g.id,p.mid,from,p.emoji,!!p.remove);
     } else if(p.t==='historyRequest' && g.joined && g.accepted.includes(from) && typeof p.after==='number') {
@@ -1050,22 +1067,22 @@
     let delivered=0;
     for (const friend of ids) if (sendGroupWire(friend,{t:'invite',id,creator:me(),name:title,members:g.members},
       `💌 ${bcName(me())} invited you to PawLounge group “${title}”. Open PawLounge to accept.`)) delivered++;
-    state.groupCreateOpen=false;state.selectedGroup=id;state.selected=0;state.tab='chats';
+    state.groupCreateOpen=false;state.selectedGroup=id;state.tab='groups';
     saveSoon();render();
-    requestAnimationFrame(()=>{if(state.open&&state.tab==='chats'&&state.selectedGroup===id)renderGroupChat();});
+    requestAnimationFrame(()=>{if(state.open&&state.tab==='groups'&&state.selectedGroup===id)renderGroupChat();});
     notice(`Invited ${delivered}/${ids.length} friends. They must accept before messages reach them.`);
     return true;
   }
   function respondGroup(id, accept) {
     const g=state.groups[id];if(!g || g.joined || g.creator===me())return;
     if (accept) {g.joined=true;g.unread=0;g.accepted=[...new Set([g.creator,me()])];
-      state.selectedGroup=id;state.selected=0;state.tab='chats';}
+      state.selectedGroup=id;state.tab='groups';}
     else delete state.groups[id];
     const ok=sendGroupWire(g.creator,{t:'response',id,accepted:!!accept},
       `🐾 ${bcName(me())} ${accept?'accepted':'declined'} your PawLounge invitation to ${g.name}.`);
     if (!ok) notice('Could not notify the group creator. Check that you are BC friends.');
     saveSoon();updateBadge();render();
-    if(accept)requestAnimationFrame(()=>{if(state.open&&state.tab==='chats'&&state.selectedGroup===id)renderGroupChat();});
+    if(accept)requestAnimationFrame(()=>{if(state.open&&state.tab==='groups'&&state.selectedGroup===id)renderGroupChat();});
   }
   function sendGroupMessage(text) {
     const g=currentGroup();text=trim(text,MAX_GROUP_TEXT);
@@ -1083,9 +1100,9 @@
     addGroupMessage(g,me(),text,mid,reply);state.replyTarget=null;renderReplyBar();
     if (skipped) notice(`Sent to ${sent}; ${skipped} unavailable (not a BC friend or send failed).`);
     if (ui.input)ui.input.value='';g.draft='';saveSoon();
-    if(state.open && state.tab==='chats' && state.selectedGroup===g.id) {
+    if(state.open && state.tab==='groups' && state.selectedGroup===g.id) {
       const refresh=()=>{
-        if(!state.open || state.tab!=='chats' || state.selectedGroup!==g.id)return;
+        if(!state.open || state.tab!=='groups' || state.selectedGroup!==g.id)return;
         const log=ui.shadow?.getElementById('kc-log');
         if(!log || ![...log.querySelectorAll('[data-message-id]')].some(row=>row.dataset.messageId===mid))renderGroupChat();
       };
@@ -4391,6 +4408,31 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
 }
 
+/* v0.9.8 — Dedicated Groups tab and vertically compact group inbox. */
+#kc-panel .paw-groups-shell{min-height:0;display:flex;flex-direction:column;gap:9px;height:100%}
+#kc-panel .paw-groups-heading{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:10px 4px 5px;flex:0 0 auto;min-width:0}
+#kc-panel .paw-groups-heading .side-card-title{font-size:16px!important;margin:0 0 3px!important}
+#kc-panel .paw-groups-heading .muted{font-size:11px!important}
+#kc-panel .paw-groups-heading .group-plus{flex:0 0 auto;padding:8px 10px;min-height:34px}
+#kc-panel .paw-groups-shell>.side-search{flex:0 0 auto}
+#kc-panel .paw-group-scroll{min-height:0;flex:1 1 auto;overflow-y:auto!important;overflow-x:hidden!important;padding-bottom:15px}
+#kc-panel .paw-group-scroll .groupbar{margin:6px 0!important;padding:8px 0 3px!important;border-top:0!important}
+#kc-panel .paw-group-scroll .group-stack{max-height:none!important;overflow:visible!important;display:grid!important;gap:7px!important}
+#kc-panel .paw-group-scroll .group-item{width:100%;min-width:0;max-width:100%;padding:9px 7px!important;gap:7px!important;text-align:left}
+#kc-panel .paw-group-info{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;gap:4px}
+#kc-panel .paw-group-info .group-name,#kc-panel .paw-group-info .group-sub{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#kc-panel .paw-group-scroll .group-invite{margin:0!important}
+#kc-panel .paw-group-empty-list{font-size:12px;line-height:1.5;padding:13px 8px}
+#kc-panel .paw-group-empty{display:flex;align-items:center;justify-content:center;min-height:0;height:100%;padding:22px;text-align:center}
+#kc-panel .paw-groups-shell>.new-kitty{flex:0 0 auto}
+#kc-panel .rail .railtab[data-tab="groups"] .ic{font-size:26px;line-height:1}
+
+/* v0.9.9 — Keep the close control above the ornamental frame at all sizes.
+   Its stacking order must beat the SVG (15) and the top kitten (19). */
+#kc-panel .heroactions{z-index:36!important;position:relative!important}
+#kc-panel .heroactions .closekitty{position:relative!important;z-index:37!important;isolation:isolate!important}
+#kc-panel .kc-sculpted-frame{pointer-events:none!important}
+
 `; }
 
   function setTheme() {
@@ -4445,6 +4487,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <div class="workspace">
         <nav class="rail" aria-label="PawLounge navigation">
           <button class="railtab active" data-tab="chats"><span class="ic">${asset('ui-paw.svg','','🐾')}</span><span class="tx">Chats</span></button>
+          <button class="railtab" data-tab="groups" title="Group Dens and invitations" aria-label="Groups"><span class="ic" aria-hidden="true">👥</span><span class="tx">Groups</span></button>
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
           <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
@@ -4525,15 +4568,34 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         left: svg.querySelector('[data-frame-path="rail"]'),
         middle: svg.querySelector('[data-frame-path="sidebar"]'),
         right: svg.querySelector('[data-frame-path="companion"]'),
-        width: 0, height: 0
+        signature: ''
       };
       frameGeometry.set(svg, refs);
     }
-    if (refs.width === width && refs.height === height) return;
-    refs.width = width; refs.height = height;
+    // The sculpted border normally bleeds 22px sideways / 25px vertically.
+    // When the plugin fills the game window, that protruding outline was cut
+    // off by the viewport at both upper corners. Use only the available bleed
+    // and keep the path's pixel scale at 1:1 instead of stretching it.
+    const rect = state.windowRect || defaultWindowRect();
+    const vw = Math.max(1, document.documentElement.clientWidth || window.innerWidth);
+    const vh = Math.max(1, document.documentElement.clientHeight || window.innerHeight);
+    const gapRight = Math.max(0, vw - (rect.x + width));
+    const gapBottom = Math.max(0, vh - (rect.y + height));
+    const leftBleed = Math.max(0, Math.min(22, rect.x + 5));
+    const rightBleed = Math.max(0, Math.min(22, gapRight + 5));
+    const topBleed = Math.max(0, Math.min(25, rect.y - 5));
+    const bottomBleed = Math.max(0, Math.min(25, gapBottom + 4));
+    const signature = `${width}:${height}:${leftBleed}:${rightBleed}:${topBleed}:${bottomBleed}`;
+    if (refs.signature === signature) return;
+    refs.signature = signature;
     motionRuntime.frameGeometryWrites++;
     const {outer, inner, left, middle, right} = refs;
-    const w = width + 44, h = height + 50;
+    const w = width + leftBleed + rightBleed;
+    const h = height + topBleed + bottomBleed;
+    svg.style.setProperty('left', `${-leftBleed}px`);
+    svg.style.setProperty('top', `${-topBleed}px`);
+    svg.style.setProperty('width', `${w}px`);
+    svg.style.setProperty('height', `${h}px`);
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
     const narrow = width < 830 || height < 410;
     const top = narrow ? 29 : 84;
@@ -4632,6 +4694,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       style.setProperty('top',`${y}px`,'important');
       style.removeProperty('transform');
       panel.classList.remove('kc-moving');
+      updateSculptedFrame(state.windowRect.w,state.windowRect.h);
       el.style.touchAction=oldTouch;
       motionRuntime.lastDragMs=Math.round(performance.now()-started);
       endMotion();
@@ -4781,7 +4844,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     setTheme();
     if (state.open) updateSculptedFrame();
     ui.fab.setAttribute('aria-label', state.open ? 'Close PawLounge' : 'Open PawLounge');
-    if (state.open) { render(); ui.shadow.getElementById('kc-search')?.focus(); if (state.selectedGroup) void prepareHistoryView('group',state.selectedGroup); else if(state.selected){ void prepareHistoryView('chat',state.selected);requestFriendStatus(state.selected); } }
+    if (state.open) { render(); (ui.shadow.getElementById(state.tab==='groups'?'kc-group-search':'kc-search'))?.focus(); if (state.tab==='groups'&&state.selectedGroup) void prepareHistoryView('group',state.selectedGroup); else if(state.tab==='chats'&&state.selected){ void prepareHistoryView('chat',state.selected);requestFriendStatus(state.selected); } }
     // Keep small offline canvases across close/reopen within this browser
     // session. They are memory-only, bounded, and cleared at account switch.
     else { /* no portrait cache teardown on ordinary window close */ }
@@ -4815,15 +4878,22 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function selectChat(id) {
     const chat = ensure(id); if (!chat) return;
-    state.compactOpen=false;state.selected = id; state.selectedGroup=''; state.messageSearch = ''; chat.unread = 0;
+    // Remember the BC-visible name before this player leaves the room, so an
+    // otherwise unknown player doesn't turn into 'Kitty #12345' afterward.
+    const roomCharacter=currentRoomRoster().find(character=>numeric(character.MemberNumber)===id);
+    if(roomCharacter)chat.displayName=trim(roomCharacter.Nickname||roomCharacter.Name||chat.displayName,80);
+    // BC whispers work for room-mates without requiring them to be BC friends.
+    // Do not attempt friend-only beeps when opening a non-friend from In Room.
+    if(state.contactsMode==='inroom'&&inRoom(id)&&!myFriends().includes(id))state.composerMode='whisper';
+    state.compactOpen=false;state.selected = id; state.messageSearch = ''; chat.unread = 0;
     state.tab = 'chats'; saveSoon(); updateBadge(); void prepareHistoryView('chat',id); render();
     queueVisiblePrivateChatSync(id);
     requestFriendStatus(id);
   }
   function selectGroup(id) {
     const g=state.groups[id];if(!g)return;
-    state.compactOpen=false;state.selectedGroup=id;state.selected=0;state.messageSearch='';if(g.joined)g.unread=0;
-    state.tab='chats';saveSoon();updateBadge();void prepareHistoryView('group',id);render();
+    state.compactOpen=false;state.selectedGroup=id;state.messageSearch='';if(g.joined)g.unread=0;
+    state.tab='groups';saveSoon();updateBadge();void prepareHistoryView('group',id);render();
   }
   function isCompactCollapseLayout() {
     // Container query tracks the resizable PawLounge panel, not viewport width.
@@ -4862,10 +4932,24 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
     setTheme();
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
-    ui.menu.style.display = state.tab === 'chats' || state.tab === 'friends' ? 'flex' : 'none';
-    ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='friends'));
+    ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
+    ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='groups'));
     ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='catchup' || state.tab==='circles');
-    if (state.tab === 'chats' || state.tab === 'friends') { ensureDefaultSelection(); if (state.open && state.tab === 'chats') {if(state.selectedGroup) void prepareHistoryView('group',state.selectedGroup); else if(state.selected) void prepareHistoryView('chat',state.selected);} renderSidebar(); renderChat();
+    if (state.tab === 'chats' || state.tab === 'groups') {
+      if (state.tab==='chats') {
+        ensureDefaultSelection();
+        if(state.open&&state.selected)void prepareHistoryView('chat',state.selected);
+      } else {
+        if(!state.groups[state.selectedGroup]?.joined) {
+          const first=Object.values(state.groups).filter(g=>g.joined).sort((a,b)=>b.updated-a.updated)[0];
+          state.selectedGroup=first?.id||'';
+        }
+        if(state.open&&state.selectedGroup) {
+          if(state.groups[state.selectedGroup].unread){state.groups[state.selectedGroup].unread=0;saveSoon();updateBadge();}
+          void prepareHistoryView('group',state.selectedGroup);
+        }
+      }
+      renderSidebar();renderChat();
       if (isCompactCollapseLayout() && state.compactOpen) {
         ui.menu.insertAdjacentHTML('beforeend', '<button type="button" class="kc-compact-close" data-action="toggleleftpanel" title="Collapse contacts sidebar" aria-label="Collapse contacts sidebar">‹</button>');
       }
@@ -4885,12 +4969,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function contactItems() {
     const friends=new Set(myFriends());
-    const ids = new Set([...Object.keys(state.chats).map(numeric), ...friends]);
-    if (Array.isArray(window.ChatRoomCharacter)) for (const p of window.ChatRoomCharacter) if (numeric(p.MemberNumber)) ids.add(p.MemberNumber);
+    const roomIds=new Set(currentRoomRoster().map(character=>numeric(character.MemberNumber)));
+    const inRoomOnly=state.contactsMode==='inroom';
+    const ids = inRoomOnly ? roomIds : new Set([...Object.keys(state.chats).map(numeric), ...friends, ...roomIds]);
     ids.delete(me());
     const query=state.search.toLowerCase();
     return [...ids].filter(numeric)
-      .filter(id => !state.circleFilter || (state.circleFilter === '__paw_bc_friends__'
+      // In Room is a separate live roster, not a subset of a friend circle.
+      .filter(id => inRoomOnly || !state.circleFilter || (state.circleFilter === '__paw_bc_friends__'
         ? friends.has(id)
         : !!state.circles.find(c => c.id === state.circleFilter && c.members.includes(id))))
       .filter(id => !query || (`${name(id)} ${id}`).toLowerCase().includes(query))
@@ -4899,20 +4985,19 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       .filter(id => state.contactsMode !== 'favorites' || !!state.chats[id]?.favorite)
       .filter(id => state.contactsMode !== 'later' || !!state.chats[id]?.replyLater)
       .filter(id => state.contactsMode !== 'muted' || !!state.chats[id]?.muted || state.chats[id]?.snoozeUntil>Date.now())
-      .filter(id => state.contactsMode==='requests' ? !!state.chats[id]?.requestPending : state.contactsMode==='all' || !state.chats[id]?.requestPending)
+      .filter(id => state.contactsMode==='requests' ? !!state.chats[id]?.requestPending :
+        inRoomOnly || state.contactsMode==='all' || !state.chats[id]?.requestPending)
       .sort((a,b) => Number(!!state.chats[b]?.pinned) - Number(!!state.chats[a]?.pinned) ||
         Number(!!state.chats[b]?.favorite) - Number(!!state.chats[a]?.favorite) ||
         (state.chats[b]?.updated || 0) - (state.chats[a]?.updated || 0) || name(a).localeCompare(name(b)));
   }
   function ensureDefaultSelection() {
     if (state.tab !== 'chats' && state.tab !== 'friends') return;
-    if (state.selectedGroup && state.groups[state.selectedGroup]) return;
     const items = contactItems();
     if (state.selected && state.chats[state.selected]) return;
     if (items.length) {
       state.selected = items[0];
       if (!state.chats[state.selected]) ensure(state.selected);
-      state.selectedGroup = '';
       state.chats[state.selected].unread = 0;
     } else if (state.selected && !state.chats[state.selected]) {
       state.selected = 0;
@@ -5011,12 +5096,35 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     e.preventDefault();
     e.stopPropagation();
   }
+  function renderGroupsSidebar() {
+    if(!ui.menu||state.tab!=='groups')return;
+    const old=ui.menu.querySelector('.contacts-scroll');
+    if(old)state.panelScroll.left=old.scrollTop;
+    const query=state.groupSearch.trim().toLowerCase();
+    const groups=Object.values(state.groups).sort((a,b)=>Number(b.joined)-Number(a.joined)||(b.updated||0)-(a.updated||0));
+    const filtered=groups.filter(g=>!query||`${g.name} ${g.id} ${g.creator}`.toLowerCase().includes(query));
+    const invitations=filtered.filter(g=>!g.joined);
+    const joined=filtered.filter(g=>g.joined);
+    const groupRow=g=>`<button class="group-item ${state.selectedGroup===g.id?'active':''}" data-group="${escapeText(g.id)}" aria-current="${state.selectedGroup===g.id?'page':'false'}">${asset('group-coven-avatar.png','group-avatar','🏡')}<span class="paw-group-info"><span class="group-name">${escapeText(g.name)}</span><span class="group-sub">${g.accepted.length}/${g.members.length} members · ${g.creator===me()?'Your den':'Group Den'}</span></span>${g.unread?`<span class="tiny-pill">${Math.min(99,g.unread)}</span>`:''}</button>`;
+    ui.menu.innerHTML=`<div class="side-shell paw-groups-shell">
+      <div class="paw-groups-heading"><div><div class="side-card-title">Group Dens ♡</div><div class="muted">Your shared little hideouts</div></div><button class="group-plus" data-action="newgroup" title="Create Group Den">＋ New</button></div>
+      <div class="side-search"><input class="search" id="kc-group-search" type="search" placeholder="Search Group Dens..." value="${escapeText(state.groupSearch)}" aria-label="Search Group Dens"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
+      <div class="contacts-scroll paw-group-scroll" tabindex="0" role="region" aria-label="Group Dens and invitations">
+        ${invitations.length?`<div class="groupbar"><b>💌 Invitations (${invitations.length})</b></div><div class="group-stack">${invitations.map(g=>`<div class="group-invite"><b>${escapeText(g.name)}</b><span class="muted">From ${escapeText(bcName(g.creator))}</span><div class="actions"><button class="primary" data-group-accept="${escapeText(g.id)}">Join</button><button class="secondary" data-group-decline="${escapeText(g.id)}">Decline</button></div></div>`).join('')}</div>`:''}
+        <div class="groupbar"><b>🏡 Your Groups (${joined.length})</b></div>
+        <div class="group-stack">${joined.map(groupRow).join('')||`<div class="paw-group-empty-list muted">${query?'No matching groups.':'No Group Dens yet. Create one or accept an invitation ♡'}</div>`}</div>
+      </div>
+      <button class="new-kitty" data-action="newgroup">＋ Create a Group Den</button>
+    </div>`;
+    restoreSideScroll('left');
+  }
   function renderSidebar() {
+    if(state.tab==='groups'){renderGroupsSidebar();return;}
     if (!ui.menu) return;
     // v0.9.4: The old v0.8.16 simplification incorrectly removed the
     // entire inbox-filter strip. Keep the original choices and ensure any
     // stale/unknown mode falls back safely to All.
-    const inboxModes = ['all','unread','favorites','later','requests','muted','pinned'];
+    const inboxModes = ['all','inroom','unread','favorites','later','requests','muted','pinned'];
     if (!inboxModes.includes(state.contactsMode)) state.contactsMode = 'all';
     const confirmedFriends=new Set(myFriends());
     for(const [id,c] of Object.entries(state.chats)) if(c?.requestPending && confirmedFriends.has(Number(id))){c.requestPending=false;c.requestAccepted=true;saveSoon();}
@@ -5026,9 +5134,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (previousInboxFilters) inboxFilterScroll = previousInboxFilters.scrollLeft;
     ensureDefaultSelection();
     const items = contactItems();
-    const heroId = state.selected || items[0] || 0;
-    const onlineMembers = window.CurrentScreen === 'ChatRoom' && Array.isArray(window.ChatRoomCharacter)
-      ? new Set(window.ChatRoomCharacter.map(p=>numeric(p?.MemberNumber)).filter(Boolean)) : new Set();
+    const onlineMembers = new Set(currentRoomRoster().map(p=>numeric(p.MemberNumber)));
+    // The spotlight follows this roster too, rather than showing someone
+    // outside the room when In Room is selected.
+    const heroId = state.contactsMode==='inroom' ?
+      (items.includes(state.selected) ? state.selected : items[0] || 0) :
+      (state.selected || items[0] || 0);
     const heroChat = heroId ? state.chats[heroId] : null;
     const heroLast = heroChat?.messages?.at(-1);
     const contactButton = id => {
@@ -5037,26 +5148,22 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         ${avatar(id)}<span class="info"><div class="topline"><span class="nameline">${escapeText(name(id))} ${c?.favorite ? '♡' : ''}</span><span class="time">${m ? new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}</span></div><div class="preview">${escapeText(m?.text || (online ? 'In your room' : 'No messages yet'))}</div>${statusMarkup(id)}</span>
         ${c?.replyLater ? '<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread ? `<span class="tiny-pill">${Math.min(99,c.unread)}</span>` : ''}<span class="presence ${online ? 'on':''}" title="${online ? 'In your room' : 'Not in your room'}"></span></button>`;
     };
-    const joined = Object.values(state.groups).sort((a,b)=>b.updated-a.updated);
-    const groupsMarkup = joined.map(g => g.joined
-      ? `<button class="group-item ${state.selectedGroup===g.id?'active':''}" data-group="${escapeText(g.id)}">${asset('group-coven-avatar.png','group-avatar','🏡')}<span style="min-width:0;flex:1"><div class="group-name">${escapeText(g.name)}</div><div class="group-sub">${g.accepted.length}/${g.members.length} joined</div></span>${g.unread ? `<span class="tiny-pill">${g.unread}</span>` : ''}</button>`
-      : `<div class="group-invite"><b>💌 ${escapeText(g.name)}</b><span class="muted">Invite from ${escapeText(bcName(g.creator))}</span><div class="actions"><button class="primary" data-group-accept="${escapeText(g.id)}">Join</button><button class="secondary" data-group-decline="${escapeText(g.id)}">Decline</button></div></div>`).join('');
     ui.menu.innerHTML = `<div class="side-shell">
       <div class="side-card"><div class="side-card-title">Now Purring ♡</div>
         ${heroId ? `<div class="side-mainline">${avatar(heroId)}<div style="min-width:0;flex:1"><div style="font-size:15px;font-weight:900">${escapeText(name(heroId))}</div><div class="muted">${escapeText(heroLast?.text || (onlineMembers.has(heroId) ? 'Together in the same room ♡' : 'A cozy connection'))}</div>${statusMarkup(heroId)}</div><span class="hero-heart">♡</span></div>` : '<div class="muted">Pick a kitty to start purring ♡</div>'}</div>
       <div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
       <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option><option value="__paw_bc_friends__" ${state.circleFilter==='__paw_bc_friends__'?'selected':''}>🐈 BC Friends only</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
       <div class="kc-inbox-filter-wrap">
-        <div class="side-filters kc-inbox-filters" aria-label="Inbox filters">${[['all','All'],['unread','♡ Unread'],['favorites','💗 Favorites'],['later','⏰ Later'],['requests','✉ Requests'],['muted','🔕 Muted'],['pinned','📌 Pinned']].map(([key,label])=>`<button type="button" class="filterbtn ${state.contactsMode===key?'active':''}" data-filter="${key}" aria-pressed="${state.contactsMode===key}">${label}</button>`).join('')}</div>
+        <div class="side-filters kc-inbox-filters" aria-label="Inbox filters">${[['all','All'],['inroom',`🏠 In Room (${onlineMembers.size})`],['unread','♡ Unread'],['favorites','💗 Favorites'],['later','⏰ Later'],['requests','✉ Requests'],['muted','🔕 Muted'],['pinned','📌 Pinned']].map(([key,label])=>`<button type="button" class="filterbtn ${state.contactsMode===key?'active':''}" data-filter="${key}" aria-pressed="${state.contactsMode===key}">${label}</button>`).join('')}</div>
         <div class="kc-filter-scroll-controls" aria-label="Scroll inbox filters">
           <button type="button" class="kc-filter-scroll-btn" data-action="inboxscrollleft" title="Previous filters" aria-label="Scroll filters left">‹</button>
           <div class="kc-filter-scroll-track" role="scrollbar" tabindex="0" aria-label="Inbox filters horizontal scrollbar" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="kc-filter-scroll-thumb"></div></div>
           <button type="button" class="kc-filter-scroll-btn" data-action="inboxscrollright" title="Next filters" aria-label="Scroll filters right">›</button>
         </div>
       </div>
-      <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names, contacts and groups">
-        <div class="side-list">${items.map(contactButton).join('') || '<div class="muted">No kitties found yet.</div>'}</div>
-        ${state.tab === 'chats' ? `<div class="groupbar"><b>Group Dens ♡</b><button class="group-plus" data-action="newgroup">＋ Group</button></div><div class="group-stack">${groupsMarkup || '<div class="muted">A little den for your kitties ♡</div>'}</div>` : ''}
+      <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names and contacts">
+        <div class="side-list">${items.map(contactButton).join('') || (state.contactsMode==='inroom' ?
+          `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom' ? 'Join a BC room to see everyone there.' : state.search.trim() ? 'No matching room members.' : 'Nobody else is in this room yet.'}</div>` : '<div class="muted">No kitties found yet.</div>')}</div>
       </div>
       <button class="new-kitty" data-action="new">＋ Add a kitty by member #</button>
     </div>`;
@@ -5072,7 +5179,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const composerCursor = restoreComposer ? oldComposer.selectionStart : 0;
     const oldCompanion = ui.body?.querySelector('.companion');
     if (oldCompanion) state.panelScroll.right = oldCompanion.scrollTop;
-    if (currentGroup() && state.tab==='chats') { renderGroupChat(); return; }
+    if (state.tab==='groups') {
+      if(currentGroup()?.joined)renderGroupChat();
+      else ui.body.innerHTML=`<div class="screen paw-group-empty"><div class="empty"><div class="art">🏡</div><b>Welcome to Group Dens!</b><p>Select a group on the left, accept an invitation, or create a den for your kitties.</p><button class="primary" data-action="newgroup">＋ New Group Den</button></div></div>`;
+      return;
+    }
     const id = state.selected, c = state.chats[id];
     if (!id || !c) { ui.body.innerHTML = `<div class="screen" style="display:flex;align-items:center;justify-content:center"><div class="empty"><div class="art">${asset('kitty-empty.png','','😽')}</div><b>Welcome to the kitty den!</b><p>Choose a friend on the left to start a cozy chat, or add a kitty by member number.</p><button class="primary" data-action="new">＋ Add a kitty</button></div></div>`; return; }
     const p = state.profiles[id] || {};
@@ -5454,7 +5565,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
           if(sent){addGroupMessage(g,me(),entry.text,mid);success=true;}
         }
       }
-      if(success){entry.status='sent';entry.sentAt=now;saveNow(true);if(state.open){renderSidebar();if(state.tab==='chats')renderChat();}notice('📅 Scheduled PawLounge message sent.');}
+      if(success){entry.status='sent';entry.sentAt=now;saveNow(true);if(state.open){if(state.tab==='chats'||state.tab==='groups')renderSidebar();if(state.tab==='chats'||state.tab==='groups')renderChat();}notice('📅 Scheduled PawLounge message sent.');}
     }
     if(state.scheduledMessages.length>100){state.scheduledMessages=state.scheduledMessages.filter(x=>x.status==='pending').concat(state.scheduledMessages.filter(x=>x.status!=='pending').slice(-30));saveSoon();}
   }
@@ -6136,12 +6247,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.saveMoment!==undefined) {saveMessageAsMoment(target.dataset.saveMoment);return;}
     if (target.dataset.reactionId!==undefined) {replyAndReact(currentConversationKind(),target.dataset.reactionId,target.dataset.emoji);return;}
     if (target.dataset.roleToggle!==undefined) {const g=currentGroup(),id=numeric(target.dataset.roleToggle);if(g?.creator===me()&&g.members.includes(id)&&id!==me()){g.moderators||=[];g.moderators=g.moderators.includes(id)?g.moderators.filter(x=>x!==id):[...g.moderators,id];syncGroup(g);saveSoon();renderGroupChat();}return;}
-    if (target.dataset.tab) {state.compactOpen=target.dataset.tab==='chats'?true:false; state.tab=target.dataset.tab;render();if (state.tab==='rooms') void searchRooms('rooms-tab');return;}
+    if (target.dataset.tab) {state.compactOpen=['chats','groups'].includes(target.dataset.tab); state.tab=target.dataset.tab;state.replyTarget=null;render();if (state.tab==='rooms') void searchRooms('rooms-tab');return;}
     if (target.dataset.contact) { selectChat(numeric(target.dataset.contact)); return; }
     if (target.dataset.group){selectGroup(target.dataset.group);return;}
     if (target.dataset.groupAccept){respondGroup(target.dataset.groupAccept,true);return;}
     if (target.dataset.groupDecline){respondGroup(target.dataset.groupDecline,false);return;}
-    if (target.dataset.filter) { const mode=target.dataset.filter; if(!['all','unread','favorites','later','requests','muted','pinned'].includes(mode))return; state.contactsMode = mode; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
+    if (target.dataset.filter) { const mode=target.dataset.filter; if(!['all','inroom','unread','favorites','later','requests','muted','pinned'].includes(mode))return; state.contactsMode = mode; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
     if (target.dataset.quick !== undefined) { (currentGroup()?sendGroupMessage:sendText)(state.settings.shortcuts[Number(target.dataset.quick)]); return; }
     if (target.dataset.react !== undefined) { const chosen=window.prompt('Reaction emoji: 💗 🐾 😽 ✨ 😹','💗');if(chosen)replyAndReact(currentConversationKind(),target.dataset.react,trim(chosen,12));return; }
     if (target.dataset.sticker) { const st = STICKERS.find(x => x.id === target.dataset.sticker); if (!st) return; if (!currentGroup() && !state.chats[state.selected]) { notice('Choose a kitty or Group Den before sending a sticker.'); return; } (currentGroup()?sendGroupMessage:sendText)(`🐱 Kittychat sticker: ${st.name} ${st.emoji}`); return; }
@@ -6235,7 +6346,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const t = e.target;
     if (t.id === 'kc-search') { state.search = t.value; // Preserve focus and cursor after sidebar repaint.
       const pos = t.selectionStart; renderSidebar(); const s = ui.shadow.getElementById('kc-search'); s?.focus(); s?.setSelectionRange(pos,pos); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; }
-    else if (t.id === 'kc-compose') {if (currentGroup() && state.tab==='chats'){currentGroup().draft=trim(t.value,MAX_GROUP_TEXT);saveSoon();return;}const c = state.chats[state.selected]; if (c) { c.draft = t.value; saveSoon(); sendTyping(); } }
+    else if (t.id === 'kc-compose') {if (currentGroup() && state.tab==='groups'){currentGroup().draft=trim(t.value,MAX_GROUP_TEXT);saveSoon();return;}const c = state.chats[state.selected]; if (c) { c.draft = t.value; saveSoon(); sendTyping(); } }
+    else if (t.id === 'kc-group-search') { state.groupSearch=t.value;const pos=t.selectionStart;renderGroupsSidebar();const field=ui.shadow.getElementById('kc-group-search');field?.focus();field?.setSelectionRange(pos,pos);const list=ui.menu?.querySelector('.contacts-scroll');if(list)list.scrollTop=0;state.panelScroll.left=0; }
     else if (t.id === 'kc-roomquery') state.roomSearch = t.value;
   }
   function changeUI(e) {
@@ -6278,8 +6390,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       const items=contactItems();const pos=items.indexOf(state.selected),next=items[Math.max(0,Math.min(items.length-1,pos+(e.key==='ArrowDown'?1:-1)))];
       if(next){e.preventDefault();e.stopPropagation();selectChat(next);}return;
     }
-    if(!e.ctrlKey&&e.shiftKey&&e.altKey&&!e.metaKey&&/^[1-6]$/.test(e.key)&&!e.target?.matches?.('input,textarea,select')){
-      const tab=['chats','catchup','rooms','stickers','moments','settings'][Number(e.key)-1];
+    if(!e.ctrlKey&&e.shiftKey&&e.altKey&&!e.metaKey&&/^[1-7]$/.test(e.key)&&!e.target?.matches?.('input,textarea,select')){
+      const tab=['chats','groups','catchup','rooms','stickers','moments','settings'][Number(e.key)-1];
       if(tab){e.preventDefault();e.stopPropagation();state.tab=tab;render();return;}
     }
     if (e.key === 'Escape' && state.profileModal) { e.stopPropagation(); closeProfileModal(); return; }
@@ -6296,6 +6408,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       e.preventDefault(); e.stopImmediatePropagation(); toggle(); return;
     }
   }
+  let lastVisibleRosterSignature='';
   function tick() {
     const id = me();
     if (!id) { if (!ui.host && document.body) buildUI(); return; }
@@ -6317,6 +6430,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     restoreSubbycatRoomHistory();
     deliverScheduledMessages();
     if (state.open && state.tab === 'rooms' && !state.roomLoading && state.roomError.startsWith('BC room search has not loaded yet.') && typeof window.ServerRoomSearch === 'function') void searchRooms('bc-search-ready');
+    if (state.open && state.tab==='chats') {
+      const roster=roomRosterSignature();
+      if(roster!==lastVisibleRosterSignature){
+        lastVisibleRosterSignature=roster;
+        // Only update the sidebar when the membership/names truly changed.
+        // Rebuilding it every tick would reset focus and cause avatar flicker.
+        renderSidebar();
+        // Update the selected conversation's room-presence subtitle too.
+        // Do not rebuild the composer or message history when the roster changes.
+        renderChatHeader();
+      }
+    }
     if (state.open) schedulePortraits();
     if (state.open && state.tab === 'chats' && !state.selected && !state.selectedGroup && (Object.keys(state.chats).length || myFriends().length)) render();
     if (state.open && state.selected && state.typingUntil[state.selected] && state.typingUntil[state.selected] < Date.now()) {
@@ -6352,6 +6477,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
     socialStudioDiagnostics:()=>({version:VERSION,pendingScheduled:state.scheduledMessages.filter(x=>x.status==='pending').length,quietHours:inPawQuietHours(),favoriteFriends:Object.values(state.chats).filter(x=>x.favorite).length,groupPolls:Object.values(state.groups).reduce((sum,g)=>sum+(g.polls||[]).length,0),scrapbooks:state.sharedAlbums.length,layoutEdit:state.settings.layoutEdit}),
+    roomRosterDiagnostics:()=>({version:VERSION,insideRoom:window.CurrentScreen==='ChatRoom',filter:state.contactsMode,room:window.CurrentScreen==='ChatRoom'?(window.ChatRoomData?.Name||''):null,visibleMembers:currentRoomRoster().map(c=>({id:numeric(c.MemberNumber),name:trim(c.Nickname||c.Name||'',80)}))}),
     expansionDiagnostics: () => ({version:VERSION,roomSort:state.roomSort,roomFavorites:state.roomFavorites.length,recentRooms:state.roomRecent.length,moments:state.moments.length,replyActive:!!state.replyTarget,inboxFilter:state.contactsMode,pendingRequests:Object.values(state.chats).filter(c=>c.requestPending).length,replyLater:Object.values(state.chats).filter(c=>c.replyLater).length,moderatorAssignments:Object.values(state.groups).reduce((n,g)=>n+(g.moderators?.length||0),0)}),
     friendStatusDiagnostics: () => ({version:VERSION,mode:state.settings.friendStatusMode,
       text:state.settings.friendStatusText,sharing:state.settings.shareFriendStatus,
