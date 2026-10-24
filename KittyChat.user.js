@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      0.9.10
+// @version      1.0.2
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        *://bondageprojects.elementfx.com/*
@@ -25,7 +25,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '0.9.10';
+  const VERSION = '1.0.2';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -112,7 +112,7 @@
     friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
     shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
-    quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
+    encodePrivateChat:false,quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
@@ -122,7 +122,7 @@
     roomError: '', roomLoading: false, roomSearched: false, roomCounts: {}, roomSearchWarnings: [], roomSearchTrigger: 'not-started', roomLastStarted: 0, roomLastFinished: 0, open: false, contactsMode: 'all',
     composerMode: 'beep', typingUntil: {}, lastTypingSent: 0, lastSave: null,
     hooks: [], mod: null, suppressOutgoing: false, recentFingerprints: new Map(),
-    started: false, scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, rightDrawerOpen: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0 };
+    started: false, deliveryOutbox:[], scheduledMessages:[], nativeWhisperHandler: null, toastTimer: null, fabPosition: null, roomsRequest: 0, messageSearch: '', hotkeysAttached: false, resizeAttached: false, bootError: '', bootAttempts: 0, lastBootErrorAt: 0, faceBurst: { at: 0, count: 0 }, panelScroll: { left: 0, right: 0 }, leftCollapsed: false, rightCollapsed: false, rightDrawerOpen: false, profileModal: null, circles: [], circleFilter: '', catchUpSince: 0, sharedAlbums: [], invitations: [], pawGuestbook: [], historyOlder: [], historyHasMore: false, historyLoading: false, historySelection: "", historyEpoch: 0, integritySeen: [] };
   // Friend-status packets are private Kittychat control messages, not public
   // chat/beeps. Keep all delivery state in memory; only settings/received status
   // are saved with existing Kittychat account data.
@@ -137,8 +137,473 @@
   const numeric = n => { const v = Number(n); return Number.isSafeInteger(v) && v > 0 ? v : 0; };
   const trim = (s, max = 350) => String(s == null ? '' : s).trim().slice(0, max);
   const escapeText = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const safeRead = (key, fallback) => { try { const x = JSON.parse(localStorage.getItem(key)); return x ?? fallback; } catch { return fallback; } };
-  const safeWrite = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (err) { console.warn('[Kittychat] Storage full/unavailable:', err); return false; } };
+  // v0.9.14: PL2 data codec. A reversible format with integrity checksum.
+  // NOT cryptography: anyone with the script can decode it. Never present it
+  // as E2EE, a signature, or protection against a malicious peer.
+  const PAW_CODEC_PREFIX='PL2.';
+  const PAW_CHAT_PREFIX='[PLCHAT2:';
+  const pawCodecMetrics={encoded:0,decoded:0,legacy:0,failed:0,storageFallbacks:0};
+  const pawEncoder=new TextEncoder(),pawDecoder=new TextDecoder('utf-8',{fatal:true});
+  function pawBytesToBase64Url(bytes){
+    let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  function pawBase64UrlToBytes(value){
+    if(typeof value!=='string'||!value||!/^[A-Za-z0-9_-]+$/.test(value))throw Error('Invalid PL2 alphabet');
+    const str=value.replace(/-/g,'+').replace(/_/g,'/');
+    return Uint8Array.from(atob(str+'='.repeat((4-str.length%4)%4)),c=>c.charCodeAt(0));
+  }
+  function pawChecksum(data){
+    let hash=2166136261;
+    for(let i=0;i<data.length;i++){hash=Math.imul(hash^data[i],16777619)>>>0;}
+    return hash.toString(16).padStart(8,'0');
+  }
+  function pawCodecEncode(data){
+    const bytes=pawEncoder.encode(JSON.stringify(data));
+    const salt=new Uint8Array(2);
+    if(window.crypto?.getRandomValues)window.crypto.getRandomValues(salt);
+    else {salt[0]=Math.random()*256|0;salt[1]=Math.random()*256|0;}
+    const masked=new Uint8Array(bytes.length+2);masked.set(salt);
+    let rolling=(salt[0]*3+salt[1])&255;
+    for(let i=0;i<bytes.length;i++){rolling=(rolling+((i*17+53)&255))&255;masked[i+2]=bytes[i]^rolling;}
+    pawCodecMetrics.encoded++;
+    return PAW_CODEC_PREFIX+pawChecksum(bytes)+'.'+pawBytesToBase64Url(masked);
+  }
+  function pawCodecDecode(serialized,maxBytes=3000000){
+    if(typeof serialized!=='string'||!serialized.startsWith(PAW_CODEC_PREFIX))throw Error('Missing PL2 header');
+    const match=/^PL2\.([a-f0-9]{8})\.([A-Za-z0-9_-]+)$/.exec(serialized);
+    if(!match||serialized.length>Math.ceil(maxBytes*1.5)+64)throw Error('Malformed or oversized PL2');
+    const masked=pawBase64UrlToBytes(match[2]);
+    if(masked.length<3||masked.length>maxBytes+2)throw Error('PL2 size invalid');
+    const bytes=new Uint8Array(masked.length-2);
+    let rolling=(masked[0]*3+masked[1])&255;
+    for(let i=0;i<bytes.length;i++){rolling=(rolling+((i*17+53)&255))&255;bytes[i]=masked[i+2]^rolling;}
+    if(pawChecksum(bytes)!==match[1])throw Error('PL2 checksum mismatch');
+    const data=JSON.parse(pawDecoder.decode(bytes));
+    pawCodecMetrics.decoded++;
+    return data;
+  }
+  function pawParseWireJSON(value,maxBytes=20000){
+    if(typeof value!=='string')throw Error('Missing packet');
+    if(value.startsWith(PAW_CODEC_PREFIX))return pawCodecDecode(value,maxBytes);
+    pawCodecMetrics.legacy++;
+    return JSON.parse(value);
+  }
+  function pawWireJSON(data){const packed=pawCodecEncode(data);return packed.length<=14500?packed:JSON.stringify(data);}
+  function pawEncodeChat(text,mode){
+    const packet={v:2,kind:'chat',mode,text:String(text),nonce:integrityNonce()};
+    return PAW_CHAT_PREFIX+pawCodecEncode(packet)+']';
+  }
+  function pawDecodeChat(value){
+    if(typeof value!=='string'||!value.startsWith(PAW_CHAT_PREFIX)||!value.endsWith(']'))return null;
+    try{
+      const packet=pawCodecDecode(value.slice(PAW_CHAT_PREFIX.length,-1),12000);
+      if(packet?.v!==2||packet.kind!=='chat'||!['whisper','beep'].includes(packet.mode)||typeof packet.text!=='string'||packet.text.length>2000)return null;
+      return packet.text;
+    }catch{pawCodecMetrics.failed++;return null;}
+  }
+  // v0.9.17 — opt-in authenticated private messaging via Web Crypto.
+  // Manual out-of-band shared key: NOT Signal, MLS, forward secrecy, or a
+  // replacement for transport/account authentication. Never persist secrets.
+  const PAW_SECURE_PREFIX='[PLSEC1.';
+  const pawSecureSecrets=new Map(); // key: actual BC member number, session only
+  const pawSecurePending=new Map();
+  const pawSecureSeen=new Set();
+  const pawSecureKDFIterations=210000;
+  function pawSecureAvailable(){return !!(window.crypto?.subtle && window.crypto?.getRandomValues);}
+  function pawSecureToken(text){return typeof text==='string'&&text.startsWith(PAW_SECURE_PREFIX);}
+  function pawSecureContext(sender,recipient,mode,mid){
+    return pawEncoder.encode(`PawLounge.PLSEC1|${sender}|${recipient}|${mode}|${mid}`);
+  }
+  async function pawSecureDerive(secret,salt){
+    const base=await window.crypto.subtle.importKey('raw',pawEncoder.encode(secret),'PBKDF2',false,['deriveKey']);
+    return window.crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:pawSecureKDFIterations,hash:'SHA-256'},
+      base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+  }
+  async function pawEncryptPrivate(to,text,mode){
+    to=numeric(to);
+    const secret=pawSecureSecrets.get(to);
+    if(!secret||!pawSecureAvailable())throw Error('Secure Chat key unavailable; no plaintext was sent');
+    if(!['beep','whisper'].includes(mode))throw Error('Unsupported secure transport');
+    if(!to||!me())throw Error('No secure conversation selected');
+    const salt=window.crypto.getRandomValues(new Uint8Array(16));
+    const iv=window.crypto.getRandomValues(new Uint8Array(12));
+    const id=uniqueMessageId();
+    const aad=pawSecureContext(me(),to,mode,id);
+    const key=await pawSecureDerive(secret,salt);
+    const ct=new Uint8Array(await window.crypto.subtle.encrypt(
+      {name:'AES-GCM',iv,additionalData:aad,tagLength:128},key,pawEncoder.encode(text)));
+    const payload={v:1,s:me(),r:to,m:mode,id,k:'PBKDF2-SHA256',i:pawSecureKDFIterations,
+      salt:pawBytesToBase64Url(salt),iv:pawBytesToBase64Url(iv),ct:pawBytesToBase64Url(ct)};
+    const wire=PAW_SECURE_PREFIX+pawBytesToBase64Url(pawEncoder.encode(JSON.stringify(payload)))+']';
+    if(wire.length>1950)throw Error('Encrypted message is too long for BC; shorten it');
+    return {wire,id};
+  }
+  function pawSecureParse(wire,from,to,mode){
+    if(typeof wire!=='string'||wire.length>1950||!wire.startsWith(PAW_SECURE_PREFIX)||!wire.endsWith(']'))throw Error('Invalid secure message envelope');
+    const bytes=pawBase64UrlToBytes(wire.slice(PAW_SECURE_PREFIX.length,-1));
+    if(bytes.length>2200)throw Error('Oversized encrypted packet');
+    const p=JSON.parse(pawDecoder.decode(bytes));
+    if(p?.v!==1||p.s!==from||p.r!==to||p.m!==mode||typeof p.id!=='string'||
+      !/^msg_[0-9]+_[a-f0-9]{24}$/.test(p.id)||p.k!=='PBKDF2-SHA256'||p.i!==pawSecureKDFIterations||
+      typeof p.salt!=='string'||typeof p.iv!=='string'||typeof p.ct!=='string')throw Error('Encrypted metadata invalid');
+    const salt=pawBase64UrlToBytes(p.salt),iv=pawBase64UrlToBytes(p.iv),ct=pawBase64UrlToBytes(p.ct);
+    if(salt.length!==16||iv.length!==12||ct.length<17||ct.length>2100)throw Error('Invalid cryptographic parameters');
+    return {p,salt,iv,ct};
+  }
+  async function pawDecryptPrivate(wire,from,mode){
+    from=numeric(from);const secret=pawSecureSecrets.get(from);
+    if(!secret||!pawSecureAvailable())throw Error('Unlock Secure Chat for this contact');
+    const {p,salt,iv,ct}=pawSecureParse(wire,from,me(),mode);
+    const key=await pawSecureDerive(secret,salt);
+    const raw=await window.crypto.subtle.decrypt({name:'AES-GCM',iv,
+      additionalData:pawSecureContext(from,me(),mode,p.id),tagLength:128},key,ct);
+    const text=pawDecoder.decode(new Uint8Array(raw));
+    if(text.length>2000)throw Error('Decrypted message is oversized');
+    return {id:p.id,text};
+  }
+  async function pawHandleSecureInbound(wire,from,mode){
+    from=numeric(from);
+    if(!from||!pawSecureToken(wire))return false;
+    if(!inboundLimit(from,'secureChat',wire,1950))return true;
+    let mid='';try{mid=pawSecureParse(wire,from,me(),mode).p.id;}catch {return true;}
+    const account=state.myId;
+    const seen=`${account}:${from}:${mid}`;
+    if(pawSecureSeen.has(seen))return true;
+    pawSecureSeen.add(seen);
+    if(pawSecureSeen.size>1500)pawSecureSeen.delete(pawSecureSeen.values().next().value);
+    if(!pawSecureSecrets.has(from)){
+      const list=pawSecurePending.get(from)||[];
+      if(list.length<30)list.push({wire,mode,account:state.myId});
+      pawSecurePending.set(from,list);
+      notice(`🔒 Encrypted ${mode} from ${bcName(from)}. Open Secure Chat to unlock it.`);
+      return true;
+    }
+    try{
+      const got=await pawDecryptPrivate(wire,from,mode);
+      if(state.myId!==account||me()!==account)return true;
+      if(!integrityAcceptEvent('secureChat',from,{nonce:got.id},got.id))return true;
+      appendMessage(from,got.text,from,mode,'network',{messageId:got.id});
+    }catch{
+      notice(`🔒 Couldn't authenticate an encrypted message from ${bcName(from)}. Check the shared key.`);
+      // Keep failed ciphertext for a corrected key in this same session.
+      const list=pawSecurePending.get(from)||[];
+      if(list.length<30)list.push({wire,mode,account:state.myId});
+      pawSecurePending.set(from,list);
+    }
+    return true;
+  }
+  async function pawSecureUnlockPending(member){
+    const list=pawSecurePending.get(member)||[];pawSecurePending.delete(member);
+    for(const entry of list)if(entry.account===state.myId){
+      // The original receive is already deduplicated. Decrypt directly.
+      try{const got=await pawDecryptPrivate(entry.wire,member,entry.mode);
+        if(state.myId===entry.account&&integrityAcceptEvent('secureChat',member,{nonce:got.id},got.id))
+          appendMessage(member,got.text,member,entry.mode,'network',{messageId:got.id});
+      }catch{const backlog=pawSecurePending.get(member)||[];if(backlog.length<30){backlog.push(entry);pawSecurePending.set(member,backlog);}}
+    }
+  }
+  function pawSecureOpenModal(){
+    const member=numeric(state.selected),modal=ui.shadow?.getElementById('kc-secure-modal');
+    if(!member||!modal)return;
+    modal.classList.remove('hidden');
+    const label=modal.querySelector('.paw-secure-recipient');if(label)label.textContent=`${bcName(member)} (#${member})`;
+    const input=modal.querySelector('#kc-secure-key');if(input){input.value='';input.type='password';input.focus();}
+    const status=modal.querySelector('.paw-secure-status');if(status)status.textContent=pawSecureSecrets.has(member)?'Enabled for this session':'Not enabled';
+  }
+  function pawSecureCloseModal(){const el=ui.shadow?.getElementById('kc-secure-modal');if(el){el.classList.add('hidden');const input=el.querySelector('#kc-secure-key');if(input)input.value='';}}
+  function pawSecureSaveKey(){
+    const id=numeric(state.selected),field=ui.shadow?.getElementById('kc-secure-key');
+    const key=field?.value||'';
+    if(!pawSecureAvailable()){notice('This browser context does not support Web Crypto.');return;}
+    if(!id||key.length<20||key.length>256){notice('Use a shared secret of 20–256 characters; generated random keys are recommended.');return;}
+    pawSecureSecrets.set(id,key);if(field)field.value='';
+    pawSecureCloseModal();renderChatHeader();
+    notice(`🔐 Secure Chat enabled with ${bcName(id)} for this session. Both sides must use the SAME secret.`);
+    void pawSecureUnlockPending(id);
+  }
+  function pawSecureForgetKey(){
+    const id=numeric(state.selected);if(!id)return;
+    pawSecureSecrets.delete(id);pawSecureCloseModal();renderChatHeader();notice('Secure Chat key cleared for this contact.');
+  }
+  function pawSecureGenerateKey(){
+    const field=ui.shadow?.getElementById('kc-secure-key');if(!field||!pawSecureAvailable())return;
+    field.value=pawBytesToBase64Url(window.crypto.getRandomValues(new Uint8Array(32)));
+    field.type='text';field.select();
+    notice('Random key generated. Copy it and share outside BC before enabling.');
+  }
+  function pawSecureResetSession(){pawSecureSecrets.clear();pawSecurePending.clear();pawSecureSeen.clear();}
+
+
+  // v1.0.1: Optional password-protected local PawBooks vault.
+  // PL2 is NOT encryption. When this vault is enabled, the normal account save
+  // contains no shared-book or private-page content. The encrypted container is
+  // kept in a separate account-scoped localStorage record.
+  const pawBookVault={active:false,locked:false,account:0,key:null,salt:null,queue:Promise.resolve(),error:'',writes:0};
+  const bookVaultStorageKey=id=>`Kittychat.PawBookVault.v1.${numeric(id)}`;
+  function bookVaultRecord(id){
+    try{
+      const s=localStorage.getItem(bookVaultStorageKey(id));if(!s)return null;
+      const v=JSON.parse(s);
+      if(v?.v!==1||v.account!==numeric(id)||v.kdf!=='PBKDF2-SHA256'||v.iterations!==310000||
+        v.cipher!=='AES-256-GCM'||typeof v.salt!=='string'||typeof v.iv!=='string'||typeof v.data!=='string')return null;
+      return v;
+    }catch{return null;}
+  }
+  function bookVaultCryptoAvailable(){return !!(window.crypto?.subtle&&window.crypto?.getRandomValues);}
+  async function bookVaultDerive(password,salt){
+    const raw=await window.crypto.subtle.importKey('raw',pawEncoder.encode(password),'PBKDF2',false,['deriveKey']);
+    return window.crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',iterations:310000,salt},raw,
+      {name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+  }
+  function bookVaultPayload(){
+    return {v:1,account:state.myId,sharedAlbums:state.sharedAlbums.slice(-30),privateBookPages:state.privateBookPages};
+  }
+  async function bookVaultEncrypt(key,salt,payload,account){
+    const iv=window.crypto.getRandomValues(new Uint8Array(12));
+    const aad=pawEncoder.encode(`PawLounge.PawBooksVault.v1:${account}`);
+    const data=new Uint8Array(await window.crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:aad},key,pawEncoder.encode(JSON.stringify(payload))));
+    return {v:1,account,kdf:'PBKDF2-SHA256',iterations:310000,cipher:'AES-256-GCM',salt:pawBytesToBase64Url(salt),iv:pawBytesToBase64Url(iv),data:pawBytesToBase64Url(data)};
+  }
+  async function bookVaultDecrypt(key,record,account){
+    const iv=pawBase64UrlToBytes(record.iv),data=pawBase64UrlToBytes(record.data);
+    if(iv.length!==12||data.length>11000000)throw Error('Invalid encrypted vault');
+    const aad=pawEncoder.encode(`PawLounge.PawBooksVault.v1:${account}`);
+    const plaintext=await window.crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:aad},key,data);
+    const obj=JSON.parse(pawDecoder.decode(new Uint8Array(plaintext)));
+    if(obj?.v!==1||obj.account!==account||!Array.isArray(obj.sharedAlbums)||
+       !obj.privateBookPages||typeof obj.privateBookPages!=='object')throw Error('Damaged vault contents');
+    return obj;
+  }
+  function bookVaultQueueSave(){
+    if(!pawBookVault.active||pawBookVault.locked||!pawBookVault.key||pawBookVault.account!==state.myId)return;
+    const account=state.myId,key=pawBookVault.key,salt=pawBookVault.salt;
+    // Freeze each snapshot before async work. Serialized writes cannot replace
+    // newer data with an older encryption result.
+    const payload=bookVaultPayload();
+    pawBookVault.queue=pawBookVault.queue.catch(()=>{}).then(async()=>{
+      const record=await bookVaultEncrypt(key,salt,payload,account);
+      localStorage.setItem(bookVaultStorageKey(account),JSON.stringify(record));
+      pawBookVault.writes++;pawBookVault.error='';
+    }).catch(e=>{pawBookVault.error='Encrypted PawBooks save failed: '+String(e?.message||e).slice(0,130);
+      console.error('[PawLounge] '+pawBookVault.error);
+      if(state.myId===account)notice('⚠ PawBooks vault could not save. Check storage space before closing BC.');});
+  }
+  function bookVaultPrepareAccount(account){
+    pawBookVault.account=account;pawBookVault.key=null;pawBookVault.salt=null;
+    try{pawBookVault.active=localStorage.getItem(bookVaultStorageKey(account))!==null;}catch{pawBookVault.active=false;}
+    pawBookVault.locked=pawBookVault.active;
+    pawBookVault.error='';
+  }
+  async function bookVaultEnable(){
+    if(pawBookVault.active)return notice('PawBooks vault already enabled.');
+    if(!bookVaultCryptoAvailable())return notice('Web Crypto requires a secure browser context.');
+    const password=window.prompt('Choose a PawBooks vault password (at least 12 characters). You must remember this to unlock books after restarting.','');
+    if(password===null)return;if(password.length<12)return notice('Use a longer, unique password (12+ characters).');
+    if(window.prompt('Confirm PawBooks vault password:','')!==password)return notice('Passwords did not match.');
+    const account=state.myId;
+    try{
+      const salt=window.crypto.getRandomValues(new Uint8Array(16));
+      const key=await bookVaultDerive(password,salt);
+      if(account!==state.myId)return;
+      const vault=await bookVaultEncrypt(key,salt,bookVaultPayload(),account);
+      // Write the encrypted copy BEFORE removing cleartext from the main save.
+      localStorage.setItem(bookVaultStorageKey(account),JSON.stringify(vault));
+      pawBookVault.account=account;pawBookVault.active=true;pawBookVault.locked=false;
+      pawBookVault.key=key;pawBookVault.salt=salt;
+      saveNow(true);
+      if(account!==state.myId)throw Error('Account changed during vault setup');
+      const main=safeRead(dataKey(),{});
+      if((main.sharedAlbums?.length||0)||Object.keys(main.privateBookPages||{}).length)
+        throw Error('Main save still contains PawBooks data; encrypted migration was not finalized');
+      notice('🔐 PawBooks vault enabled. Back up your password—there is no recovery key.');
+      bookRender();
+    }catch(e){
+      console.error('[PawLounge] Vault setup failed:',e);
+      // Leave original data untouched if secure migration could not finish.
+      pawBookVault.active=false;pawBookVault.locked=false;pawBookVault.key=null;pawBookVault.salt=null;
+      notice('PawBooks encryption could not finish: '+String(e?.message||e).slice(0,100));
+    }
+  }
+  async function bookVaultUnlock(){
+    if(!pawBookVault.active||!pawBookVault.locked)return;
+    if(!bookVaultCryptoAvailable())return notice('Web Crypto is unavailable in this browser context.');
+    const password=window.prompt('PawBooks vault password:','');if(password===null)return;
+    const account=state.myId,record=bookVaultRecord(account);
+    if(!record)return notice('Encrypted vault is missing or damaged; do not overwrite your backup.');
+    try{
+      const salt=pawBase64UrlToBytes(record.salt);
+      if(salt.length!==16)throw Error('Invalid salt');
+      const key=await bookVaultDerive(password,salt);
+      const payload=await bookVaultDecrypt(key,record,account);
+      if(state.myId!==account)return;
+      state.sharedAlbums=payload.sharedAlbums.slice(-30).map(normalizeAlbum).filter(Boolean);
+      state.privateBookPages=normalizePrivateBookPages(payload.privateBookPages);
+      pawBookVault.key=key;pawBookVault.salt=salt;pawBookVault.locked=false;pawBookVault.error='';
+      notice('🔓 PawBooks unlocked for this session.');renderPawBooks();
+    }catch(e){console.warn('[PawLounge] Vault unlock rejected:',e);notice('Incorrect password or damaged encrypted vault.');}
+  }
+  async function bookVaultLock(){
+    if(!pawBookVault.active||pawBookVault.locked)return;
+    bookVaultQueueSave();await pawBookVault.queue;
+    if(pawBookVault.error)return notice('Cannot lock: last encrypted save failed. Preserve your session and free storage.');
+    state.sharedAlbums=[];state.privateBookPages={};state.albumView='';
+    pawBookVault.key=null;pawBookVault.salt=null;pawBookVault.locked=true;
+    saveNow(true);notice('🔒 PawBooks locked.');renderPawBooks();
+  }
+  function bookVaultControls(){
+    if(!pawBookVault.active)return '<button class="secondary" data-action="bookvaultenable" title="Encrypt all PawBooks saved on this device">🔐 Protect books on this device</button>';
+    if(pawBookVault.locked)return '<button class="primary" data-action="bookvaultunlock">🔓 Unlock PawBooks</button>';
+    return '<button class="secondary" data-action="bookvaultlock">🔒 Lock local vault</button>';
+  }
+
+  const safeRead=(key,fallback)=>{
+    try{
+      const stored=localStorage.getItem(key);
+      if(!stored)return fallback;
+      const data=stored.startsWith(PAW_CODEC_PREFIX)?pawCodecDecode(stored,4500000):JSON.parse(stored);
+      return data??fallback;
+    }catch(err){console.warn('[PawLounge] Cannot read saved data:',err);pawCodecMetrics.failed++;return fallback;}
+  };
+  const safeWrite=(key,value)=>{
+    try{
+      localStorage.setItem(key,pawCodecEncode(value));return true;
+    }catch(err){
+      // Do not sacrifice conversation persistence to a larger encoded representation.
+      pawCodecMetrics.storageFallbacks++;
+      try{localStorage.setItem(key,JSON.stringify(value));return true;}
+      catch(e){console.warn('[PawLounge] Storage full/unavailable:',e);return false;}
+    }
+  };
+
+  // v0.9.13 Message Integrity Shield. BC supplies the outer sender member number.
+  // Packet JSON and any self-declared sender inside it are UNTRUSTED. This is
+  // validation, correlation and abuse control, not end-to-end authentication.
+  const integrity = {rejects:0,duplicates:0,rateLimited:0,legacy:0,accepted:0,
+    bursts:new Map(),keys:new Set(),recovery:new Map(),quorums:new Map()};
+  const INTEGRITY_LOG_LIMIT=650;
+  function integrityNonce(){
+    if(window.crypto?.getRandomValues){const a=new Uint8Array(12);window.crypto.getRandomValues(a);return [...a].map(x=>x.toString(16).padStart(2,'0')).join('');}
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,16)}`;
+  }
+  function integrityReject(){integrity.rejects++;return false;}
+  // IDs travel with messages and remain stable across exports, history and
+  // reactions. Group IDs intentionally have a different prefix from message IDs.
+  function uniqueMessageId(){return `msg_${me()}_${integrityNonce()}`;}
+  function assignMissingMessageIds(messages){
+    const seen=new Set();let fixed=0;
+    for(const m of messages){
+      if(!m||typeof m!=='object')continue;
+      let id=typeof m.id==='string'?m.id:'';
+      if(!id || id.length>90 || seen.has(id)){id=uniqueMessageId();fixed++;}
+      m.id=id;seen.add(id);
+    }
+    return fixed;
+  }
+  function inboundLimit(from,family,raw,maxBytes=6000){
+    if(!numeric(from)||from===me()||typeof raw!=='string'||raw.length>maxBytes)return integrityReject();
+    const now=Date.now(),key=`${from}:${family}`;
+    let record=integrity.bursts.get(key);
+    if(!record||now-record.at>10000)record={at:now,count:0};
+    record.count++;integrity.bursts.set(key,record);
+    if(integrity.bursts.size>250){for(const [k,v] of integrity.bursts)if(now-v.at>15000)integrity.bursts.delete(k);}
+    // A normal busy group can produce dozens of events; reject floods only.
+    if(record.count>70){integrity.rateLimited++;return false;}
+    return true;
+  }
+  function integrityReplayKey(family,from,packet,legacyKey=''){
+    if(!packet||typeof packet!=='object'||Array.isArray(packet))return '';
+    if(packet.nonce!==undefined){
+      if(typeof packet.nonce!=='string'||!/^[a-zA-Z0-9_-]{12,72}$/.test(packet.nonce))return '!invalid';
+      return `${family}:${from}:nonce:${packet.nonce}`;
+    }
+    integrity.legacy++;
+    // Legacy peers have no nonce; only immutable message IDs can be durably
+    // deduplicated. Mutable sync/ack/reactions remain backward compatible.
+    return legacyKey?`${family}:${from}:legacy:${legacyKey}`:'';
+  }
+  function integrityAcceptEvent(family,from,packet,legacyKey=''){
+    const key=integrityReplayKey(family,from,packet,legacyKey);
+    if(key==='!invalid')return integrityReject();
+    const semantic=legacyKey?`${family}:${from}:semantic:${legacyKey}`:'';
+    if((key&&integrity.keys.has(key))||(semantic&&integrity.keys.has(semantic))){integrity.duplicates++;return false;}
+    if(semantic){integrity.keys.add(semantic);state.integritySeen.push([semantic,Date.now()]);}
+    if(key){
+      integrity.keys.add(key);state.integritySeen.push([key,Date.now()]);
+      if(state.integritySeen.length>INTEGRITY_LOG_LIMIT){
+        state.integritySeen.splice(0,state.integritySeen.length-INTEGRITY_LOG_LIMIT);
+        integrity.keys=new Set(state.integritySeen.map(x=>x[0]));
+      }
+      saveSoon();
+    }
+    if(state.integritySeen.length>INTEGRITY_LOG_LIMIT){state.integritySeen=state.integritySeen.slice(-INTEGRITY_LOG_LIMIT);integrity.keys=new Set(state.integritySeen.map(x=>x[0]));}
+    integrity.accepted++;return true;
+  }
+  function integrityMsgId(s,max=80){return typeof s==='string' && s.length<=max && /^[a-zA-Z0-9_-]{8,80}$/.test(s);}
+  // A history query is scoped to a short-lived, per-peer challenge. It is not
+  // enough to be asked: recovery is committed only on two matching, independent
+  // reports from two *other* accepted participants. The requester is not a vote.
+  const RECOVERY_QUORUM=2, RECOVERY_TTL=90000, RECOVERY_MAX_CANDIDATES=80;
+  function integrityRecoveryKey(group,member){return `${group}:${numeric(member)}`;}
+  function integrityRequestRecovery(group,member,after){
+    const token=integrityNonce();
+    integrity.recovery.set(integrityRecoveryKey(group,member),{token,until:Date.now()+RECOVERY_TTL,after});
+    return token;
+  }
+  function integrityPermitsRecovery(group,member,packet){
+    const query=integrity.recovery.get(integrityRecoveryKey(group,member));
+    if(!query||Date.now()>query.until||!packet||packet.rid!==query.token)return false;
+    if(!Number.isSafeInteger(Number(packet.time))||Number(packet.time)<query.after||Number(packet.time)>Date.now()+60000)return false;
+    return true;
+  }
+  function quorumState(gid){
+    const result=integrity.quorums.get(gid);
+    if(!result||Date.now()>result.until)return null;
+    return result;
+  }
+  function recoveryStatus(gid){
+    const round=quorumState(gid);
+    if(!round)return 'Requires matching reports from two other accepted members using v0.9.15+.';
+    return `Confirmed ${round.confirmed} · Pending ${round.candidates.size} · Reports from ${round.reporters.size}/${RECOVERY_QUORUM}+ members`;
+  }
+  function receiveHistoryWitness(g,from,p){
+    const round=quorumState(g.id);
+    if(!round||!round.members.has(from)||!g.joined||!g.accepted.includes(from)||from===me()||
+       !integrityPermitsRecovery(g.id,from,p)||!integrityMsgId(p.mid,70)||
+       !g.accepted.includes(numeric(p.author))||typeof p.text!=='string'||!p.text.trim()||
+       p.text.length>MAX_GROUP_TEXT||!Number.isSafeInteger(p.time)||
+       p.time<Date.now()-8*86400000||p.time>Date.now()+60000)return integrityReject();
+    if(g.messages.some(m=>m.id===p.mid))return false;
+    const reply=normalizeReply(p.replyTo), author=numeric(p.author);
+    // Compare *exact* content, author and reply reference; a matching
+    // ID with different text is not a valid corroboration.
+    const value=JSON.stringify([p.mid,author,p.text,reply]);
+    let candidate=round.candidates.get(p.mid);
+    if(!candidate){
+      if(round.candidates.size>=RECOVERY_MAX_CANDIDATES)return integrityReject();
+      candidate={variants:new Map(),reporters:new Set()};round.candidates.set(p.mid,candidate);
+    }
+    if(candidate.reporters.has(from))return false;
+    candidate.reporters.add(from);round.reporters.add(from);
+    let variant=candidate.variants.get(value);
+    if(!variant){
+      // Never permit arbitrary unbounded conflicting copies of one ID.
+      if(candidate.variants.size>=RECOVERY_QUORUM+2)return integrityReject();
+      variant={votes:new Set(),author,text:p.text,time:p.time,reply};candidate.variants.set(value,variant);
+    }
+    variant.votes.add(from);
+    if(variant.votes.size>=RECOVERY_QUORUM){
+      const voters=[...variant.votes];
+      addGroupMessage(g,variant.author,variant.text,p.mid,variant.reply,variant.time,true,voters);
+      round.candidates.delete(p.mid);round.confirmed++;
+      notice(`✓ Recovered group message with ${RECOVERY_QUORUM} matching member confirmations.`);
+    }
+    if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id){
+      const label=ui.shadow?.querySelector('[data-recovery-status]');
+      if(label)label.textContent=recoveryStatus(g.id);
+    }
+    return true;
+  }
   const dataKey = () => `Kittychat.v1.${state.myId}`;
   const imgUrl = file => {
     const base = /^https:\/\/[^\s]+\/$/.test(state.settings.assetBase) ? state.settings.assetBase : DEFAULT_ASSET_BASE;
@@ -174,10 +639,37 @@
       currentRoomRoster().map(character=>`${numeric(character.MemberNumber)}:${trim(character.Nickname||character.Name||'',80)}`).sort().join('|') : 'not-in-room';
   }
 
+  // Native BC's OnlineFriends response is the only source for remote availability.
+  // Cache its online IDs briefly; an old PawLounge KCStatus does not mean online.
+  const pawOnlinePresence={ids:new Set(),seenAt:0,lastQuery:0,modSdkHookInstalled:false};
+  function pawObserveNativePresence(data){
+    if(data?.Query!=='OnlineFriends'||!Array.isArray(data.Result))return;
+    pawOnlinePresence.ids=new Set(data.Result.filter(e=>e&&e.Online!==false&&e.IsOnline!==false&&e.MemberNumber).map(e=>numeric(e.MemberNumber)).filter(Boolean));
+    pawOnlinePresence.seenAt=Date.now();
+    if(state.open&&state.tab==='chats'){scheduleSidebarUpdate();renderChatHeader();}
+  }
+  function pawPresenceTick(){
+    // The OnlineFriends response is observed by hookBC() through ModSDK.
+    // NEVER overwrite ServerAccountQueryResult directly: BCX detects raw
+    // function replacements and other mods would lose their hook chain.
+    if(!state.open||!me()||!window.ServerIsConnected||typeof window.ServerSend!=='function')return;
+    // Without the ModSDK observer a query would be useless; avoid spamming BC.
+    if(!pawOnlinePresence.modSdkHookInstalled)return;
+    if(Date.now()-pawOnlinePresence.lastQuery>95000){
+      pawOnlinePresence.lastQuery=Date.now();
+      try{window.ServerSend('AccountQuery',{Query:'OnlineFriends'});}catch{}
+    }
+  }
+  function pawFriendConfirmedOnline(member){
+    if(numeric(member)===me())return true;
+    if(inRoom(numeric(member)))return true;
+    return Date.now()-pawOnlinePresence.seenAt<130000&&pawOnlinePresence.ids.has(numeric(member));
+  }
   function statusView(member) {
     if (numeric(member) === me()) return state.settings.shareFriendStatus ? {
       mode:state.settings.friendStatusMode, text:trim(state.settings.friendStatusText,100)
     } : null;
+    if(!pawFriendConfirmedOnline(member))return null;
     const raw=state.profiles[numeric(member)]?.friendStatus;
     if (!raw || !Object.hasOwn(STATUS_MODES,raw.mode)) return null;
     return {mode:raw.mode,text:trim(raw.text || '',100)};
@@ -203,7 +695,7 @@
       ? {type:'KCStatus',version:1,action:'request'}
       : statusUpdatePayload();
     try {
-      window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:'KCStatus',IsSecret:true,Message:JSON.stringify(data)});
+      window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:'KCStatus',IsSecret:true,Message:pawWireJSON(data)});
       statusWire.packetsSent++;
       return true;
     } catch(err) {
@@ -249,7 +741,7 @@
     member=numeric(member);
     if (!member || !myFriends().includes(member)) return;
     let item;
-    try { item=JSON.parse(String(data.Message||'')); } catch { return; }
+    try { item=pawParseWireJSON(String(data.Message||''),1600); } catch { return; }
     if (item?.type!=='KCStatus' || item.version!==1) return;
     if (item.action==='request') {
       const now=Date.now();
@@ -318,7 +810,7 @@
   }
   function messageActions(m,kind) {
     const id=escapeText(m.id);
-    return `<span class="kc-message-actions"><button class="react" data-reply-msg="${id}" title="Reply to this message">↩</button><button class="react" data-react="${id}" title="React to this message">♡</button><button class="react" data-save-moment="${id}" title="Save as Paw Moment">☆</button></span>`;
+    return `<span class="kc-message-actions" title="Message ID: ${id}"><button class="react" data-reply-msg="${id}" title="Reply to this message">↩</button><button class="react" data-react="${id}" title="React to this message">♡</button><button class="react" data-save-moment="${id}" title="Save privately">☆</button><button class="react" data-book-save-message="${id}" title="Add to PawBook (ask consent if quoting another user)">📖</button></span>`;
   }
   function currentConversationKind() {return currentGroup()?'group':'chat';}
   function setReplyTarget(mid) {
@@ -338,7 +830,7 @@
     el.classList.remove('hidden');
     el.innerHTML=`<span>↪ Replying to <b>${escapeText(r.senderName)}</b>: ${escapeText(r.snippet)}</span><button class="iconbutton" data-action="cancelreply" title="Cancel reply">✕</button>`;
   }
-  async function applyReaction(kind,conversation,mid,member,emoji,remove=false,mustBeWhisper=false) {
+  async function applyReaction(kind,conversation,mid,member,emoji,remove=false,mustBeWhisper=false,expectedAuthor=0) {
     emoji=trim(emoji,12);mid=trim(mid,100);member=numeric(member);
     if (!member || !mid || !emoji) return;
     const recent=visibleHistoryTail(kind,conversation);
@@ -353,7 +845,7 @@
         });
       } catch {};
     }
-    if (!msg || (mustBeWhisper && msg.mode!=='whisper')) return;
+    if (!msg || (mustBeWhisper && msg.mode!=='whisper')||(expectedAuthor&&msg.from!==expectedAuthor)) return;
     const reactions=normalizeReactions(msg.reactions);
     const members=new Set(reactions[emoji]||[]);
     if (remove) members.delete(member); else members.add(member);
@@ -373,6 +865,9 @@
   const PAW_WHISPER_ID_TAG='KCPawWhisperId';
   const PAW_WHISPER_REACTION='KCPawWhisperReaction';
   const PAW_HIDDEN_REACTION_PREFIX='KCPawWhisperReaction:';
+  const PAW_HIDDEN_TYPING_PREFIX='KCPawTyping:';
+  // Short-lived; never persisted. Avoid one friend's keystrokes throttling another's.
+  const typingSendTimes=new Map();
   function nativeWhisperId(packet){
     const dictionary=Array.isArray(packet?.Dictionary)?packet.Dictionary:[];
     const own=dictionary.find(v=>v?.Tag===PAW_WHISPER_ID_TAG);
@@ -385,13 +880,13 @@
     let id=nativeWhisperId(packet);
     if(!packet.Dictionary.some(v=>v?.Tag===PAW_WHISPER_ID_TAG)){
       // Never reuse the native MsgId, which may be regenerated by the BC queue.
-      id=`pw-${me()}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
+      id=uniqueMessageId();
       packet.Dictionary.push({Tag:PAW_WHISPER_ID_TAG,Text:id});
     }
     return id;
   }
   function whisperReactionWire(message,mid,emoji,remove){
-    return {type:PAW_WHISPER_REACTION,v:1,mid:trim(mid,90),emoji:trim(emoji,12),remove:!!remove,
+    return {type:PAW_WHISPER_REACTION,v:1,nonce:integrityNonce(),mid:trim(mid,90),emoji:trim(emoji,12),remove:!!remove,
       source:numeric(message.from),quote:trim(message.text,150),length:message.text.length};
   }
   function validWhisperReaction(data){
@@ -419,8 +914,9 @@
     if(!from||from===me()||!packet||![from,me()].includes(packet.source))return false;
     if(!state.chats[from])return false;
     const id=locateWhisperReaction(from,packet);
+    // The archive validates message authorship even for older, paged messages.
     // applyReaction updates the archive, the visible chips and saved chat data.
-    void applyReaction('chat',from,id,from,packet.emoji,packet.remove,true);
+    void applyReaction('chat',from,id,from,packet.emoji,packet.remove,true,packet.source);
     return true;
   }
   function sendWhisperReaction(member,original,emoji,remove){
@@ -434,17 +930,44 @@
     // targeted path also supports players who are not on each other's BC list.
     try {
       window.ServerSend('ChatRoomChat',{Type:'Hidden',Target:member,
-        Content:PAW_HIDDEN_REACTION_PREFIX+JSON.stringify(packet)});
+        Content:PAW_HIDDEN_REACTION_PREFIX+pawWireJSON(packet)});
       return true;
     }catch(err){console.warn('[PawLounge] Whisper reaction send failed:',err);notice('Could not send whisper reaction.');return false;}
   }
+  // Type indicators are ephemeral and never enter message history, notifications,
+  // the outbox or normal native chat. Sender identity comes from BC's outer packet.
+  function receiveTypingPaws(packet,from,transport){
+    from=numeric(from);
+    if(!from||from===me()||!packet||packet.type!=='KCTyping'||packet.v!==1||
+       typeof packet.typing!=='boolean'||
+       (packet.mode!==undefined&&!['beep','whisper'].includes(packet.mode)))return false;
+    if(transport==='whisper'&&(!inRoom(from)||packet.mode!=='whisper'))return false;
+    state.typingUntil[from]=packet.typing?Date.now()+5500:0;
+    if(state.open&&state.tab==='chats'&&state.selected===from)renderChatHeader();
+    return true;
+  }
+  function onHiddenTypingPacket(data,senderCharacter=null){
+    if(data?.Type!=='Hidden'||typeof data.Content!=='string'||
+       !data.Content.startsWith(PAW_HIDDEN_TYPING_PREFIX))return false;
+    // Recognized control messages are consumed even when malformed: never turn
+    // a hostile or outdated control packet into a visible chat notification.
+    if(data.Content.length>1100)return true;
+    const from=numeric(data.Sender??data.MemberNumber??senderCharacter?.MemberNumber);
+    const target=numeric(data.Target??data.TargetMemberNumber??data.Recipient);
+    if(!from||from===me()||(target&&target!==me())||!inRoom(from))return true;
+    try {
+      if(inboundLimit(from,'typing',data.Content,850))
+        receiveTypingPaws(pawParseWireJSON(data.Content.slice(PAW_HIDDEN_TYPING_PREFIX.length),1000),from,'whisper');
+    }catch { /* Invalid packet: no message, no presence update. */ }
+    return true;
+  }
   function onWhisperReactionPacket(data,senderCharacter=null){
     if(data?.Type!=='Hidden'||typeof data.Content!=='string'||
-        !data.Content.startsWith(PAW_HIDDEN_REACTION_PREFIX)||data.Content.length>650)return false;
+        !data.Content.startsWith(PAW_HIDDEN_REACTION_PREFIX)||data.Content.length>1100)return false;
     const from=numeric(data.Sender??data.MemberNumber??senderCharacter?.MemberNumber);
     const target=numeric(data.Target??data.TargetMemberNumber??data.Recipient);
     if(!from||from===me()||(target&&target!==me()))return false;
-    try{return receiveWhisperReaction(JSON.parse(data.Content.slice(PAW_HIDDEN_REACTION_PREFIX.length)),from);}
+    try{if(!inboundLimit(from,'reaction',data.Content,750))return false;const p=pawParseWireJSON(data.Content.slice(PAW_HIDDEN_REACTION_PREFIX.length),2200);return integrityAcceptEvent('whisperReaction',from,p)&&receiveWhisperReaction(p,from);}
     catch{return false;}
   }
   function replyAndReact(kind,mid,emoji) {
@@ -507,12 +1030,19 @@
     const conv=String(conversation);
     if (!member || !['chat','group'].includes(kind) || !conv || !message || typeof message.text!=='string') return null;
     const time=Number(message.time)||Date.now();
-    const msgId=trim(message.id,90) || `legacy-${time}-${numeric(message.from)}-${String(message.text).slice(0,70)}`;
+    const msgId=trim(message.id,90) || uniqueMessageId();
     const key=`${member}:${kind}:${conv}:${msgId}`;
     return {key,account:member,kind,conversation:conv,time,
-      id:msgId,from:numeric(message.from),text:trim(message.text,group?MAX_GROUP_TEXT:2000),
+      id:msgId,from:numeric(message.from),text:pawCodecEncode(trim(message.text,group?MAX_GROUP_TEXT:2000)),
       replyTo:normalizeReply(message.replyTo),reactions:normalizeReactions(message.reactions),nativeId:!!message.nativeId,
-      ...(group?{}:{mode:message.mode==='whisper'?'whisper':'beep',reaction:trim(message.reaction||'',6)})};
+      ...(group?{recovered:!!message.recovered,verifiedBy:(message.verifiedBy||[]).slice(0,MAX_GROUP_MEMBERS)}:{mode:message.mode==='whisper'?'whisper':'beep',reaction:trim(message.reaction||'',6)})};
+  }
+  function pawDecodeHistoryRow(row){
+    if(row&&typeof row.text==='string'&&row.text.startsWith(PAW_CODEC_PREFIX)){
+      try{const decoded=pawCodecDecode(row.text,12000);row={...row,text:typeof decoded==='string'?decoded:''};}catch{pawCodecMetrics.failed++;row={...row,text:'[Damaged encoded message]'};}
+    }
+    if(row && (!row.id || typeof row.id!=='string')) row={...row,id:row.key?`legacy_${String(row.key).replace(/[^a-zA-Z0-9_-]/g,'_').slice(-64)}`:uniqueMessageId()};
+    return row;
   }
   function archiveMessages(account,kind,conversation,messages) {
     for (const message of messages) {
@@ -576,7 +1106,7 @@
       request.onsuccess=() => {
         const cursor=request.result;
         if (!cursor || result.length>limit) return;
-        result.push(cursor.value);
+        result.push(pawDecodeHistoryRow(cursor.value));
         if (result.length<=limit) cursor.continue();
       };
       request.onerror=()=>reject(request.error);
@@ -704,7 +1234,7 @@
         const result=[];
         const tx=db.transaction('messages','readonly');
         const request=tx.objectStore('messages').index('byAccount').openCursor(IDBKeyRange.only(account));
-        request.onsuccess=()=>{const cursor=request.result;if(cursor){result.push(cursor.value);cursor.continue();}};
+        request.onsuccess=()=>{const cursor=request.result;if(cursor){result.push(pawDecodeHistoryRow(cursor.value));cursor.continue();}};
         request.onerror=()=>reject(request.error);
         tx.oncomplete=()=>resolve(result);
         tx.onerror=()=>reject(tx.error);
@@ -754,7 +1284,8 @@
     for (const old of entries.slice(MAX_CONVERSATIONS)) delete state.chats[old.id];
     for (const g of Object.values(state.groups)) g.messages = (g.messages || []).slice(-MAX_MESSAGES);
     for (const old of Object.values(state.groups).sort((a,b) => (b.updated||0) - (a.updated||0)).slice(MAX_GROUPS)) delete state.groups[old.id];
-    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince, sharedAlbums:state.sharedAlbums.slice(-30), invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
+    if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();
+    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
   }
   function loadForAccount(id) {
     if (state.myId === id) return;
@@ -762,13 +1293,35 @@
     statusWire.dispatchTimer=null;statusWire.pending=[];statusWire.queued.clear();
     statusWire.requested.clear();statusWire.responded.clear();statusWire.bootAccount=0;
     state.myId = id;
-    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.sharedAlbums=[];state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
+    bookVaultPrepareAccount(id);
+    integrity.bursts.clear();integrity.recovery.clear();integrity.quorums.clear();integrity.keys.clear();
+    state.integritySeen=[];
+    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.sharedAlbums=[];state.privateBookPages={};state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.deliveryOutbox=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
     const loaded = safeRead(dataKey(), {});
-    state.scheduledMessages=(Array.isArray(loaded.scheduledMessages)?loaded.scheduledMessages:[]).slice(-100).map(x=>({id:trim(x.id,70),kind:x.kind==='group'?'group':'chat',to:x.kind==='group'?trim(x.to,80):numeric(x.to),text:trim(x.text,x.kind==='group'?MAX_GROUP_TEXT:2000),mode:x.mode==='whisper'?'whisper':'beep',due:Number(x.due),status:['pending','sent','missed','cancelled'].includes(x.status)?x.status:'cancelled',sentAt:Number(x.sentAt)||0})).filter(x=>x.id&&x.to&&x.text&&Number.isFinite(x.due));
+    state.integritySeen=(Array.isArray(loaded.integritySeen)?loaded.integritySeen:[]).slice(-INTEGRITY_LOG_LIMIT)
+      .filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&x[0].length<180&&Number.isFinite(Number(x[1]))&&Number(x[1])>Date.now()-14*86400000);
+    integrity.keys=new Set(state.integritySeen.map(x=>x[0]));
+    state.scheduledMessages=(Array.isArray(loaded.scheduledMessages)?loaded.scheduledMessages:[]).slice(-100).map(x=>({id:trim(x.id,70),kind:x.kind==='group'?'group':'chat',to:x.kind==='group'?trim(x.to,80):numeric(x.to),text:trim(x.text,x.kind==='group'?MAX_GROUP_TEXT:2000),mode:x.mode==='whisper'?'whisper':'beep',secure:x.kind!=='group'&&x.secure===true,due:Number(x.due),status:['pending','sent','missed','cancelled'].includes(x.status)?x.status:'cancelled',sentAt:Number(x.sentAt)||0})).filter(x=>x.id&&x.to&&x.text&&Number.isFinite(x.due));
+    // A previously interrupted send is ambiguous, not a license to resend it.
+    // Persist the intent for inspection, but never auto-replay an in-flight packet.
+    state.deliveryOutbox=(Array.isArray(loaded.deliveryOutbox)?loaded.deliveryOutbox:[]).slice(-120).map(raw=>{
+      if(!raw||typeof raw!=='object')return null;
+      const kind=raw.kind==='group'?'group':'chat';
+      const id=trim(raw.id,80),to=kind==='chat'?numeric(raw.to):trim(raw.to,80);
+      const text=trim(raw.text,kind==='group'?MAX_GROUP_TEXT:2000);
+      const mode=kind==='group'?'group':raw.mode==='whisper'?'whisper':'beep';
+      if(!/^out_[\w-]{6,75}$/.test(id)||!to||!text|| (kind==='group'&&!/^g_[a-zA-Z0-9_-]{8,44}$/.test(to)))return null;
+      const status=['queued','sending','sent','partial','failed','acknowledged','unconfirmed','cancelled'].includes(raw.status)?raw.status:'failed';
+      const ackTokens=kind==='group'&&raw.ackTokens&&typeof raw.ackTokens==='object'?Object.fromEntries(Object.entries(raw.ackTokens).filter(([k,v])=>numeric(k)&&typeof v==='string'&&/^[a-zA-Z0-9_-]{12,72}$/.test(v)).slice(0,MAX_GROUP_MEMBERS)):{};
+      const targets=kind==='group' && raw.targets&&typeof raw.targets==='object'?Object.fromEntries(Object.entries(raw.targets).filter(([k,v])=>numeric(k)&&['queued','sending','sent','acknowledged','failed','unconfirmed'].includes(v)).slice(0,MAX_GROUP_MEMBERS)):{};
+      for(const k in targets) if(targets[k]==='sending')targets[k]='unconfirmed';
+      return {id,kind,to,text,mode,secure:kind==='chat'&&raw.secure===true,mid:trim(raw.mid||'',75),messageId:trim(raw.messageId||'',90),replyTo:normalizeReply(raw.replyTo),targets,ackTokens,created:Number(raw.created)||Date.now(),updated:Number(raw.updated)||Date.now(),attempts:Math.min(5,Math.max(0,Number(raw.attempts)||0)),nextTry:Date.now()+2000,status:status==='sending'?'unconfirmed':status,reason:trim(raw.reason||'',160)};
+    }).filter(Boolean);
     state.moments=(Array.isArray(loaded.moments)?loaded.moments:[]).slice(-MOMENT_LIMIT).map(m=>normalizeMoment(m)).filter(Boolean);
     state.circles=(Array.isArray(loaded.circles)?loaded.circles:[]).slice(0,30).map(c=>({id:trim(c.id,40),name:trim(c.name,45),members:[...new Set((Array.isArray(c.members)?c.members:[]).map(numeric).filter(Boolean))].slice(0,150),shareStatus:c.shareStatus!==false,shareProfile:c.shareProfile!==false,quiet:c.quiet===true})).filter(c=>/^circle_[\w-]{4,32}$/.test(c.id)&&c.name);
     state.catchUpSince=Number.isFinite(Number(loaded.catchUpSince))?Number(loaded.catchUpSince):Date.now();
-    state.sharedAlbums=(Array.isArray(loaded.sharedAlbums)?loaded.sharedAlbums:[]).slice(-30).map(normalizeAlbum).filter(Boolean);
+    state.sharedAlbums=pawBookVault.active?[]:(Array.isArray(loaded.sharedAlbums)?loaded.sharedAlbums:[]).slice(-30).map(normalizeAlbum).filter(Boolean);
+    state.privateBookPages=pawBookVault.active?{}:normalizePrivateBookPages(loaded.privateBookPages);
     state.invitations=(Array.isArray(loaded.invitations)?loaded.invitations:[]).slice(-70).map(normalizeInvitation).filter(Boolean);
     state.pawGuestbook=(Array.isArray(loaded.pawGuestbook)?loaded.pawGuestbook:[]).slice(-50).map(normalizeGuestEntry).filter(Boolean);
     state.roomFavorites=(Array.isArray(loaded.roomFavorites)?loaded.roomFavorites:[]).slice(-70).filter(r=>r && typeof r.Name==='string' && r.Name.length<110 && ['X','M','F'].includes(r.Space));
@@ -778,13 +1331,18 @@
     // Migrate every message that STILL exists in the old local save, before
     // the 90-message UI cache trims it. Missing historical BC server messages
     // cannot be recreated by Kittychat.
+    let legacyIdsRepaired=0;
     for (const [member,c] of Object.entries(loaded.chats||{})) {
-      if (numeric(member) && Array.isArray(c?.messages))
+      if (numeric(member) && Array.isArray(c?.messages)){
+        legacyIdsRepaired+=assignMissingMessageIds(c.messages);
         archiveMessages(id,'chat',member,c.messages.filter(m=>m&&typeof m.text==='string'));
+      }
     }
     for (const [gid,g] of Object.entries(loaded.groups||{})) {
-      if (/^g_[a-zA-Z0-9_-]{8,44}$/.test(gid) && Array.isArray(g?.messages))
+      if (/^g_[a-zA-Z0-9_-]{8,44}$/.test(gid) && Array.isArray(g?.messages)){
+        legacyIdsRepaired+=assignMissingMessageIds(g.messages);
         archiveMessages(id,'group',gid,g.messages.filter(m=>m&&typeof m.text==='string'));
+      }
     }
     state.historyEpoch++;state.historySelection='';state.historyOlder=[];
     state.historyHasMore=false;state.historyLoading=false;
@@ -843,7 +1401,7 @@
         announcement:raw.announcement?{text:trim(raw.announcement.text,220),from:numeric(raw.announcement.from),at:Number(raw.announcement.at)||0}:null,
         polls:(Array.isArray(raw.polls)?raw.polls:[]).slice(-25).map(normalizePawPoll).filter(Boolean), receipts:raw.receipts && typeof raw.receipts==='object' ? Object.fromEntries(Object.entries(raw.receipts).slice(-90).map(([k,v])=>[trim(k,70),Array.isArray(v)?v.map(numeric).filter(n=>members.includes(n)):[]])) : {}, messages:(Array.isArray(raw.messages)?raw.messages:[]).slice(-MAX_MESSAGES)
           .filter(m=>m && typeof m.text==='string' && members.includes(numeric(m.from)))
-          .map(m=>({id:trim(m.id,70),text:trim(m.text,MAX_GROUP_TEXT),from:numeric(m.from),time:Number(m.time)||Date.now(),replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions)})) };
+          .map(m=>({id:trim(m.id,70),text:trim(m.text,MAX_GROUP_TEXT),from:numeric(m.from),time:Number(m.time)||Date.now(),replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions),recovered:!!m.recovered,verifiedBy:(Array.isArray(m.verifiedBy)?[...new Set(m.verifiedBy.map(numeric).filter(n=>members.includes(n)))].slice(0,MAX_GROUP_MEMBERS):[])})) };
     }
     if (state.selectedGroup && !state.groups[state.selectedGroup]) state.selectedGroup = '';
     // Validate persisted data before ever putting it into the UI.
@@ -852,8 +1410,12 @@
       chat.id = numeric(key); chat.displayName = trim(chat.displayName || '', 80);chat.replyLater=!!chat.replyLater;chat.requestPending=!!chat.requestPending;chat.requestAccepted=!!chat.requestAccepted;chat.snoozeUntil=Math.max(0,Number(chat.snoozeUntil)||0); chat.messages = chat.messages.slice(-MAX_MESSAGES).filter(m => m && typeof m.text === 'string').map(m => ({
         id: trim(m.id, 80), text: trim(m.mode === 'whisper' ? m.text : stripNativeBeepMetadata(m.text), 2000), from: numeric(m.from), time: Number(m.time) || Date.now(),
         mode: m.mode === 'whisper' ? 'whisper' : 'beep', replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions),nativeId:!!m.nativeId,reaction: trim(m.reaction || '', 6) }));
+      assignMissingMessageIds(chat.messages);
       chat.unread = Number(chat.unread) || 0;
     }
+    for(const g of Object.values(state.groups))assignMissingMessageIds(g.messages);
+    // Persist repaired legacy IDs so they never change on the next restart.
+    if(legacyIdsRepaired)saveSoon();
   }
   function notice(text) {
     if (!ui.status) return;
@@ -890,7 +1452,7 @@
     }
     const mid=trim(metadata?.messageId || '',90);
     if(mid&&chat.messages.some(m=>m.id===mid))return;
-    const message={ id: mid || `${Date.now()}-${Math.random().toString(36).slice(2,7)}`, text, from: numeric(from), time: monotonicMessageTime(), mode, replyTo:normalizeReply(metadata?.replyTo),reactions:{},nativeId:!!mid };
+    const message={ id: mid || uniqueMessageId(), text, from: numeric(from), time: monotonicMessageTime(), mode, replyTo:normalizeReply(metadata?.replyTo),reactions:{},nativeId:!!mid };
     chat.messages.push(message);
     archiveMessages(state.myId,'chat',member,[message]);
     if (chat.messages.length > MAX_MESSAGES) chat.messages.shift();
@@ -905,7 +1467,7 @@
     }
     saveSoon();
     updateBadge();
-    if (state.open) { scheduleSidebarUpdate(); if (state.selected === member && state.tab === 'chats') { if (sticker(text)) renderChat(); else if (!appendVisiblePrivateMessage(member,message)) renderMessages(); } }
+    if (state.open) { scheduleSidebarUpdate(); if (state.selected === member && state.tab === 'chats') { if (!appendVisiblePrivateMessage(member,message)) renderMessages(); } }
   }
   let audioCtx = null;
   function makeChime() {
@@ -926,23 +1488,36 @@
   // Ordinary BC beeps carry the human-readable preview plus an encoded Kittychat payload.
   // Custom beep types are not used: BC's built-in handler only recognizes selected types.
   const kcEncode = payload => {
-    const bytes = new TextEncoder().encode(JSON.stringify(payload));
-    return btoa(String.fromCharCode(...bytes));
+    return pawCodecEncode(payload);
   };
   const kcDecode = text => {
-    const match = String(text || '').match(/\n\[KC1:([A-Za-z0-9+/=]{1,2400})\]$/);
-    if (!match) return null;
-    try {
-      const bin = atob(match[1]);
-      const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, x=>x.charCodeAt(0))));
-      return data && data.v === 1 && typeof data.t === 'string' ? data : null;
-    } catch { return null; }
+    const raw=String(text||'');
+    const modern=raw.match(/\n\[KC2:(PL2\.[A-Za-z0-9._-]{1,6000})\]$/);
+    if(modern){
+      try{const data=pawCodecDecode(modern[1],12000);return data?.v===1&&typeof data.t==='string'?data:null;}
+      catch{pawCodecMetrics.failed++;return null;}
+    }
+    const legacy=raw.match(/\n\[KC1:([A-Za-z0-9+/=]{1,2400})\]$/);
+    if(!legacy)return null;
+    try{
+      const bin=atob(legacy[1]);
+      const data=JSON.parse(new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0))));
+      pawCodecMetrics.legacy++;
+      return data?.v===1&&typeof data.t==='string'?data:null;
+    }catch{return null;}
   };
   function sendGroupWire(member, body, summary, quiet=false) {
     if (!numeric(member) || !myFriends().includes(member) || typeof window.ServerSend !== 'function') return false;
     try {
-      const envelope = `${trim(summary,140)}\n[KC1:${kcEncode({v:1,...body})}]`;
-      if (envelope.length > 1800) return false;
+      const packet={v:1,...body,nonce:integrityNonce()};
+      const preview=body.t==='msg'?'🐾 PawLounge group message · open PawLounge to read':trim(summary,140);
+      let envelope=`${preview}\n[KC2:${kcEncode(packet)}]`;
+      if(envelope.length>1800){
+        const utf=pawEncoder.encode(JSON.stringify(packet));
+        let raw='';for(let i=0;i<utf.length;i+=8192)raw+=String.fromCharCode(...utf.subarray(i,i+8192));
+        envelope=`${preview}\n[KC1:${btoa(raw)}]`;
+      }
+      if(envelope.length>1800)return false;
       state.suppressOutgoing = true;
       window.ServerSend('AccountBeep', { MemberNumber:member, BeepType:quiet?'KCGroupControl':'', IsSecret:true, Message:envelope });
       return true;
@@ -957,13 +1532,14 @@
     return 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2,16);
   };
   const currentGroup = () => state.tab==='groups' && state.selectedGroup ? state.groups[state.selectedGroup] : null;
-  function addGroupMessage(g, from, text, id, reply=null, originalTime=null, recovered=false) {
+  function addGroupMessage(g, from, text, id, reply=null, originalTime=null, recovered=false, verifiedBy=[]) {
     if (!g || !g.joined || !g.members.includes(from) || !g.accepted.includes(from)) return;
     const mid=trim(id,70), content=trim(text,MAX_GROUP_TEXT);
     if (!content || !mid || g.messages.some(m=>m.id===mid)) return;
     const supplied=Number(originalTime);
     const time=recovered && Number.isSafeInteger(supplied) && supplied>Date.now()-8*86400000 && supplied<=Date.now()+60000 ? supplied : monotonicMessageTime();
-    const message={id:mid, text:content, from, time,replyTo:normalizeReply(reply),reactions:{}};
+    const message={id:mid, text:content, from, time,replyTo:normalizeReply(reply),reactions:{},recovered:!!recovered,
+      verifiedBy:recovered?[...new Set(verifiedBy.map(numeric))].filter(n=>g.accepted.includes(n)&&n!==me()).slice(0,MAX_GROUP_MEMBERS):[]};
     g.messages.push(message);
     g.messages.sort((a,b)=>a.time-b.time);
     archiveMessages(state.myId,'group',g.id,[message]);
@@ -982,10 +1558,21 @@
     for (const member of g.accepted) if (member!==me()) sendGroupWire(member,packet,`🐾 Kittychat group update: ${g.name}`);
   }
   function receiveGroupBeep(data, from) {
-    const p=kcDecode(data.Message);
-    if (!p || !/^g_[a-zA-Z0-9_-]{8,44}$/.test(p.id||'')) return false;
+    from=numeric(from);
+    const raw=data?.Message;
+    // Ordinary beeps are not control packets. Only inspect the KC envelope.
+    if(typeof raw!=='string'||(!raw.includes('[KC1:')&&!raw.includes('[KC2:')))return false;
+    if(!inboundLimit(from,'groups',raw,2400))return true;
+    const p=kcDecode(raw);
+    if (!p || !/^g_[a-zA-Z0-9_-]{8,44}$/.test(p.id||'')) return true;
+    if(!['invite','response','sync','msg','ack','announcement','poll','pollvote','react','historyRequest','historyMessage','historyWitness','leave'].includes(p.t))return true;
+    // A durable event ID prevents replay even after the old message leaves the
+    // 90-message cache. The sender is always BC's outer member number.
+    const eventId=(p.t==='msg'||p.t==='historyMessage'||p.t==='historyWitness')&&integrityMsgId(p.mid,70)?`${p.id}:${p.mid}`:
+      p.t==='invite'?`${p.id}:invite`:p.t==='poll'&&integrityMsgId(p.poll?.id)?`${p.id}:${p.poll.id}`:'';
+    if(!integrityAcceptEvent('group',from,p,eventId))return true;
     if (p.t==='invite') {
-      if (numeric(p.creator)!==from || !Array.isArray(p.members)) return true;
+      if (numeric(p.creator)!==from || !Array.isArray(p.members) || typeof p.name!=='string'||p.name.length>46) return true;
       const members=[...new Set(p.members.map(numeric).filter(Boolean))];
       if (members.length<2 || members.length>MAX_GROUP_MEMBERS || !members.includes(from) || !members.includes(me())) return true;
       if (!state.groups[p.id]) {
@@ -997,7 +1584,7 @@
       return true;
     }
     const g=state.groups[p.id];
-    if (!g || !g.members.includes(from)) return true;
+    if (!g || !g.members.includes(from) || (p.t!=='response' && p.t!=='sync' && !g.accepted.includes(from))) return true;
     if (p.t==='response' && me()===g.creator) {
       g.accepted=g.accepted.filter(n=>n!==from);
       if (p.accepted===true) g.accepted.push(from);
@@ -1011,38 +1598,49 @@
       if(p.announcement&&typeof p.announcement==='object'&&Number(p.announcement.at)>Number(g.announcement?.at||0))g.announcement={text:trim(p.announcement.text,220),from:numeric(p.announcement.from),at:Number(p.announcement.at)};
       if (g.joined && !g.accepted.includes(me())) g.accepted.push(me());
       saveSoon();if(state.open)render();
-    } else if (p.t==='msg' && g.joined && (g.accepted.includes(from)||from===g.creator)) {
-      if (typeof p.text==='string' && typeof p.mid==='string') {
+    } else if (p.t==='msg' && g.joined && g.accepted.includes(from)) {
+      if (typeof p.text==='string' && p.text.length<=MAX_GROUP_TEXT && integrityMsgId(p.mid,70)) {
         addGroupMessage(g,from,p.text,p.mid,p.replyTo);
-        if(from!==me() && g.accepted.includes(me()))sendGroupWire(from,{t:'ack',id:g.id,mid:p.mid},'✓ Delivery acknowledged',true);
+        if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)appendVisibleGroupMessage(g,p.mid);
+        if(from!==me() && g.accepted.includes(me()))sendGroupWire(from,{t:'ack',id:g.id,mid:p.mid,ackToken:typeof p.ackToken==='string'?p.ackToken:''},'✓ Client-reported receipt',true);
       }
     } else if (p.t==='ack' && typeof p.mid==='string' && g.accepted.includes(from)) {
-      if (g.messages.some(m=>m.id===p.mid && m.from===me())) {g.receipts ||= {};g.receipts[p.mid]=[...new Set([...(g.receipts[p.mid]||[]),from])];saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id){const receipt=ui.shadow?.querySelector(`[data-group-receipt="${CSS.escape(p.mid)}"]`);if(receipt)receipt.textContent=`· ✓ ${g.receipts[p.mid].length}/${Math.max(0,g.accepted.length-1)} acknowledged`;else renderGroupChat();}}
+      if (g.messages.some(m=>m.id===p.mid && m.from===me()) && state.deliveryOutbox.some(x=>x.kind==='group'&&x.to===g.id&&x.mid===p.mid&&['sent','acknowledged'].includes(x.targets?.[from])&&(!x.ackTokens?.[from]||x.ackTokens[from]===p.ackToken))) {g.receipts ||= {};g.receipts[p.mid]=[...new Set([...(g.receipts[p.mid]||[]),from])];markGroupOutboxAck(g.id,p.mid,from);saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id){const receipt=ui.shadow?.querySelector(`[data-group-receipt="${CSS.escape(p.mid)}"]`);if(receipt)receipt.textContent=`· ✓ ${g.receipts[p.mid].length}/${Math.max(0,g.accepted.length-1)} client ACKs`;else renderGroupChat();}}
     } else if(p.t==='announcement'&&g.joined&&(from===g.creator||g.moderators?.includes(from)||g.roles?.[from]==='Organizer')){
       const a=p.announcement;
-      if(a&&typeof a==='object'&&numeric(a.from)===from&&Number.isSafeInteger(Number(a.at))&&Number(a.at)>Number(g.announcement?.at||0)){
+      if(a&&typeof a==='object'&&numeric(a.from)===from&&typeof a.text==='string'&&a.text.length<=220&&Number.isSafeInteger(Number(a.at))&&Number(a.at)<=Date.now()+60000&&Number(a.at)>Number(g.announcement?.at||0)){
         g.announcement={text:trim(a.text,220),from,at:Number(a.at)};saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();
       }
     } else if(p.t==='poll'&&g.joined&&g.accepted.includes(from)){
       const poll=normalizePawPoll(p.poll);
-      if(poll&&poll.from===from&&!g.polls?.some(x=>x.id===poll.id)){
-        g.polls ||= [];g.polls.push(poll);g.polls=g.polls.slice(-25);saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();
+      if(poll&&poll.from===from&&Number.isSafeInteger(Number(poll.at))&&Math.abs(Date.now()-Number(poll.at))<7*86400000&&!g.polls?.some(x=>x.id===poll.id)){
+        poll.votes={};g.polls ||= [];g.polls.push(poll);g.polls=g.polls.slice(-25);saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();
       }
     } else if(p.t==='pollvote'&&g.joined&&g.accepted.includes(from)){
       const poll=g.polls?.find(x=>x.id===p.pollId),index=Number(p.index);
       if(poll&&Number.isInteger(index)&&index>=0&&index<poll.options.length){poll.votes ||= {};poll.votes[from]=index;saveSoon();if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)renderGroupChat();}
-    } else if(p.t==='react' && typeof p.mid==='string' && typeof p.emoji==='string') {
+    } else if(p.t==='react' && g.joined && g.accepted.includes(from) && typeof p.mid==='string' && typeof p.emoji==='string' && p.emoji.length<=12 && (g.messages.some(m=>m.id===p.mid&&g.accepted.includes(m.from))||(state.historySelection===historySelectionKey('group',g.id)&&state.historyOlder.some(m=>m.id===p.mid&&g.accepted.includes(m.from))))) {
       void applyReaction('group',g.id,p.mid,from,p.emoji,!!p.remove);
-    } else if(p.t==='historyRequest' && g.joined && g.accepted.includes(from) && typeof p.after==='number') {
-      // At most the last eight OWN messages. Does not request other people's private logs.
-      const own=g.messages.filter(m=>m.from===me() && m.time>=p.after).slice(-8);
-      own.forEach((m,index)=>setTimeout(()=>{
-        if(state.myId===me() && state.groups[g.id]?.joined && myFriends().includes(from))
-          sendGroupWire(from,{t:'historyMessage',id:g.id,mid:m.id,text:m.text,replyTo:m.replyTo,time:m.time},'🐾 History recovery',true);
+    } else if(p.t==='historyRequest' && g.joined && g.accepted.includes(from) &&
+       p.quorum===RECOVERY_QUORUM && typeof p.after==='number' &&
+       Number.isSafeInteger(p.after)&&p.after>=Date.now()-8*86400000&&p.after<=Date.now()+60000&&
+       typeof p.rid==='string'&&/^[a-zA-Z0-9_-]{12,72}$/.test(p.rid)) {
+      // Independently attest *observed* messages from any accepted author.
+      // Never use previously recovered data as independent evidence.
+      const after=Math.max(Date.now()-7*86400000,p.after);
+      const observations=g.messages.filter(m=>!m.recovered&&g.accepted.includes(m.from)&&
+        integrityMsgId(m.id,70)&&m.time>=after&&m.time<=Date.now()+60000).slice(-8);
+      observations.forEach((m,index)=>setTimeout(()=>{
+        if(state.myId===me()&&state.groups[g.id]?.joined&&g.accepted.includes(from)&&myFriends().includes(from))
+          sendGroupWire(from,{t:'historyWitness',id:g.id,mid:m.id,author:m.from,text:m.text,
+            replyTo:m.replyTo,time:m.time,rid:p.rid},'🐾 History witness',true);
       },index*650));
-    } else if(p.t==='historyMessage' && g.joined && typeof p.text==='string' && typeof p.mid==='string') {
-      // Only restore messages genuinely authored by the sending participant.
-      if(g.accepted.includes(from) && !g.messages.some(m=>m.id===p.mid))addGroupMessage(g,from,p.text,p.mid,p.replyTo,p.time,true);
+    } else if(p.t==='historyWitness' && g.joined && typeof p.text==='string' && typeof p.mid==='string') {
+      // A report alone is never enough to restore history.
+      receiveHistoryWitness(g,from,p);
+    } else if(p.t==='historyMessage') {
+      // Old (pre-quorum) peer responses are intentionally ignored; no bypass.
+      integrityReject();
     } else if (p.t==='leave' && g.creator===me()) {
       g.accepted=g.accepted.filter(n=>n!==from);syncGroup(g);saveSoon();if(state.open)render();
     }
@@ -1084,30 +1682,232 @@
     saveSoon();updateBadge();render();
     if(accept)requestAnimationFrame(()=>{if(state.open&&state.tab==='groups'&&state.selectedGroup===id)renderGroupChat();});
   }
+  // v0.9.12: Transport-safe outbox. "Sent" means handed to BC, not read or
+  // received by another player. Only compatible Group Dens provide ACK packets.
+  const outboxRuntime={draining:false,repaintQueued:false,nonce:new Map(),sent:0,held:0};
+  const liveOutboxStatuses=new Set(['queued','sending','failed','unconfirmed','partial']);
+  function outboxStatusLabel(item){
+    if(!item)return '';
+    if(item.status==='acknowledged')return '✓ Client-reported ACK';
+    if(item.status==='sent')return item.kind==='group'?'✓ Sent to BC · waiting for ACK':'✓ Sent to BC · unconfirmed';
+    if(item.status==='partial')return '◔ Partially sent · review outbox';
+    if(item.status==='unconfirmed')return '？ Delivery uncertain · do not retry blindly';
+    if(item.status==='failed')return '⚠ Failed · retry available';
+    if(item.status==='sending')return '⌛ Sending…';
+    if(item.status==='cancelled')return '✕ Cancelled';
+    return '⌛ Queued';
+  }
+  function pruneOutbox(){
+    if(state.deliveryOutbox.length<=120)return;
+    const active=state.deliveryOutbox.filter(x=>liveOutboxStatuses.has(x.status));
+    const finished=state.deliveryOutbox.filter(x=>!liveOutboxStatuses.has(x.status));
+    state.deliveryOutbox=active.slice(-75).concat(finished.slice(-Math.max(0,120-Math.min(75,active.length)))).sort((a,b)=>a.created-b.created);
+  }
+  function outboxById(id){return state.deliveryOutbox.find(x=>x.id===id)||null;}
+  function outboxForMessage(m){return m?.outboxId?outboxById(m.outboxId):null;}
+  function setOutboxChanged(item){
+    item.updated=Date.now();pruneOutbox();saveNow(true);
+    if(!state.open||outboxRuntime.repaintQueued)return;
+    outboxRuntime.repaintQueued=true;
+    // Coalesce every packet in this frame, including multi-recipient groups.
+    requestAnimationFrame(()=>{
+      outboxRuntime.repaintQueued=false;
+      if(!state.open||!ui.body)return;
+      for(const label of ui.body.querySelectorAll('[data-outbox-status]')){
+        const entry=outboxById(label.dataset.outboxStatus);
+        if(entry){const text=outboxStatusLabel(entry);if(label.textContent!==text)label.textContent=text;}
+      }
+      const kind=state.tab==='groups'?'group':'chat',id=kind==='group'?state.selectedGroup:state.selected;
+      const container=ui.body.querySelector('.kc-outbox');
+      if(container){
+        const template=document.createElement('template');template.innerHTML=outboxMarkup(kind,id).trim();
+        const replacement=template.content.firstElementChild;
+        if(replacement){replacement.scrollTop=container.scrollTop;container.replaceWith(replacement);}
+      }
+    });
+  }
+  function outboxMarkup(kind,to){
+    const list=state.deliveryOutbox.filter(x=>x.kind===kind&&String(x.to)===String(to)&&x.status!=='cancelled').slice(-10).reverse();
+    const flagged=list.filter(x=>liveOutboxStatuses.has(x.status));
+    const shown=flagged.length?list.slice(0,5):list.slice(0,1);
+    return `<section class="kc-outbox" aria-label="Message delivery outbox"><div class="kc-outbox-title">📤 Outbox${flagged.length?` · ${flagged.length} to review`:''}</div>${shown.map(x=>`<div class="kc-outbox-row"><span class="kc-outbox-preview" title="${escapeText(x.text)}">${escapeText(x.text.slice(0,42))}</span><span class="kc-outbox-status" data-outbox-status="${escapeText(x.id)}">${escapeText(outboxStatusLabel(x))}</span>${x.status==='failed'||(x.kind==='group'&&Object.values(x.targets).includes('failed'))?`<button class="secondary" data-outbox-retry="${escapeText(x.id)}" title="Retry only failed destinations">Retry failed</button>`:''}${x.status==='queued'?`<button class="secondary" data-outbox-cancel="${escapeText(x.id)}">Cancel</button>`:''}</div>`).join('')||'<div class="muted">Nothing pending · BC delivery is not guaranteed.</div>'}</section>`;
+  }
+  function markOutboxMessage(item,member){
+    const arr=state.chats[numeric(member)]?.messages;
+    if(!arr)return;
+    const found=[...arr].reverse().find(m=>m.from===me()&&m.mode===item.mode&&m.text===item.text&&Math.abs(m.time-item.created)<20000);
+    if(found){
+      found.outboxId=item.id;item.messageId=found.id;
+      const visible=state.open&&state.tab==='chats'&&state.selected===numeric(member)?ui.shadow?.getElementById('kc-log'):null;
+      const row=visible?.querySelector(`[data-message-id="${CSS.escape(String(found.id))}"]`);
+      const meta=row?.querySelector('.msgmeta');
+      if(meta&&!meta.querySelector('[data-outbox-status]')){
+        const badge=document.createElement('span');badge.className='kc-delivery';
+        badge.dataset.outboxStatus=item.id;badge.textContent=outboxStatusLabel(item);
+        meta.append(' ',badge);
+      }
+    }
+  }
+  function enqueueDelivery(kind,to,text,mode='beep',replyTo=null){
+    text=trim(text,kind==='group'?MAX_GROUP_TEXT:2000);
+    if(!text||!to)return null;
+    const key=`${kind}:${to}:${mode}:${text}`;
+    const last=outboxRuntime.nonce.get(key)||0;
+    // Some UI input handlers can double-submit in one frame. Keep deliberate
+    // repeated identical messages possible after a short guard interval.
+    if(Date.now()-last<500){notice('Already queued this message.');return null;}
+    outboxRuntime.nonce.set(key,Date.now());
+    if(outboxRuntime.nonce.size>75)for(const [k,t] of outboxRuntime.nonce)if(Date.now()-t>5000)outboxRuntime.nonce.delete(k);
+    const g=kind==='group'?state.groups[to]:null;
+    if(kind==='group'&&(!g?.joined||!g.accepted.includes(me())))return null;
+    const targets=kind==='group'?Object.fromEntries(g.accepted.filter(n=>n!==me()).map(n=>[n,'queued'])):{};
+    if(kind==='group'&&!Object.keys(targets).length)return null;
+    const item={id:uniquePawId('out'),kind,to,text,mode:kind==='group'?'group':mode,replyTo:normalizeReply(replyTo),targets,ackTokens:{},
+      mid:kind==='group'?uniqueMessageId():'',secure:kind==='chat'&&pawSecureSecrets.has(numeric(to)),messageId:'',created:Date.now(),updated:Date.now(),attempts:0,nextTry:0,status:'queued',reason:''};
+    state.deliveryOutbox.push(item);pruneOutbox();saveNow(true);
+    if(kind==='group'){
+      addGroupMessage(g,me(),text,item.mid,replyTo);
+      const local=g.messages.find(m=>m.id===item.mid);if(local)local.outboxId=item.id;
+      if(state.open&&state.tab==='groups'&&state.selectedGroup===g.id)appendVisibleGroupMessage(g,item.mid);
+    }
+    dispatchOutbox();return item;
+  }
+  async function dispatchOutbox(){
+    if(outboxRuntime.draining||!state.myId||me()!==state.myId)return;
+    outboxRuntime.draining=true;
+    try {
+      for(const item of state.deliveryOutbox){
+        if(item.status!=='queued'||Number(item.nextTry)>Date.now())continue;
+        if(typeof window.ServerSend!=='function'){item.nextTry=Date.now()+2000;continue;}
+        if(item.kind==='chat'&&item.mode==='whisper'&&(!inRoom(item.to)||typeof window.ChatRoomSendWhisper!=='function')){
+          // Whispers MUST remain room-scoped, never transmit to someone elsewhere.
+          item.status='failed';item.reason='Not in the same room';setOutboxChanged(item);continue;
+        }
+        if(item.kind==='chat'&&item.mode==='beep'&&!myFriends().includes(numeric(item.to))){item.status='failed';item.reason='Not a BC friend';setOutboxChanged(item);continue;}
+        const group=item.kind==='group'?state.groups[item.to]:null;
+        if(item.kind==='group'&&!group?.joined){item.status='failed';item.reason='Group no longer joined';setOutboxChanged(item);continue;}
+        if(item.kind==='group'){
+          // Reserve all destinations as "sending" before crossing the transport
+          // boundary. Reloading mid-send marks them unconfirmed, not queued.
+          const eligible=Object.keys(item.targets).filter(n=>item.targets[n]==='queued');
+          if(!eligible.length)continue;
+          for(const id of eligible)item.targets[id]='sending';
+          item.status='sending';item.attempts++;setOutboxChanged(item);
+          let succeeded=0;
+          for(const recipient of eligible){
+            const id=numeric(recipient);
+            if(!group.accepted.includes(id)||!myFriends().includes(id)){item.targets[recipient]='failed';continue;}
+            (item.ackTokens ||= {})[recipient] ||= integrityNonce();saveNow(true);
+            // BC's ServerSend has no delivery receipt; once invoked, we must
+            // not automatically send the packet a second time.
+            try{
+              const ok=sendGroupWire(id,{t:'msg',id:group.id,mid:item.mid,text:item.text,replyTo:item.replyTo,ackToken:(item.ackTokens ||= {})[recipient] ||= integrityNonce()},`🐾 [${group.name}] ${bcName(me())}: ${item.text}`);
+              item.targets[recipient]=ok?'sent':'unconfirmed';
+              if(ok)succeeded++;
+            }catch(err){item.targets[recipient]='unconfirmed';console.warn('[PawLounge] Group transport result uncertain:',err);}
+            setOutboxChanged(item);
+          }
+          const statuses=Object.values(item.targets);
+          item.status=statuses.every(v=>v==='acknowledged')?'acknowledged':statuses.some(v=>v==='failed'||v==='unconfirmed')?'partial':'sent';
+          if(succeeded&&!group.messages.some(m=>m.id===item.mid)){
+            addGroupMessage(group,me(),item.text,item.mid,item.replyTo);
+            const saved=group.messages.find(m=>m.id===item.mid);if(saved)saved.outboxId=item.id;
+            if(state.open&&state.tab==='groups'&&state.selectedGroup===group.id)appendVisibleGroupMessage(group,item.mid);
+          }
+          setOutboxChanged(item);outboxRuntime.sent+=succeeded;
+        }else{
+          item.status='sending';item.attempts++;setOutboxChanged(item);
+          let crossed=false;
+          try{
+            if(item.mode==='whisper'){
+              const before=window.ChatRoomTargetMemberNumber;
+              try{
+                const encrypted=item.secure?await pawEncryptPrivate(item.to,item.text,'whisper'):null;
+                if(encrypted)item.messageId=encrypted.id;
+                const encoded=encrypted?encrypted.wire:state.settings.encodePrivateChat?pawEncodeChat(item.text,'whisper'):item.text;
+                if(encoded.length>1950)throw Error('Message too long');
+                window.ChatRoomTargetMemberNumber=numeric(item.to);crossed=true;window.ChatRoomSendWhisper(numeric(item.to),encoded);
+              }
+              finally{window.ChatRoomTargetMemberNumber=before;}
+              appendMessage(item.to,item.text,me(),'whisper','local',item.secure?{messageId:item.messageId}:{});
+            }else{
+              try{
+                const encrypted=item.secure?await pawEncryptPrivate(item.to,item.text,'beep'):null;
+                if(encrypted)item.messageId=encrypted.id;
+                const encodedBeep=encrypted?encrypted.wire:state.settings.encodePrivateChat?pawEncodeChat(item.text,'beep'):item.text;
+                if(encodedBeep.length>1950)throw Error('Encoded message too long; shorten it or disable encoding');
+                crossed=true;
+                state.suppressOutgoing=true;
+                if(typeof window.ServerSendBeepMessage==='function'){
+                  window.ServerSendBeepMessage(item.to,encodedBeep,item.replyTo?{messageType:'Reply',replyTo:item.replyTo}:{});
+                }else{
+                  window.ServerSend('AccountBeep',{MemberNumber:item.to,BeepType:'',IsSecret:true,Message:encodedBeep});
+                  if(Array.isArray(window.FriendListBeepLog))window.FriendListBeepLog.push({MemberNumber:item.to,MemberName:bcName(item.to),Sent:true,Private:true,Time:new Date(),Message:item.text});
+                }
+              }finally{state.suppressOutgoing=false;}
+              appendMessage(item.to,item.text,me(),'beep','local',item.secure?{messageId:item.messageId}:{});
+            }
+            markOutboxMessage(item,item.to);
+            item.status='sent';item.reason='Handed to BC; recipient receipt unavailable';outboxRuntime.sent++;
+          }catch(err){item.status=crossed?'unconfirmed':'failed';item.reason=trim(String(err?.message||err),130);console.warn('[PawLounge] Message handoff:',err);}
+          setOutboxChanged(item);
+        }
+      }
+    }finally{outboxRuntime.draining=false;}
+  }
+  function retryFailedOutbox(id){
+    const item=outboxById(id);if(!item||!['failed','partial'].includes(item.status))return;
+    // Never retry a sent/uncertain packet: doing so could duplicate delivery.
+    if(item.kind==='group'){
+      for(const key of Object.keys(item.targets))if(item.targets[key]==='failed')item.targets[key]='queued';
+      if(!Object.values(item.targets).includes('queued'))return notice('No safely retryable destinations. Sent or uncertain packets will not be resent.');
+    }else if(item.status!=='failed')return;
+    if(item.kind==='chat'){
+      // User knowingly retries one failed send; prevent stacking duplicates.
+      if(!window.confirm('Retry the failed message? Only retry if you are confident it was not delivered.'))return;
+    }
+    item.status='queued';item.nextTry=0;item.reason='';setOutboxChanged(item);dispatchOutbox();
+  }
+  function cancelQueuedOutbox(id){
+    const item=outboxById(id);if(!item||item.status!=='queued')return;
+    item.status='cancelled';setOutboxChanged(item);
+  }
+  function markGroupOutboxAck(groupId,mid,from){
+    for(const item of state.deliveryOutbox){
+      if(item.kind!=='group'||item.to!==groupId||item.mid!==mid||!Object.hasOwn(item.targets,from))continue;
+      if(item.targets[from]==='acknowledged')break;
+      item.targets[from]='acknowledged';
+      const statuses=Object.values(item.targets);
+      if(statuses.every(x=>x==='acknowledged'))item.status='acknowledged';
+      else if(statuses.some(x=>x==='failed'||x==='unconfirmed'))item.status='partial';
+      else item.status='sent';
+      setOutboxChanged(item);break;
+    }
+  }
+  function appendVisibleGroupMessage(group,mid){
+    const log=ui.shadow?.getElementById('kc-log');
+    if(!log||state.tab!=='groups'||state.selectedGroup!==group.id)return false;
+    if(log.querySelector('[data-message-id="'+CSS.escape(mid)+'"]'))return true;
+    // Reuse the existing renderer's exact row HTML, but only insert that row.
+    // If paging, a filter or unexpected structure is active, preserve scroll and
+    // gracefully fall back to the existing group renderer.
+    if(state.historyOlder.length||state.historyLoading||state.messageSearch)return false;
+    const m=group.messages.find(x=>x.id===mid);if(!m)return false;
+    const mine=m.from===me(),st=sticker(m.text),oldNearBottom=log.scrollHeight-log.scrollTop-log.clientHeight<100;
+    const html=`<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine?me():m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':name(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',group.id)}<div class="msgmeta">${m.recovered?`<span title="Matched by ${m.verifiedBy?.length||0} other group participants; client-reported, not cryptographically verified">✓ ${m.verifiedBy?.length||0} peer confirmations · </span>`:''}${new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} <span data-group-receipt="${escapeText(m.id)}">· ✓ ${group.receipts?.[m.id]?.length||0}/${Math.max(0,group.accepted.length-1)} client ACKs</span> <span class="kc-delivery" data-outbox-status="${escapeText(m.outboxId||'')}">${m.outboxId?escapeText(outboxStatusLabel(outboxById(m.outboxId))):''}</span> ${messageActions(m,'group')}</div></div></div>`;
+    const empty=log.querySelector(':scope > .empty');if(empty)empty.remove();
+    log.insertAdjacentHTML('beforeend',html);
+    if(oldNearBottom)log.scrollTop=log.scrollHeight;
+    return true;
+  }
   function sendGroupMessage(text) {
     const g=currentGroup();text=trim(text,MAX_GROUP_TEXT);
-    if (!g || !g.joined || !text) return false;
-    if (typeof window.ServerSend!=='function') {notice('Not connected to BC.');return false;}
-    const recipients=g.accepted.filter(n=>n!==me());
-    if (!recipients.length) {notice('Nobody has accepted the invitation yet.');return false;}
-    const reply=state.replyTarget?.kind==='group' && state.replyTarget.conversation===g.id ? normalizeReply(state.replyTarget) : null;
-    const mid=groupId();let sent=0;let skipped=0;
-    for (const member of recipients) {
-      if (sendGroupWire(member,{t:'msg',id:g.id,mid,text,replyTo:reply},`🐾 [${g.name}] ${bcName(me())}: ${text}`))sent++;
-      else skipped++;
-    }
-    if (!sent){notice('No recipients reachable. BC friendship is required for each recipient.');return false;}
-    addGroupMessage(g,me(),text,mid,reply);state.replyTarget=null;renderReplyBar();
-    if (skipped) notice(`Sent to ${sent}; ${skipped} unavailable (not a BC friend or send failed).`);
-    if (ui.input)ui.input.value='';g.draft='';saveSoon();
-    if(state.open && state.tab==='groups' && state.selectedGroup===g.id) {
-      const refresh=()=>{
-        if(!state.open || state.tab!=='groups' || state.selectedGroup!==g.id)return;
-        const log=ui.shadow?.getElementById('kc-log');
-        if(!log || ![...log.querySelectorAll('[data-message-id]')].some(row=>row.dataset.messageId===mid))renderGroupChat();
-      };
-      refresh();requestAnimationFrame(refresh);
-    }
+    if(!g?.joined||!text)return false;
+    const reply=state.replyTarget?.kind==='group'&&state.replyTarget.conversation===g.id?normalizeReply(state.replyTarget):null;
+    const item=enqueueDelivery('group',g.id,text,'group',reply);
+    if(!item){notice('Could not queue group message. Check group membership.');return false;}
+    if(ui.input)ui.input.value='';g.draft='';state.replyTarget=null;renderReplyBar();saveSoon();
+    if(item.status==='partial')notice('Some group members could not receive your message. Review Outbox.');
     return true;
   }
   function leaveGroup() {
@@ -1144,20 +1944,21 @@
     const from = numeric(data.MemberNumber);
     if (!from || from === me()) return;
     // Internal group invitations/messages are not regular beeps.
-    if (data.BeepType==='KCStatus') { receiveFriendStatus(data,from); return; }
+    if (data.BeepType==='KCStatus') { if(inboundLimit(from,'status',String(data.Message||''),1600)) receiveFriendStatus(data,from); return; }
     if (data.BeepType===PAW_WHISPER_REACTION){
-      try{receiveWhisperReaction(JSON.parse(String(data.Message||'')),from);}catch{}
+      try{if(inboundLimit(from,'reaction',String(data.Message||''),2000)){const p=pawParseWireJSON(String(data.Message||''),2500);if(integrityAcceptEvent('whisperReaction',from,p))receiveWhisperReaction(p,from);}}catch{}
       return;
     }
-    if (data.BeepType==='KCMoment') {receivePawMoment(data,from);return;}
-    if (data.BeepType==='KCPawInvite'){receivePawInvite(data,from);return;}
-    if (data.BeepType==='KCPawAlbum'){receivePawAlbum(data,from);return;}
-    if (data.BeepType==='KCPawGuestbook'){receivePawGuestbook(data,from);return;}
+    if (data.BeepType==='KCMoment') {if(inboundLimit(from,'moment',String(data.Message||''),4000))receivePawMoment(data,from);return;}
+    if (data.BeepType==='KCPawInvite'){if(inboundLimit(from,'invite',String(data.Message||''),4000))receivePawInvite(data,from);return;}
+    if (data.BeepType==='KCPawAlbum'){if(inboundLimit(from,'album',String(data.Message||''),22500))receivePawAlbum(data,from);return;}
+    if (data.BeepType==='KCPawGuestbook'){if(inboundLimit(from,'guestbook',String(data.Message||''),4000))receivePawGuestbook(data,from);return;}
     if (data.BeepType==='KCGroupControl') {receiveGroupBeep(data,from);return;}
     if (!data.BeepType && receiveGroupBeep(data, from)) return;
     if (data.BeepType === 'KCProfile') {
+      if(!inboundLimit(from,'profile',String(data.Message||''),6800))return;
       try {
-        const rawProfile = JSON.parse(String(data.Message || ''));
+        const rawProfile = pawParseWireJSON(String(data.Message || ''),9000);
         if (rawProfile?.type !== 'KCProfile') return;
         const normalized = normalizePawProfile(rawProfile, from);
         if (!normalized) return;
@@ -1176,15 +1977,17 @@
       return;
     }
     if (data.BeepType === 'KCTyping') {
-      try { const item = JSON.parse(data.Message); if (item?.type === 'KCTyping' && item.v === 1) {
-        state.typingUntil[from] = item.typing ? Date.now() + 5500 : 0;
-        if (state.open && state.selected === from) renderChatHeader();
-      }} catch { /* Ignore invalid typing signals. */ }
+      if(!inboundLimit(from,'typing',String(data.Message||''),850))return;
+      try { receiveTypingPaws(pawParseWireJSON(data.Message,1000),from,'beep'); }
+      catch { /* Ignore invalid/legacy typing signals. */ }
       return;
     }
     // No other special-purpose BC/addon beeps should become chat messages.
     if (data.BeepType && data.BeepType !== '') return;
     const message = parseNativeBeep(data.Message);
+    const decodedChat=pawDecodeChat(message.text);
+    if(decodedChat!==null)message.text=decodedChat;
+    if(pawSecureToken(message.text)){void pawHandleSecureInbound(message.text,from,'beep');return;}
     if (message.reaction) {if(typeof message.meta.reactionTo==='string'&&typeof message.meta.reactionEmoji==='string')void applyReaction('chat',from,message.meta.reactionTo,from,message.meta.reactionEmoji,!!message.meta.reactionRemove);return;}
     rememberNativeSender(from, data.MemberName);
     appendMessage(from, message.text, from, 'beep','network',message.meta);
@@ -1196,6 +1999,8 @@
       if (kcDecode(payload.Message)) return;
       const target = numeric(payload.MemberNumber);
       const message = parseNativeBeep(payload.Message);
+      message.text=pawDecodeChat(message.text)??message.text;
+      if(pawSecureToken(message.text)) return;
       if (target && message.reaction) {if(message.meta?.reactionTo&&message.meta?.reactionEmoji)void applyReaction('chat',target,message.meta.reactionTo,me(),message.meta.reactionEmoji,!!message.meta.reactionRemove);}
       else if (target && message.text !== '(Beep)') appendMessage(target, message.text, me(), 'beep','network',message.meta);
     } else if (type === 'ChatRoomChat' && payload.Type === 'Whisper') {
@@ -1203,6 +2008,7 @@
       // A server echo is deduplicated by appendMessage().
       const target = numeric(payload.Target);
       const whisperId=prepareOutgoingWhisper(payload);
+      if (pawSecureToken(payload.Content)) return;
       if (target && target !== me() && typeof payload.Content === 'string')
         appendMessage(target, payload.Content, me(), 'whisper','network',{messageId:whisperId});
     }
@@ -1234,6 +2040,7 @@
     saveSoon();
   }
   function captureNativeRoomMessage(data, sender) {
+    if(onHiddenTypingPacket(data,sender))return;
     if(onWhisperReactionPacket(data,sender))return;
     onWhisper(data, sender);
     onPublicRoomMessage(data, sender);
@@ -1289,14 +2096,16 @@
     if (from === self) {
       // Outgoing echoes need an explicit recipient. Local outgoing sends are
       // also captured at ServerSend, so missing-target echoes are harmless.
-      if (target && target !== self) appendMessage(target, data.Content, self, 'whisper','network',{messageId:nativeWhisperId(data)});
+      if (pawSecureToken(data.Content)) return;
+      if (target && target !== self) appendMessage(target, pawDecodeChat(data.Content)??data.Content, self, 'whisper','network',{messageId:nativeWhisperId(data)});
       return;
     }
     // An explicit target for somebody else must never enter our inbox.
     if (target && target !== self) return;
     const senderName = data.SenderName || data.MemberName || senderCharacter?.Nickname || senderCharacter?.Name;
     rememberNativeSender(from, senderName);
-    appendMessage(from, data.Content, from, 'whisper','network',{messageId:nativeWhisperId(data)});
+    if(pawSecureToken(data.Content)){void pawHandleSecureInbound(data.Content,from,'whisper');return;}
+    appendMessage(from, pawDecodeChat(data.Content)??data.Content, from, 'whisper','network',{messageId:nativeWhisperId(data)});
   }
   function registerNativeWhisperHandler() {
     // The built-in message handler is a secondary receive path on BC versions
@@ -1396,7 +2205,7 @@
 
   function hookBC() {
     registerNativeWhisperHandler();
-    if (state.hooks.length || state.mod) return;
+    if (state.mod) return;
     if (typeof window.ServerSend !== 'function' || typeof window.ServerAccountBeep !== 'function' || typeof window.ChatRoomMessage !== 'function') return;
     const sdk = window.bcModSdk;
     if (sdk && typeof sdk.registerMod === 'function') {
@@ -1412,6 +2221,20 @@
           } catch (e) { console.warn('[Kittychat] receive:',e); }
           return inMutedNativePacket('beep', args[0], () => next(args));
         });
+        // Observe native BC's online-friend results using the same ModSDK
+        // chain as the other PawLounge features (no direct overwrite).
+        // Failure to install this optional hook only disables remote status
+        // labels; native BC login and the rest of PawLounge keep working.
+        if (typeof window.ServerAccountQueryResult === 'function') {
+          try {
+            mod.hookFunction('ServerAccountQueryResult', 1, (args, next) => {
+              try { pawObserveNativePresence(args[0]); }
+              catch (err) { console.warn('[PawLounge] Online presence observation failed:', err); }
+              return next(args);
+            });
+            pawOnlinePresence.modSdkHookInstalled=true;
+          } catch (err) { console.warn('[PawLounge] ModSDK online presence hook unavailable:', err); }
+        }
         mod.hookFunction('ServerSend', 1, (args, next) => { try { onOutgoing(args[0], args[1]); } catch (e) { console.warn('[Kittychat] send:',e); } return next(args); });
         mod.hookFunction('ChatRoomMessage', 1, (args, next) => { try { captureNativeRoomMessage(args[0]); } catch (e) { console.warn('[Kittychat] whisper:',e); } return inMutedNativePacket('whisper', args[0], () => next(args)); });
         // Optional BC hooks are independent: a renamed API must not break
@@ -1427,81 +2250,29 @@
         state.mod = mod; log('Connected with BC Mod SDK'); return;
       } catch (err) { console.warn('[Kittychat] Mod SDK registration failed; using chainable wrappers:',err); }
     }
-    // Fallback delegates to the exact function we replaced (never calls itself).
-    for (const [key, capture] of [['ServerAccountBeep', args => receiveBeep(args[0])],
-      ['ServerSend', args => onOutgoing(args[0], args[1])],
-      ['ChatRoomMessage', args => captureNativeRoomMessage(args[0])],
-      ['ServerShowBeep', null], ['NotificationRaise', null]]) {
-      const original = window[key];
-      if (typeof original !== 'function') continue;
-      const wrapped = function (...args) {
-        if (key === 'ServerShowBeep') return original.apply(this, nativeSilentBeepArgs(args));
-        if (key === 'NotificationRaise') {
-          return suppressNativeMessageNotification(args) ? undefined : original.apply(this, args);
-        }
-        try {
-          const data=args[0];
-          if (key==='ServerAccountBeep' && data && !data.BeepType && kcDecode(data.Message) &&
-            receiveGroupBeep(data,numeric(data.MemberNumber))) return;
-          capture(args);
-        } catch (e) { console.warn('[Kittychat] Hook failure:',e); }
-        const kind=key==='ServerAccountBeep'?'beep':key==='ChatRoomMessage'?'whisper':null;
-        return kind ? inMutedNativePacket(kind,args[0], () => original.apply(this,args)) : original.apply(this,args);
-      };
-      window[key] = wrapped;
-      state.hooks.push(() => { if (window[key] === wrapped) window[key] = original; });
+    // ModSDK may be initialized later by BCX or the mod manager. Do not
+    // replace native BC functions as a fallback: wait for SDK, then retry on
+    // the existing startup tick. Native BC remains untouched in the meantime.
+    if (!hookBC.waitNoticeLogged) {
+      hookBC.waitNoticeLogged=true;
+      console.info('[PawLounge] ModSDK not available yet; waiting to register compatible BC hooks.');
     }
-    log('Connected with safe pass-through hooks');
   }
   function sendText(text, target = state.selected) {
-    const member = numeric(target), chat = ensure(member);
-    text = trim(text, 2000);
-    if (!member || !chat || !text) return false;
-    if (typeof window.ServerSend !== 'function') { notice('Not connected to BC yet.'); return false; }
-    const reply=state.replyTarget?.kind==='chat' && Number(state.replyTarget.conversation)===member ? normalizeReply(state.replyTarget) : null;
-    if (state.composerMode === 'whisper') {
-      if (!inRoom(member) || typeof window.ChatRoomSendWhisper !== 'function') {
-        notice('Whispers require that you are in the same room.'); return false;
-      }
-      const previous = window.ChatRoomTargetMemberNumber;
-      try {
-        window.ChatRoomTargetMemberNumber = member;
-        const whisperText=reply ? trim(`↪ ${reply.senderName}: ${reply.snippet}\n${text}`,2000) : text;
-        window.ChatRoomSendWhisper(member, whisperText);
-        // The server should echo the whisper through ChatRoomMessage.
-        // Optimistic rendering uses duplicate suppression when the echo arrives.
-        appendMessage(member, whisperText, me(), 'whisper');
-      } catch (err) { notice('Could not send whisper.'); console.warn('[Kittychat]', err); return false; }
-      finally { window.ChatRoomTargetMemberNumber = previous; }
-    } else {
-      if (!myFriends().includes(member)) { notice('Beep messages require a BC friend. Try Whisper in the same room.'); return false; }
-      try {
-        state.suppressOutgoing = true;
-        if(typeof window.ServerSendBeepMessage==='function') {
-          window.ServerSendBeepMessage(member,text,reply?{messageType:'Reply',replyTo:reply}:{});
-          const last=window.FriendListBeepLog?.at(-1);
-          const meta=last?.Sent && Number(last.MemberNumber)===member ? {...parseNativeBeep(last.Message).meta,messageId:parseNativeBeep(last.Message).meta?.messageId || last.Id || ''} : {};
-          appendMessage(member,text,me(),'beep','local',meta);
-        } else {
-          // Graceful fallback on BC builds without the native metadata helper.
-          window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:'',IsSecret:true,Message:text});
-          appendMessage(member,text,me(),'beep');
-          if(Array.isArray(window.FriendListBeepLog))window.FriendListBeepLog.push({MemberNumber:member,MemberName:bcName(member),Sent:true,Private:true,Time:new Date(),Message:text});
-          if(reply)notice('BC native reply metadata unavailable; sent as an ordinary beep.');
-        }
-      } catch (err) { notice('Could not send beep.'); console.warn('[Kittychat]', err); return false; }
-      finally { state.suppressOutgoing = false; }
-    }
-    if (ui.input) ui.input.value = '';
-    chat.draft = ''; state.replyTarget=null;renderReplyBar();saveSoon();
-    // Explicitly reconcile the conversation with the stored outgoing message.
-    // The normal append fast path can race native beep hooks / history hydration.
-    const ownLast=[...chat.messages].reverse().find(m=>m.from===me() && m.text===text);
-    queueVisiblePrivateChatSync(member,ownLast?.id||'');
-    scheduleSidebarUpdate();
-    return true;
+    const member=numeric(target),chat=ensure(member);
+    text=trim(text,2000);
+    if(!member||!chat||!text)return false;
+    const reply=state.replyTarget?.kind==='chat'&&Number(state.replyTarget.conversation)===member?normalizeReply(state.replyTarget):null;
+    const mode=state.composerMode==='whisper'?'whisper':'beep';
+    if(mode==='whisper'&&!inRoom(member)){notice('Whispers require that you are in the same room.');return false;}
+    if(mode==='beep'&&!myFriends().includes(member)){notice('Beep messages require a BC friend. Try Whisper in the same room.');return false;}
+    const whisperText=mode==='whisper'&&reply?trim(`↪ ${reply.senderName}: ${reply.snippet}\n${text}`,2000):text;
+    const item=enqueueDelivery('chat',member,whisperText,mode,reply);
+    if(!item)return false;
+    if(ui.input)ui.input.value='';chat.draft='';state.replyTarget=null;renderReplyBar();saveSoon();
+    if(item.messageId)queueVisiblePrivateChatSync(member,item.messageId);
+    scheduleSidebarUpdate();return true;
   }
-
   function pawGalleryFromSettings() {
     return ['pawGallery1','pawGallery2','pawGallery3','pawGallery4']
       .map(k => trim(state.settings[k] || '', 500))
@@ -1620,18 +2391,37 @@
     if (!id || !myFriends().includes(id)) { notice('Select a BC friend before sharing your profile.'); return; }
     const payload = ownPawProfilePayload();
     try {
-      window.ServerSend('AccountBeep', { MemberNumber: id, BeepType: 'KCProfile', IsSecret: true, Message: JSON.stringify(payload) });
+      window.ServerSend('AccountBeep', { MemberNumber: id, BeepType: 'KCProfile', IsSecret: true, Message: pawWireJSON(payload) });
       notice('Paw profile shared!');
     } catch { notice('Could not share your Paw Profile.'); }
   }
 
   function sendTyping() {
-    const id = state.selected;
-    if (!state.settings.typing || !state.profiles[id]?.kitty || state.composerMode !== 'beep') return;
-    if (!myFriends().includes(id) || Date.now() - state.lastTypingSent < 4500) return;
-    try { window.ServerSend('AccountBeep', { MemberNumber: id, BeepType: 'KCTyping', IsSecret: true,
-      Message: JSON.stringify({ type: 'KCTyping', v: 1, typing: true }) });
-      state.lastTypingSent = Date.now(); } catch { /* Optional feature. */ }
+    const id=numeric(state.selected);
+    if(!state.settings.typing||!id||state.tab!=='chats'||
+       !ui.shadow?.getElementById('kc-compose')?.value?.trim()||
+       typeof window.ServerSend!=='function')return;
+    const mode=state.composerMode==='whisper'?'whisper':'beep';
+    // Native beeps require BC friendship and a recognized PawLounge contact.
+    // BC whispers require both players in the same room, not BC friendship:
+    // the recipient can display the indicator if they run PawLounge.
+    if(mode==='beep'&&(!state.profiles[id]?.kitty||!myFriends().includes(id)))return;
+    if(mode==='whisper'&&!inRoom(id))return;
+    const key=`${id}:${mode}`,now=Date.now();
+    if(now-(typingSendTimes.get(key)||0)<4500)return;
+    const packet={type:'KCTyping',v:1,mode,typing:true,nonce:integrityNonce()};
+    try {
+      if(mode==='whisper') {
+        // Targeted BC Hidden control packet: no visible native whisper or beep.
+        window.ServerSend('ChatRoomChat',{Type:'Hidden',Target:id,
+          Content:PAW_HIDDEN_TYPING_PREFIX+pawWireJSON(packet)});
+      } else {
+        window.ServerSend('AccountBeep',{MemberNumber:id,BeepType:'KCTyping',
+          IsSecret:true,Message:pawWireJSON(packet)});
+      }
+      typingSendTimes.set(key,now);
+      if(typingSendTimes.size>120)for(const [k,t] of typingSendTimes)if(now-t>60000)typingSendTimes.delete(k);
+    }catch(err){console.debug('[PawLounge] Optional typing signal unavailable:',err);}
   }
   function sendProfile() {
     openShareProfileModal(state.selected);
@@ -1652,7 +2442,7 @@
       await new Promise((resolve,reject)=>{
         const tx=db.transaction('messages','readonly');
         const req=tx.objectStore('messages').index('byConversation').openCursor(historyRange(state.myId,'chat',chat.id,null));
-        req.onsuccess=()=>{const cursor=req.result;if(cursor){records.push(cursor.value);cursor.continue();}};
+        req.onsuccess=()=>{const cursor=req.result;if(cursor){records.push(pawDecodeHistoryRow(cursor.value));cursor.continue();}};
         req.onerror=()=>reject(req.error);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
       });
       if (format === 'json') download(base + '.json','application/json',JSON.stringify({...chat,messages:records},null,2));
@@ -1687,7 +2477,7 @@
     'MugshotCanvas', 'mugshotCanvas', 'ImageCanvas', 'imageCanvas',
     'Image', 'image', 'ImageBitmap', 'imageBitmap', 'Bitmap', 'bitmap',
     'Sprite', 'sprite', 'Layers', 'layers', 'CharacterImage',
-    'CanvasBlink', 'canvasBlink', 'CanvasTemp', 'CanvasData', 'CanvasCache',
+    'CanvasTemp', 'CanvasData', 'CanvasCache',
     'CanvasElement', 'Render', 'render', 'Rendering', 'rendering',
     'Context', 'context', 'ctx', 'Surface', 'surface', 'Texture', 'texture',
     'LayerCanvas','layerCanvas','DrawImage','drawImage','CharacterCanvasData', 'AppearanceLayers'
@@ -1782,6 +2572,9 @@
           try { keys=Object.keys(value).slice(0,90); } catch {}
           for (const key of keys) {
             if (!/canvas|bitmap|render|layer|image|texture|surface|portrait/i.test(key) || portraitCandidateKeys.includes(key)) continue;
+            // A few BC mods expose the blink/eye and mouth overlay canvases
+            // separately. Never mistake one of those overlays for a mugshot.
+            if (/blink|eyes?|mouth|lips|expression|shadow|mask/i.test(key)) continue;
             try { add(value[key],depth+1); } catch {}
           }
         }
@@ -1952,7 +2745,9 @@
       canvas.parentElement?.classList.add('kc-has-mugshot');
       // The first complete remote portrait becomes the stable crop for this
       // contact until manual refresh or the next account/session switch.
-      if (member) rememberSteadyRemotePortrait(member,canvas);
+      // Only finished, explicit profile or room rendering paths are allowed
+      // to freeze offline thumbnails. Arbitrary canvas layers may be clothing
+      // or blinking eyes even when their bounding box looks plausible.
       portraitRuntime.painted++;
       if (member) portraitCropRuntime.last.set(member,{outcome:'painted',inspected,empty,partial,source:bestSource,...best});
       return true;
@@ -2013,18 +2808,48 @@
   // This is a bounded session-only pixel cache (not localStorage/IndexedDB).
   // Live in-room members still render through BC's normal live path.
   const steadyRemotePortraits = new Map();
+  // Before a room member disappears from BC's live roster, retain *only the
+  // finished 128px thumbnail*. This prevents an avatar going blank simply
+  // because the user left, without copying any appearance or profile data.
+  // Entries stay in memory only and are evicted after six hours or 96 people.
+  const recentRoomPortraits = new Map();
+  function finishedThumbnailCopy(source) {
+    if (!source || !source.width || !source.height) return null;
+    try {
+      const copy=document.createElement('canvas');
+      copy.width=128;copy.height=128;
+      const ctx=copy.getContext('2d',{alpha:false});
+      if (!ctx) return null;
+      ctx.drawImage(source,0,0,128,128);
+      return copy;
+    } catch { return null; }
+  }
+  function rememberRoomPortrait(member,source) {
+    if (!member || !hasActualLivePresence(member) ||
+        !source?.classList?.contains('is-painted')) return false;
+    const copy=finishedThumbnailCopy(source);
+    if (!copy) return false;
+    recentRoomPortraits.delete(member);
+    recentRoomPortraits.set(member,{canvas:copy,at:Date.now()});
+    while(recentRoomPortraits.size>MAX_OFFLINE_PORTRAITS)
+      recentRoomPortraits.delete(recentRoomPortraits.keys().next().value);
+    return true;
+  }
   function steadyRemotePortrait(member) {
-    return member && !hasActualLivePresence(member) ? steadyRemotePortraits.get(member) || null : null;
+    if (!member || hasActualLivePresence(member)) return null;
+    const steady=steadyRemotePortraits.get(member);
+    if(steady)return steady;
+    const recent=recentRoomPortraits.get(member);
+    if(!recent)return null;
+    if(Date.now()-recent.at>21600000){recentRoomPortraits.delete(member);return null;}
+    return recent.canvas;
   }
   function rememberSteadyRemotePortrait(member, source) {
     if (!member || hasActualLivePresence(member) || steadyRemotePortraits.has(member) ||
         !source || !source.width || !source.height) return false;
     try {
-      const copy=document.createElement('canvas');
-      copy.width=128;copy.height=128;
-      const ctx=copy.getContext('2d');
-      if (!ctx) return false;
-      ctx.drawImage(source,0,0,copy.width,copy.height);
+      const copy=finishedThumbnailCopy(source);
+      if (!copy) return false;
       steadyRemotePortraits.set(member,copy);
       while (steadyRemotePortraits.size > MAX_OFFLINE_PORTRAITS)
         steadyRemotePortraits.delete(steadyRemotePortraits.keys().next().value);
@@ -2181,9 +3006,12 @@
         // standalone portrait and caused floating eyes in contact circles.
         const sources=[character.Canvas,character.CharacterCanvas,
           character.DrawCanvas,character.RenderCanvas].filter(portraitImageSource);
+        // Prefer the finished BC composite. If it is not ready yet, ask
+        // BC's renderer; don't promote isolated clothing/eye-layer canvases
+        // to permanent avatars while textures are still downloading.
         const rendered = (sources.length && drawPortraitLayers(temp,sources,member)) ||
-          drawLiveCharacterThroughBC(temp,member,character) ||
-          (sources.length===0 && drawPortraitLayers(temp,collectPortraitSources(character),member));
+          drawLiveCharacterThroughBC(temp,member,character);
+        if (rendered) rememberSteadyRemotePortrait(member,temp);
         if (!rendered) return false;
         wceSnapshotRuntime.temporaryPortraits.set(member,temp);
         while (wceSnapshotRuntime.temporaryPortraits.size>MAX_OFFLINE_PORTRAITS) {
@@ -2194,13 +3022,15 @@
         return true;
       };
       if (!paint()) {
-        // An initial CharacterLoadCanvas often returns before its images have
-        // finished arriving. Retry after image loading gets a chance to run.
-        await new Promise(resolve=>setTimeout(resolve,900));
-        if (!paint()) {
-          await new Promise(resolve=>setTimeout(resolve,1500));
-          if (!paint()) report.status='render-not-ready';
+        // BC finishes loading character textures asynchronously; on slower
+        // browsers the old ~2.4-second retry window gave up too early.
+        // Yield between attempts and never recreate the online character.
+        for (const delay of [500,1000,1800,3000]) {
+          await new Promise(resolve=>setTimeout(resolve,delay));
+          if(state.myId!==account || !state.open || hasActualLivePresence(member))break;
+          if(paint())break;
         }
+        if (!report.painted) report.status='render-not-ready';
       }
     })().catch(err=>{
       report.status='error';report.error=String(err?.message||err).slice(0,140);
@@ -2213,7 +3043,13 @@
   }
   function tryWcePortrait(canvas, member, record) {
     if (!record) return false;
-    if (drawPortraitLayers(canvas, collectPortraitSources(record))) return true;
+    // The fallback image must enter the same session cache as fully loaded
+    // snapshots; without `member` the previous implementation repainted on
+    // every sidebar rebuild and could jump between crops.
+    if (drawPortraitLayers(canvas, collectPortraitSources(record),member)) {
+      if (!hasActualLivePresence(member)) rememberSteadyRemotePortrait(member,canvas);
+      return true;
+    }
     const url = portraitUrl(record);
     if (!url || portraitRuntime.pending.get(canvas) === url) return false;
     portraitRuntime.pending.set(canvas, url);
@@ -2221,7 +3057,10 @@
     img.onload = () => {
       portraitRuntime.pending.delete(canvas);
       if (canvas.isConnected && !canvas.classList.contains('is-painted') &&
-          drawPortraitLayers(canvas,[img],member)) syncPaintedPortraitCopies(member);
+          drawPortraitLayers(canvas,[img],member)) {
+        if (!hasActualLivePresence(member)) rememberSteadyRemotePortrait(member,canvas);
+        syncPaintedPortraitCopies(member);
+      }
     };
     img.onerror = () => { portraitRuntime.pending.delete(canvas); };
     img.src = url;
@@ -2341,7 +3180,7 @@
       sidebarRefresh.queued=false;
       if (!sidebarRefresh.dirty || motionRuntime.active) return;
       sidebarRefresh.dirty=false;
-      if (state.open && ui.menu && ['chats','friends'].includes(state.tab)) renderSidebar();
+      if (state.open && ui.menu && ['chats','friends'].includes(state.tab)) reconcileSidebarContacts();
     });
   }
   function beginMotion() { motionRuntime.active++; }
@@ -2395,7 +3234,14 @@
       // traversal is allowed as a last resort but checked for completeness.
       const nativeLayers = live ? [live.Canvas,live.CharacterCanvas,
         live.DrawCanvas,live.RenderCanvas].filter(portraitImageSource) : [];
-      const layers = [...new Set([...nativeLayers,...(liveLayers.length ? liveLayers : savedLayers)])];
+      // If BC exposes a pre-composited portrait, never let a lone overlay
+      // found during generic object traversal outscore that complete canvas.
+      const composite = nativeLayers.length ? nativeLayers :
+        [saved?.Canvas,saved?.CharacterCanvas,saved?.DrawCanvas,
+          saved?.RenderCanvas].filter(portraitImageSource);
+      const layers = composite.length ? [...new Set(composite)] :
+        [...new Set(liveLayers.length ? liveLayers : savedLayers)].filter(x=>
+          !/blink|eye|mouth|lips/i.test(String(x?.id||x?.name||'')));
       let worked = false;
       // Paint once then clone to all other avatars for this same person.
       if (canvases.length && drawPortraitLayers(canvases[0],layers,member)) {
@@ -2414,6 +3260,9 @@
         for (const extra of canvases.slice(1)) clonePaintedPortrait(canvases[0], extra, member);
       }
       if (worked) {
+        if(live) rememberRoomPortrait(member,canvases[0]);
+        else if(canvases[0]?.classList.contains('is-painted'))
+          rememberSteadyRemotePortrait(member,canvases[0]);
         syncPaintedPortraitCopies(member);
         portraitRuntime.unresolved.delete(member);
       }
@@ -2456,7 +3305,8 @@
       wceSavedSnapshot:{installed:wceIsInstalled(),database:'bce-past-profiles',
         dbLastCheck:wceSnapshotRuntime.dbLastCheck,
         cachedInSession:wceSnapshotRuntime.temporaryPortraits.has(member),
-        stableRemotePortrait:steadyRemotePortraits.has(member),
+        stableRemotePortrait:!!steadyRemotePortrait(member),
+        recentRoomPortrait:recentRoomPortraits.has(member),
         cachedMembers:wceSnapshotRuntime.temporaryPortraits.size,
         currentlyLoading:wceSnapshotRuntime.pending.has(member),
         isInLiveRoom:hasActualLivePresence(member),
@@ -4433,6 +5283,84 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .heroactions .closekitty{position:relative!important;z-index:37!important;isolation:isolate!important}
 #kc-panel .kc-sculpted-frame{pointer-events:none!important}
 
+
+/* v0.9.12 — Zero-flicker delivery indicators and compact outbox. */
+#kc-panel .kc-outbox{border:1px solid #d78bbb66;border-radius:12px;background:#321c33bf;padding:4px 9px;max-height:102px;overflow-y:auto;scrollbar-width:thin}
+#kc-panel .kc-outbox-title{font-weight:780;font-size:11px;color:#ffd0e8;margin-bottom:2px}
+#kc-panel .kc-outbox-row{display:flex;align-items:center;gap:6px;font-size:10px;padding:2px 0;border-top:1px solid #eeb7d522;min-width:0}
+#kc-panel .kc-outbox-preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:35%;flex:1;color:#ffe3f0}
+#kc-panel .kc-outbox-status{color:#f5bfdb;font-size:10px;flex:1;line-height:1.2}
+#kc-panel .kc-outbox-row .secondary{font-size:10px;padding:3px 7px;white-space:nowrap}
+#kc-panel .kc-delivery{color:#fbd2e6;font-size:10px;white-space:normal}
+
+
+/* v0.9.17: Security modal always above both drawers, input masked by default. */
+#kc-panel .paw-secure-overlay{position:absolute;inset:0;z-index:1800;background:rgba(14,6,20,.83);display:flex;justify-content:center;align-items:center;padding:18px;overflow:auto}
+#kc-panel .paw-secure-overlay.hidden{display:none!important}
+#kc-panel .paw-secure-dialog{width:min(460px,100%);max-height:90%;overflow:auto;padding:20px;border:2px solid #ed8dbb;border-radius:20px;background:#28152e;box-shadow:0 14px 55px #0009;color:#ffe9f5}
+#kc-panel .paw-secure-dialog h3{font-size:20px;margin:0 0 10px}
+#kc-panel .paw-secure-dialog .field{width:100%;margin:8px 0}
+#kc-panel .paw-secure-dialog .flex{flex-wrap:wrap;margin-top:12px}
+#kc-panel .paw-secure-dialog p{line-height:1.5}
+/* PawBooks 1.0 — bookshelf, chapters, timeline, collaborative annotations */
+#kc-panel .railtab[data-tab="pawbooks"] .ic{font-size:25px;line-height:1}
+#kc-panel .railtab[data-tab="pawbooks"] .tx{font-size:9.6px!important;letter-spacing:-.25px}
+#kc-panel .workspace.wide>.sidebar{display:none!important}
+#kc-panel .workspace.wide>.main{grid-column:2 / -1!important;grid-row:1!important;width:100%!important;min-width:0!important}
+#kc-panel .pawbooks-screen{padding:18px 22px 24px;max-width:none;overflow-y:auto;min-width:0;height:100%}
+#kc-panel .pawbook-heading{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:0 0 12px}
+#kc-panel .pawbook-heading h2{font:800 clamp(18px,2vw,24px)/1.3 system-ui,sans-serif;color:#ffe9f5;margin:0;flex:1}
+#kc-panel .pawbook-heading span{color:#ebb4d7}
+#kc-panel .pawbook-toolbar,#kc-panel .pawbook-tools{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:10px 0}
+#kc-panel .pawbook-toolbar .field{min-width:180px;max-width:380px;width:100%}
+#kc-panel .pawbook-tools .secondary,#kc-panel .pawbook-toolbar button{font-size:11px;padding:6px 10px;min-height:28px}
+#kc-panel .pawbook-shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(164px,1fr));gap:14px;padding:15px 0 25px}
+#kc-panel .pawbook-shelf-card{display:flex;flex-direction:column;align-items:stretch;gap:7px;text-align:left;min-width:0;min-height:245px;padding:9px;background:linear-gradient(150deg,#482341,#281928);border:1px solid #be80a4;border-radius:14px;color:#ffe6f4;cursor:pointer;box-shadow:0 8px 20px #180b1b77}
+#kc-panel .pawbook-shelf-card:hover{border-color:#ffb5d8;transform:translateY(-2px)}
+#kc-panel .pawbook-shelf-card .paw-cover{height:170px!important;min-height:170px!important;width:100%!important;max-width:none!important}
+#kc-panel .pawbook-shelf-card strong{font-size:13px;overflow-wrap:anywhere}
+#kc-panel .pawbook-shelf-card small{font-size:11px;color:#ffc7e5}
+#kc-panel .pawbook-cover-hero{display:flex;align-items:center;gap:20px;padding:16px;background:#301c30;border:1px solid #7c4f71;border-radius:17px;margin:10px 0 14px}
+#kc-panel .pawbook-cover-hero>.paw-cover{width:145px!important;min-width:145px;height:175px;max-height:175px}
+#kc-panel .pawbook-cover-hero>div:nth-child(2){min-width:0;flex:1}
+#kc-panel .pawbook-cover-hero strong{font-size:18px;color:#ffe5f3;overflow-wrap:anywhere}
+#kc-panel .pawbook-cover-hero p{margin:5px 0;color:#e8bdd6}
+#kc-panel .pawbook-memberlist{display:flex;flex-wrap:wrap;gap:7px}
+#kc-panel .pawbook-memberlist>span{font-size:11px;border-radius:15px;background:#52304d;padding:6px 9px}
+#kc-panel .pawbook-memberlist button{font-size:10px;padding:2px 6px}
+#kc-panel .pawbook-chapter{padding:17px;margin:16px 0;background:linear-gradient(160deg,#3b2439,#261a30);border:1px solid #895e7b;border-radius:15px;min-width:0}
+#kc-panel .pawbook-chapter-head{display:flex;justify-content:space-between;flex-wrap:wrap;align-items:center;gap:6px;font-size:17px;font-weight:750;color:#ffe9f3}
+#kc-panel .pawbook-page-caption{font-style:italic;font-size:12px;color:#f9cce6;margin:10px 0}
+#kc-panel .pawbook-canvas{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:11px;margin:14px 0}
+#kc-panel .pawbook-layout-list{grid-template-columns:1fr}
+#kc-panel .pawbook-layout-polaroid .pawbook-memory{border:7px solid #f8e4e7;background:#e9d7e2;color:#42243b;transform:rotate(-1deg)}
+#kc-panel .pawbook-layout-polaroid .pawbook-memory:nth-child(2n){transform:rotate(1deg)}
+#kc-panel .pawbook-layout-polaroid .pawbook-memory p,#kc-panel .pawbook-layout-polaroid .pawbook-memory small{color:#4b2c42}
+#kc-panel .pawbook-layout-collage{display:block;position:relative;min-height:550px;max-width:100%;border:2px dashed #b880a1;border-radius:12px;background:radial-gradient(#8a577944 1px,transparent 1px);background-size:18px 18px;overflow:hidden}
+#kc-panel .pawbook-layout-collage .pawbook-memory{position:absolute;width:22%;min-width:130px;max-width:235px;cursor:grab;touch-action:none;user-select:none;z-index:1}
+#kc-panel .pawbook-layout-collage .pawbook-memory:active{cursor:grabbing;z-index:4}
+#kc-panel .pawbook-memory{padding:12px;border-radius:11px;border:1px solid #a67397;background:#4c304d;min-width:0;box-shadow:0 3px 10px #13081644;color:#fff3fa}
+#kc-panel .pawbook-memory-title{font-size:13px;font-weight:750;overflow-wrap:anywhere}
+#kc-panel .pawbook-memory img{display:block;max-width:100%;max-height:220px;object-fit:contain;margin:8px auto;border-radius:7px}
+#kc-panel .pawbook-memory p{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45;color:inherit}
+#kc-panel .pawbook-memory small{display:block;color:#f7c2dc;font-size:10px}
+#kc-panel .pawbook-memory .pawbook-tools{margin:7px 0 0}
+#kc-panel .pawbook-memory .pawbook-tools button{min-height:24px;font-size:10px;padding:4px 7px}
+#kc-panel .pawbook-memo{font:italic 12px Georgia,serif;background:#fff4;line-height:1.4;border-radius:6px;padding:8px}
+#kc-panel .pawbook-tags{display:flex;flex-wrap:wrap;gap:4px;margin:5px 0}
+#kc-panel .pawbook-tags span{background:#ef9fc34d;padding:3px 6px;border-radius:9px;font-size:10px}
+#kc-panel .pawbook-comment{padding:4px 7px;border-left:2px solid #f7b6d7;font-size:11px!important}
+#kc-panel .pawbook-seal{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:175px;background:linear-gradient(145deg,#4b274d,#2d253e);border:1px solid #d38bad;border-radius:12px;text-align:center}
+#kc-panel .pawbook-seal span{font-size:44px}
+#kc-panel .pawbook-seal strong{font-size:16px}
+#kc-panel .pawbook-seal small{color:#f7cee7}
+#kc-panel .pawbook-empty{padding:30px 15px;text-align:center;border:1px dashed #b673a2;border-radius:15px;color:#ebc0da}
+#kc-panel .pawbook-activity,#kc-panel .pawbook-chronicle{padding:15px;margin:12px 0;border:1px solid #986586;border-radius:12px;background:#312235}
+#kc-panel .pawbook-activity>div,#kc-panel .pawbook-chronicle>div{padding:7px;border-bottom:1px solid #865875;overflow-wrap:anywhere;color:#f8d9e8}
+#kc-panel .pawbook-chronicle small{display:inline;color:#ebc6dd}
+#kc-panel .pawbook-invite{padding:13px;background:#563052;border:1px solid #da9abd;border-radius:10px;margin:9px 0}
+@container (max-width:700px){#kc-panel .pawbooks-screen{padding:10px}#kc-panel .pawbook-cover-hero{flex-wrap:wrap}#kc-panel .pawbook-chapter{padding:10px}#kc-panel .pawbook-shelf{grid-template-columns:repeat(auto-fill,minmax(132px,1fr))}#kc-panel .pawbook-canvas{grid-template-columns:1fr}#kc-panel .pawbook-layout-collage .pawbook-memory{min-width:100px}}
+
 `; }
 
   function setTheme() {
@@ -4488,6 +5416,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         <nav class="rail" aria-label="PawLounge navigation">
           <button class="railtab active" data-tab="chats"><span class="ic">${asset('ui-paw.svg','','🐾')}</span><span class="tx">Chats</span></button>
           <button class="railtab" data-tab="groups" title="Group Dens and invitations" aria-label="Groups"><span class="ic" aria-hidden="true">👥</span><span class="tx">Groups</span></button>
+          <button class="railtab" data-tab="pawbooks" title="Collaborative Scrapbooks and memory books" aria-label="PawBooks"><span class="ic" aria-hidden="true">📚</span><span class="tx">PawBooks</span></button>
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
           <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
@@ -4510,6 +5439,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     portraitRuntime.observer.observe(shadow, { childList:true, subtree:true });
     shadow.addEventListener('click', clickUI);
     shadow.addEventListener('input', inputUI);
+    shadow.addEventListener('pointerdown',bookPointerStart);
+    shadow.addEventListener('pointermove',bookPointerMove);
+    shadow.addEventListener('pointerup',bookPointerEnd);
+    shadow.addEventListener('pointercancel',bookPointerEnd);
     shadow.addEventListener('change', changeUI);
     shadow.addEventListener('keydown', keyUI);
     shadow.addEventListener('dragstart', pawDragStart);
@@ -4934,7 +5867,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
     ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='groups'));
-    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='catchup' || state.tab==='circles');
+    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles');
     if (state.tab === 'chats' || state.tab === 'groups') {
       if (state.tab==='chats') {
         ensureDefaultSelection();
@@ -4957,6 +5890,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (state.tab === 'rooms') renderRooms();
     else if (state.tab === 'stickers') renderStickersLibrary();
     else if (state.tab === 'moments') renderMoments();
+    else if (state.tab === 'pawbooks') renderPawBooks();
     else if (state.tab === 'catchup') renderCatchUp();
     else if (state.tab === 'circles') renderCircles();
     else renderSettings();
@@ -5118,6 +6052,74 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     </div>`;
     restoreSideScroll('left');
   }
+  function contactRowHTML(id,onlineMembers){
+    const c=state.chats[id],m=c?.messages?.at(-1),online=onlineMembers.has(id);
+    return `<button class="contact ${id===state.selected?'active':''}" data-contact="${id}">
+      ${avatar(id)}<span class="info"><div class="topline"><span class="nameline">${escapeText(name(id))} ${c?.favorite?'♡':''}</span><span class="time">${m?new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</span></div><div class="preview">${escapeText(m?.text||(online?'In your room':'No messages yet'))}</div>${statusMarkup(id)}</span>
+      ${c?.replyLater?'<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread?`<span class="tiny-pill">${Math.min(99,c.unread)}</span>`:''}<span class="presence ${online?'on':''}" title="${online?'In your room':'Not in your room'}"></span></button>`;
+  }
+  function contactRowSignature(id,onlineMembers){
+    const c=state.chats[id],m=c?.messages?.at(-1);
+    return JSON.stringify([id,id===state.selected,name(id),m?.id,m?.time,m?.text,
+      c?.unread,c?.favorite,c?.replyLater,c?.requestPending,c?.pinned,c?.muted,
+      onlineMembers.has(id),statusLabel(id),state.profiles[id]?.updated||0]);
+  }
+  const sidebarDiffStats={patches:0,rebuilt:0,kept:0,rowsReplaced:0,rowsAdded:0};
+  function reconcileSidebarContacts(){
+    if(!state.open||state.tab!=='chats'||!ui.menu)return;
+    const key=[state.contactsMode,state.circleFilter,state.search].join('|');
+    const list=ui.menu.querySelector('.side-list');
+    if(!list||ui.menu.dataset.kcSidebarKey!==key){renderSidebar();sidebarDiffStats.rebuilt++;return;}
+    const items=contactItems(),online=new Set(currentRoomRoster().map(p=>numeric(p.MemberNumber)));
+    const before=ui.menu.querySelector('.contacts-scroll');
+    const top=before?.scrollTop||0;
+    const existing=new Map([...list.querySelectorAll(':scope > button.contact[data-contact]')].map(node=>[numeric(node.dataset.contact),node]));
+    let changed=false;
+    const template=document.createElement('template');
+    for(let i=0;i<items.length;i++){
+      const id=items[i],signature=contactRowSignature(id,online);
+      let row=existing.get(id);
+      if(!row||row.dataset.kcRowSig!==signature){
+        template.innerHTML=contactRowHTML(id,online);
+        const fresh=template.content.firstElementChild;
+        if(!fresh)continue;
+        fresh.dataset.kcRowSig=signature;
+        if(row){
+          // Keep painted BC portrait and its canvas attached; prevent a new
+          // async portrait render on every received message or badge change.
+          const oldAvatar=row.querySelector('.avatar');
+          const newAvatar=fresh.querySelector('.avatar');
+          if(oldAvatar&&newAvatar)newAvatar.replaceWith(oldAvatar);
+          row.replaceWith(fresh);sidebarDiffStats.rowsReplaced++;
+        }else sidebarDiffStats.rowsAdded++;
+        row=fresh;changed=true;
+      }else sidebarDiffStats.kept++;
+      if(list.children[i]!==row){list.insertBefore(row,list.children[i]||null);changed=true;}
+      existing.delete(id);
+    }
+    for(const old of existing.values()){old.remove();changed=true;}
+    if(!items.length){
+      if(!list.querySelector('.kc-room-empty,.muted')){
+        list.innerHTML=state.contactsMode==='inroom'?
+          `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom'?'Join a BC room to see everyone there.':'Nobody else is in this room yet.'}</div>`:'<div class="muted">No kitties found yet.</div>';
+        changed=true;
+      }
+    }else for(const empty of list.querySelectorAll(':scope > .muted')){empty.remove();changed=true;}
+    const heroId=state.contactsMode==='inroom'?(items.includes(state.selected)?state.selected:items[0]||0):(state.selected||items[0]||0);
+    const hero=ui.menu.querySelector('.side-mainline');
+    if(hero && heroId && numeric(hero.querySelector('.avatar')?.dataset.kcMember)===heroId){
+      const current=state.chats[heroId],last=current?.messages?.at(-1);
+      const content=hero.querySelector(':scope > div');
+      const title=content?.children?.[0],preview=content?.querySelector('.muted');
+      const newName=name(heroId),newPreview=last?.text||(online.has(heroId)?'Together in the same room ♡':'A cozy connection');
+      if(title&&title.textContent!==newName)title.textContent=newName;
+      if(preview&&preview.textContent!==newPreview)preview.textContent=newPreview;
+    }
+    if(before)before.scrollTop=top;
+    sidebarDiffStats.patches++;
+    // No work on portraits unless a brand-new row has been inserted.
+    if(changed){paintSteadyRemotePortraits(ui.menu);schedulePortraits();}
+  }
   function renderSidebar() {
     if(state.tab==='groups'){renderGroupsSidebar();return;}
     if (!ui.menu) return;
@@ -5142,12 +6144,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       (state.selected || items[0] || 0);
     const heroChat = heroId ? state.chats[heroId] : null;
     const heroLast = heroChat?.messages?.at(-1);
-    const contactButton = id => {
-      const c = state.chats[id], m = c?.messages?.at(-1), online = onlineMembers.has(id);
-      return `<button class="contact ${id === state.selected ? 'active' : ''}" data-contact="${id}">
-        ${avatar(id)}<span class="info"><div class="topline"><span class="nameline">${escapeText(name(id))} ${c?.favorite ? '♡' : ''}</span><span class="time">${m ? new Date(m.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}</span></div><div class="preview">${escapeText(m?.text || (online ? 'In your room' : 'No messages yet'))}</div>${statusMarkup(id)}</span>
-        ${c?.replyLater ? '<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread ? `<span class="tiny-pill">${Math.min(99,c.unread)}</span>` : ''}<span class="presence ${online ? 'on':''}" title="${online ? 'In your room' : 'Not in your room'}"></span></button>`;
-    };
     ui.menu.innerHTML = `<div class="side-shell">
       <div class="side-card"><div class="side-card-title">Now Purring ♡</div>
         ${heroId ? `<div class="side-mainline">${avatar(heroId)}<div style="min-width:0;flex:1"><div style="font-size:15px;font-weight:900">${escapeText(name(heroId))}</div><div class="muted">${escapeText(heroLast?.text || (onlineMembers.has(heroId) ? 'Together in the same room ♡' : 'A cozy connection'))}</div>${statusMarkup(heroId)}</div><span class="hero-heart">♡</span></div>` : '<div class="muted">Pick a kitty to start purring ♡</div>'}</div>
@@ -5162,11 +6158,15 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         </div>
       </div>
       <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names and contacts">
-        <div class="side-list">${items.map(contactButton).join('') || (state.contactsMode==='inroom' ?
+        <div class="side-list">${items.map(id=>contactRowHTML(id,onlineMembers)).join('') || (state.contactsMode==='inroom' ?
           `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom' ? 'Join a BC room to see everyone there.' : state.search.trim() ? 'No matching room members.' : 'Nobody else is in this room yet.'}</div>` : '<div class="muted">No kitties found yet.</div>')}</div>
       </div>
       <button class="new-kitty" data-action="new">＋ Add a kitty by member #</button>
     </div>`;
+    ui.menu.dataset.kcSidebarKey=[state.contactsMode,state.circleFilter,state.search].join('|');
+    for(const row of ui.menu.querySelectorAll('.side-list >button.contact[data-contact]')){
+      const id=numeric(row.dataset.contact);row.dataset.kcRowSig=contactRowSignature(id,onlineMembers);
+    }
     paintSteadyRemotePortraits(ui.menu);
     restoreSideScroll('left');
     const newInboxFilters = ui.menu.querySelector('.kc-inbox-filters');
@@ -5190,7 +6190,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const lastSticker = (c.messages || []).slice().reverse().find(m => sticker(m.text));
     const lastStickerInfo = lastSticker ? sticker(lastSticker.text) : null;
     ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}<div class="chathead" id="kc-chathead"></div><div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
-      ${scheduleMarkup('chat',id)}<div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
+      ${scheduleMarkup('chat',id)}${outboxMarkup('chat',id)}<div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(s => `<button class="stickerbtn" data-sticker="${s.id}" title="Send ${s.name}">${asset(`sticker-${s.id}.png`,'',s.emoji)}<small>${s.name}</small></button>`).join('')}</div>
       <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option></select>
       <textarea class="field" id="kc-compose" maxlength="2000" rows="1" placeholder="Write a little meow...">${escapeText(c.draft || '')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div></section>
@@ -5211,7 +6211,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         </section>
         <section class="compcard roompreview"><div class="smalltitle">${asset('ui-paw.svg','','🐾')} Shared Room</div><div class="roompreview-row"><div class="room-preview-icon">${asset('room-thumb-mockup.png','','🏡')}</div><div class="roompreview-name">${inRoom(id) ? escapeText(window.ChatRoomData?.Name || 'Current room') : 'No shared room'}<small>${inRoom(id) ? 'Together in the same room ♡' : 'Explore public rooms'}</small></div><button class="room-join" data-action="roomshortcut" title="Open room explorer">⌂ Join</button></div></section>
         <section class="compcard actioncard"><div class="smalltitle">${asset('ui-settings.svg','','⚙')} Quick Actions</div><div class="quickactions"><button class="iconbutton" data-action="favorite" title="Favourite"><span>${c.favorite ? '💗':'♡'}</span><small>Like</small></button><button class="iconbutton" data-action="pin" title="Pin"><span>${c.pinned ? '📌':'☆'}</span><small>Pin</small></button><button class="iconbutton" data-action="menu" title="Chat options"><span>···</span><small>More</small></button></div></section>
-      </aside></div>`;
+      </aside></div><div id="kc-secure-modal" class="paw-secure-overlay hidden" role="dialog" aria-modal="true" aria-label="Set Secure Chat secret">
+        <div class="paw-secure-dialog"><h3>🔐 Secure Chat</h3><p class="muted">Encrypt new PawLounge Beeps and Whispers to <b class="paw-secure-recipient"></b> with AES-256-GCM.</p>
+        <p class="muted">You BOTH enter the SAME secret, shared OUTSIDE Bondage Club. Generated random secrets are safest. No passwords are saved; repeat after reload. Native BC shows encoded ciphertext.</p>
+        <label>Shared secret <input class="field" type="password" id="kc-secure-key" autocomplete="off" spellcheck="false" maxlength="256" placeholder="Paste the same secret on both clients"/></label>
+        <div class="paw-secure-status muted"></div><div class="flex"><button class="secondary" data-action="pawsecuregenerate">Generate 256-bit secret</button><button class="primary" data-action="pawsecuresave">Enable secure chat</button></div>
+        <div class="flex"><button class="secondary" data-action="pawsecureforget">Disable / forget key</button><button class="secondary" data-action="pawsecureclose">Close</button></div></div></div>`;
     ui.input = ui.shadow.getElementById('kc-compose');
     renderChatHeader(); renderMessages();renderReplyBar();
     restoreSideScroll('right');
@@ -5243,12 +6248,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const groupMessages=historyDisplayMessages('group',g.id,g.messages);
     ui.body.innerHTML=`<div class="chatlayout"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}
       <div class="chathead"><div style="font-size:36px">🏡</div><div class="headblock"><div class="headtitle">${escapeText(g.name)}</div><div class="headsubtitle">PawLounge Group Den · ${g.accepted.length}/${g.members.length} members joined</div></div><button class="secondary" data-action="leavegroup">Leave group</button></div>
-      <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':name(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} acknowledged</span>` : ''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
+      <div class="msglog" id="kc-log">${historyLoadButton()}${groupMessages.length ? `<div class="kc-date-divider"><span>${new Date(groupMessages[0].time).toDateString() === new Date().toDateString() ? 'Today' : new Date(groupMessages[0].time).toLocaleDateString()}</span></div>` : ''}${groupMessages.length?groupMessages.map(m=>{const mine=m.from===me(),st=sticker(m.text);return `<div class="msgrow ${mine?'mine':'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : m.from)}</div><div class="msgcol"><div class="msgbubble"><div class="group-message-author">${escapeText(mine?'You':name(m.from))}</div>${replyPreview(m.replyTo)}${st?`<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div>`:escapeText(m.text)}</div>${reactionMarkup(m,'group',g.id)}<div class="msgmeta">${m.recovered?`<span title="Matched by ${m.verifiedBy?.length||0} other group participants; client-reported, not cryptographically verified">✓ ${m.verifiedBy?.length||0} peer confirmations · </span>`:''}${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${mine ? `<span data-group-receipt="${escapeText(m.id)}">· ✓ ${g.receipts?.[m.id]?.length||0}/${Math.max(0,g.accepted.length-1)} client ACKs</span>` : ''}${m.outboxId?` <span class="kc-delivery" data-outbox-status="${escapeText(m.outboxId)}">${escapeText(outboxStatusLabel(outboxById(m.outboxId)))}</span>`:''} ${messageActions(m,'group')}</div></div></div>`}).join(''):'<div class="empty">🐾 No group messages yet. Say meow!</div>'}</div>
       <div class="quick">${state.settings.shortcuts.slice(0,6).map((q,i)=>`<button class="pill" data-quick="${i}">🐾 ${escapeText(q)}</button>`).join('')}</div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(st=>`<button class="stickerbtn" data-sticker="${st.id}">${asset(`sticker-${st.id}.png`,'',st.emoji)}<small>${escapeText(st.name)}</small></button>`).join('')}</div>
-      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}
+      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer group-composer"><div class="group-head-tag">🏡 Group</div><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open group stickers">＋</button><textarea class="field" id="kc-compose" maxlength="${MAX_GROUP_TEXT}" rows="1" placeholder="Meow to the group...">${escapeText(g.draft||'')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div>${scheduleMarkup('group',g.id)}${outboxMarkup('group',g.id)}
       </section><aside class="companion group-details" tabindex="0" aria-label="Scroll group details and members">${rightDrawerCloseButton()}<div class="compcard"><h3>🐾 Den Members</h3>${g.members.map(id=>`<div class="group-member">${avatar(id)}<div><b>${escapeText(name(id))}</b><div><small>${g.accepted.includes(id)?'✅ Joined': '✉️ Awaiting invitation'}${id===g.creator?' · Host':g.moderators?.includes(id)?' · Moderator':''}${g.creator===me() && id!==me() ? ` <button class="kc-role-toggle" data-role-toggle="${id}" title="Toggle moderator role">${g.moderators?.includes(id)?'Remove moderator':'Make moderator'}</button><button class="kc-role-toggle" data-paw-role="${id}">${escapeText(g.roles?.[id]||'Member')} ▾</button>` : ` · ${escapeText(id===g.creator?'Host':g.roles?.[id]||'Member')}`}</small></div></div></div>`).join('')}</div>
-      <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask members for up to eight of their recent sent messages">↻ Recover recent messages</button><p class="muted">Acknowledged counts require recipients using this version of Kittychat. Recovery is best-effort and limited to recent messages.</p></div>${pawGroupExtras(g)}</aside></div>`;
+      <div class="compcard"><h3>💌 Group delivery</h3><p class="muted">Messages are delivered as individual BC beeps. Each member must accept and be a BC friend of the sender.</p>${g.creator===me()?'<button class="secondary" data-action="resendgroup">Resend pending invites</button>':''}<button class="secondary" data-action="recovergroup" title="Ask group members to corroborate recent messages">↻ Recover recent messages</button><p class="muted" data-recovery-status>${escapeText(recoveryStatus(g.id))}</p><p class="muted">Every recovered message requires identical reports from two different accepted group members (other than you), both on v0.9.15+. Client-reported matching is not cryptographic proof. ACKs are not read receipts.</p></div>${pawGroupExtras(g)}</aside></div>`;
     ui.input=ui.shadow.getElementById('kc-compose');renderReplyBar();
     const logEl=ui.shadow.getElementById('kc-log'); if(logEl)logEl.scrollTop=preserveTop ? previousTop+(logEl.scrollHeight-previousHeight) : logEl.scrollHeight;
     restoreSideScroll('right');
@@ -5263,13 +6268,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const typing = (state.typingUntil[id] || 0) > Date.now();
     const p = state.profiles[id];
     head.innerHTML = `<button class="headface facepop-btn" type="button" data-facepop="head-face" title="Pat the kitty face">${avatar(id)}</button><div class="headblock"><div class="headtitle">${escapeText(name(id))} ${p?.kitty ? '♡' : ''}</div><div class="headsubtitle">#${id} · ${typing ? '<span class="typing-paws">🐾 typing...</span>' : inRoom(id) ? 'In the room with you' : (p?.signature ? escapeText(p.signature) : 'A cozy connection')}</div>${statusMarkup(id,'kc-head-status')}</div>
-    <div class="headright"><button class="iconbutton" data-action="searchmessages" title="Search chat history">${asset('ui-search.svg','','🔎')}</button><button class="iconbutton" data-action="profile" title="Share your Paw Profile">🐾</button><button class="iconbutton" data-action="viewpawprofile" title="View saved Paw Profile">♡</button><button class="iconbutton" data-action="favorite" title="Favourite">${asset('ui-heart.svg','','♡')}</button><button class="iconbutton" data-action="menu" title="Chat options">⋯</button></div>`;
+    <div class="headright"><button class="iconbutton" data-action="securechat" title="Secure Chat: ${pawSecureSecrets.has(id)?'Enabled (session only)':'Set a shared secret'}">${pawSecureSecrets.has(id)?'🔐':'🔒'}</button><button class="iconbutton" data-action="searchmessages" title="Search chat history">${asset('ui-search.svg','','🔎')}</button><button class="iconbutton" data-action="profile" title="Share your Paw Profile">🐾</button><button class="iconbutton" data-action="viewpawprofile" title="View saved Paw Profile">♡</button><button class="iconbutton" data-action="favorite" title="Favourite">${asset('ui-heart.svg','','♡')}</button><button class="iconbutton" data-action="menu" title="Chat options">⋯</button></div>`;
   }
   // Reuse one markup function for initial render and fast append. This also
   // preserves the native reply/reaction UI in both paths without divergence.
   function privateMessageMarkup(m,c) {
     const mine=m.from===me(), st=sticker(m.text);
-    return `<div class="msgrow ${mine ? 'mine' : 'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : c.id)}</div><div class="msgcol"><div class="msgbubble">${replyPreview(m.replyTo)}${st ? `<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div><div class="muted">${escapeText(st.name)} sticker</div>` : escapeText(m.text)}</div>${reactionMarkup(m,'chat',c.id)}<div class="msgmeta">${m.mode === 'whisper' ? '🤫 Whisper' : '💌 Beep'} · ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} ${messageActions(m,'chat')}</div></div></div>`;
+    return `<div class="msgrow ${mine ? 'mine' : 'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : c.id)}</div><div class="msgcol"><div class="msgbubble">${replyPreview(m.replyTo)}${st ? `<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div><div class="muted">${escapeText(st.name)} sticker</div>` : escapeText(m.text)}</div>${reactionMarkup(m,'chat',c.id)}<div class="msgmeta">${m.mode === 'whisper' ? '🤫 Whisper' : '💌 Beep'} · ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${m.outboxId?` <span class="kc-delivery" data-outbox-status="${escapeText(m.outboxId)}">${escapeText(outboxStatusLabel(outboxById(m.outboxId)))}</span>`:''} ${messageActions(m,'chat')}</div></div></div>`;
   }
   function privateDateLabel(time) {
     const d=new Date(time);
@@ -5283,9 +6288,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (!c || !log) return false;
     const rows=log.querySelectorAll(':scope > .msgrow');
     const saturated=rows.length===MAX_MESSAGES && c.messages.length===MAX_MESSAGES;
-    if (!rows.length || (!saturated && rows.length!==c.messages.length-1)) return false;
+    if (!saturated && rows.length!==c.messages.length-1) return false;
+    if(!rows.length && c.messages.length!==1)return false;
     const nearBottom=log.scrollHeight-log.scrollTop-log.clientHeight<100;
-    if (saturated) rows[0].remove();
+    if (saturated) rows[0]?.remove();
+    const empty=log.querySelector(':scope > .empty');if(empty)empty.remove();
+    if(!log.querySelector(':scope > .kc-date-divider') && !state.historyOlder.length)log.insertAdjacentHTML('beforeend',`<div class="kc-date-divider"><span>${escapeText(privateDateLabel(message.time))}</span></div>`);
     log.insertAdjacentHTML('beforeend',privateMessageMarkup(message,c));
     // When a full 90-message cache advances beyond midnight, its day label
     // must advance too. Only the existing label changes, never the log DOM.
@@ -5346,18 +6354,45 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const room=o.room&&['X','M','F'].includes(o.room.Space)&&trim(o.room.Name,110)?{Space:o.room.Space,Name:trim(o.room.Name,110)}:null;
     return {id,from,type,room,groupId:trim(o.groupId,65),label:trim(o.label,120),at:Number(o.at)||Date.now(),status:['pending','accepted','declined'].includes(o.status)?o.status:'pending'};
   }
+  // PawBooks 1.0 uses the same shared album IDs and saved cards as legacy scrapbooks.
+  function normalizeBookPage(p){
+    const id=trim(p?.id,80),title=trim(p?.title,60);
+    if(!/^page_[\w-]{5,60}$/.test(id)||!title)return null;
+    const until=Number(p.sealedUntil)||0;
+    return {id,title,caption:trim(p.caption||'',250),background:['rose','plum','midnight','lavender','forest','gold'].includes(p.background)?p.background:'rose',
+      layout:['grid','list','polaroid','collage'].includes(p.layout)?p.layout:'polaroid',sealedUntil:until>0&&until<4102444800000?until:0,
+      updated:Number(p.updated)||0,private:!!p.private};
+  }
+  function normalizeBookPages(raw){return (Array.isArray(raw)?raw:[]).slice(0,24).map(normalizeBookPage).filter(p=>p&&!p.private);}
+  function normalizePrivateBookPages(raw){
+    const out={};if(!raw||typeof raw!=='object'||Array.isArray(raw))return out;
+    for(const [id,pages] of Object.entries(raw).slice(0,30))if(/^album_[\w-]{5,45}$/.test(id)){
+      out[id]=(Array.isArray(pages)?pages:[]).slice(-24).map(p=>{
+        const page=normalizeBookPage(p);if(!page)return null;
+        return {...page,private:true,cards:(Array.isArray(p.cards)?p.cards:[]).slice(-60).map(normalizePawCard).filter(Boolean)};
+      }).filter(Boolean);
+    }
+    return out;
+  }
+  function normalizeBookRoles(raw,members){
+    const out={};for(const member of members)if(['viewer','contributor','editor'].includes(raw?.[member]))out[member]=raw[member];
+    return out;
+  }
+  function normalizeBookEvents(raw){return (Array.isArray(raw)?raw:[]).slice(-60).map(e=>({
+    id:trim(e?.id,80),by:numeric(e?.by),type:trim(e?.type,30),detail:trim(e?.detail,110),at:Number(e?.at)||0
+  })).filter(e=>/^evt_[\w-]{5,65}$/.test(e.id)&&e.by&&e.at>0);}
   function normalizeAlbum(raw){
     const id=trim(raw?.id,80),owner=numeric(raw?.owner);
     if(!/^album_[\w-]{5,45}$/.test(id)||!owner)return null;
     const members=[...new Set([owner,...(Array.isArray(raw?.members)?raw.members:[]).map(numeric)].filter(Boolean))].slice(0,8);
     const cards=(Array.isArray(raw.cards)?raw.cards:[]).slice(-60).map(normalizePawCard).filter(Boolean);
     const nameUpdated=Number(raw.nameUpdated);
-    return {id,owner,name:trim(raw.name,70)||'Paw Scrapbook',nameUpdated:Number.isSafeInteger(nameUpdated)&&nameUpdated>0?nameUpdated:0,members,joined:!!raw.joined,cards,coverColor:Object.hasOwn(PAW_COVER_COLORS,raw.coverColor)?raw.coverColor:'rose',coverImage:safeImg(raw.coverImage),coverFrame:['classic','polaroid','floral'].includes(raw.coverFrame)?raw.coverFrame:'classic',coverAt:Number(raw.coverAt)||0,pageLayout:PAW_PAGE_LAYOUTS.includes(raw.pageLayout)?raw.pageLayout:'grid',pageAt:Number(raw.pageAt)||0,updated:Number(raw.updated)||Date.now()};
+    return {id,owner,bookPages:normalizeBookPages(raw.bookPages),bookRoles:normalizeBookRoles(raw.bookRoles,members),bookEvents:normalizeBookEvents(raw.bookEvents),linkedGroup:trim(raw.linkedGroup||'',65),bookUpdated:Math.max(0,Number(raw.bookUpdated)||0),name:trim(raw.name,70)||'Paw Scrapbook',nameUpdated:Number.isSafeInteger(nameUpdated)&&nameUpdated>0?nameUpdated:0,members,joined:!!raw.joined,pendingInvites:(Array.isArray(raw.pendingInvites)?raw.pendingInvites:[]).map(numeric).filter(Boolean).slice(0,8),cards,coverColor:Object.hasOwn(PAW_COVER_COLORS,raw.coverColor)?raw.coverColor:'rose',coverImage:safeImg(raw.coverImage),coverFrame:['classic','polaroid','floral'].includes(raw.coverFrame)?raw.coverFrame:'classic',coverAt:Number(raw.coverAt)||0,pageLayout:PAW_PAGE_LAYOUTS.includes(raw.pageLayout)?raw.pageLayout:'grid',pageAt:Number(raw.pageAt)||0,updated:Number(raw.updated)||Date.now()};
   }
   function pawSend(member,type,body){
     member=numeric(member);
     if(!member||!myFriends().includes(member)||typeof window.ServerSend!=='function')return false;
-    try{window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:type,IsSecret:true,Message:JSON.stringify(body)});return true;}
+    try{window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:type,IsSecret:true,Message:pawWireJSON({...body,nonce:integrityNonce()})});return true;}
     catch(err){console.warn('[PawLounge] Send failed:',err);return false;}
   }
   function circleFlag(member,field){return state.circles.some(c=>c.members.includes(numeric(member))&&c[field]===false);}
@@ -5422,8 +6457,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function receivePawInvite(data,from){
     if(!myFriends().includes(from))return;
-    let p;try{p=JSON.parse(String(data.Message||''));}catch{return;}
+    let p;try{p=pawParseWireJSON(String(data.Message||''),15000);}catch{return;}
     if(p?.type!=='KCPawInvite'||p.v!==1)return;
+    if(!integrityAcceptEvent('invite',from,p,integrityMsgId(p.invitation?.id)?p.invitation.id:''))return;
     const i=normalizeInvitation({...p.invitation,from});if(!i||state.invitations.some(x=>x.id===i.id))return;
     state.invitations.push(i);state.invitations=state.invitations.slice(-70);saveSoon();
     notice(`✉ ${bcName(from)} sent a PawLounge invitation.`);
@@ -5454,8 +6490,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function receivePawGuestbook(data,from){
     if(!myFriends().includes(from)||state.settings.pawGuestbookOpen===false)return;
-    let o;try{o=JSON.parse(String(data.Message||''));}catch{return;}
+    let o;try{o=pawParseWireJSON(String(data.Message||''),15000);}catch{return;}
     if(o?.type!=='KCPawGuestbook'||o.v!==1)return;
+    if(!integrityAcceptEvent('guestbook',from,o,integrityMsgId(o.entry?.id)?o.entry.id:''))return;
     const e=normalizeGuestEntry({...o.entry,from});if(!e||state.pawGuestbook.some(x=>x.id===e.id))return;
     state.pawGuestbook.push(e);state.pawGuestbook=state.pawGuestbook.slice(-50);saveSoon();notice(`🐾 ${bcName(from)} left a guestbook pawprint.`);
   }
@@ -5483,7 +6520,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     album.nameUpdated=Math.max(Date.now(),Number(album.nameUpdated||0)+1);
     album.updated=Date.now();
     saveNow(true);
-    renderMoments();
+    bookRender();
     let failed=0;
     for(const member of album.members){
       if(member===me())continue;
@@ -5530,7 +6567,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const due=new Date(when.replace(' ','T')).getTime();
     if(!Number.isFinite(due)||due<Date.now()+10000||due>Date.now()+30*86400000)return notice('Choose a time from 10 seconds to 30 days in the future.');
     if(state.scheduledMessages.length>=80)return notice('Maximum 80 scheduled messages.');
-    state.scheduledMessages.push({id:uniquePawId('scheduled'),kind:g?'group':'chat',to:recipient,text:content,mode:state.composerMode==='whisper'?'whisper':'beep',due,status:'pending'});
+    state.scheduledMessages.push({id:uniquePawId('scheduled'),kind:g?'group':'chat',to:recipient,text:content,mode:state.composerMode==='whisper'?'whisper':'beep',secure:!g&&pawSecureSecrets.has(numeric(recipient)),due,status:'pending'});
     saveNow(true); renderChat();notice(`📅 Message scheduled for ${new Date(due).toLocaleString()}. Keep BC connected.`);
   }
   function cancelPawSchedule(id) {
@@ -5539,33 +6576,30 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     entry.status='cancelled';saveNow(true);renderChat();
   }
   function deliverScheduledMessages() {
-    if(!state.myId || me()!==state.myId || typeof window.ServerSend!=='function')return;
+    if(!state.myId||me()!==state.myId||typeof window.ServerSend!=='function')return;
     const now=Date.now();
-    for(const entry of state.scheduledMessages) {
+    for(const entry of state.scheduledMessages){
       if(entry.status!=='pending'||entry.due>now)continue;
       if(now-entry.due>10*60000){entry.status='missed';saveNow(true);continue;}
-      let success=false;
-      if(entry.kind==='chat') {
-        const member=numeric(entry.to);
-        if(entry.mode==='whisper') {
-          if(inRoom(member)&&typeof window.ChatRoomSendWhisper==='function') {
-            try{window.ChatRoomSendWhisper(member,entry.text);appendMessage(member,entry.text,me(),'whisper','local');success=true;}catch(err){console.warn('[PawLounge] Scheduled whisper failed',err);}
-          }
-        }else if(myFriends().includes(member)) {
-          try{if(typeof window.ServerSendBeepMessage==='function')window.ServerSendBeepMessage(member,entry.text,{});
-            else window.ServerSend('AccountBeep',{MemberNumber:member,BeepType:'',IsSecret:true,Message:entry.text});
-            appendMessage(member,entry.text,me(),'beep','local');success=true;
-          }catch(err){console.warn('[PawLounge] Scheduled beep failed',err);}
-        }
-      } else {
-        const g=state.groups[entry.to];
-        if(g?.joined&&g.accepted.includes(me())) {
-          const mid=groupId(); let sent=0;
-          for(const id of g.accepted)if(id!==me()&&sendGroupWire(id,{t:'msg',id:g.id,mid,text:entry.text},`🐾 [${g.name}] ${bcName(me())}: ${entry.text}`))sent++;
-          if(sent){addGroupMessage(g,me(),entry.text,mid);success=true;}
+      const g=entry.kind==='group'?state.groups[entry.to]:null;
+      if(g&&(!g.joined||!g.accepted.includes(me())))continue;
+      if(entry.kind==='chat'&&entry.secure&&!pawSecureSecrets.has(numeric(entry.to)))continue; // Fail closed until re-unlocked or expired.
+      if(entry.kind==='chat'&&entry.mode==='whisper'&&!inRoom(numeric(entry.to)))continue;
+      if(entry.kind==='chat'&&entry.mode==='beep'&&!myFriends().includes(numeric(entry.to)))continue;
+      // Mark intent in durable storage before handing off, so a resumed tick
+      // cannot enqueue the same scheduled message twice after a page crash.
+      entry.status='sent';entry.sentAt=now;saveNow(true);
+      const item=enqueueDelivery(entry.kind,entry.to,entry.text,entry.mode);
+      if(!item){entry.status='missed';saveNow(true);continue;}
+      if(state.open&&['chats','groups'].includes(state.tab)){
+        scheduleSidebarUpdate();
+        if((entry.kind==='chat'&&state.tab==='chats'&&state.selected===entry.to)||
+           (entry.kind==='group'&&state.tab==='groups'&&state.selectedGroup===entry.to)){
+          const old=ui.body?.querySelector('.kc-outbox');
+          if(old){const tpl=document.createElement('template');tpl.innerHTML=outboxMarkup(entry.kind,entry.to).trim();old.replaceWith(tpl.content.firstElementChild);}
         }
       }
-      if(success){entry.status='sent';entry.sentAt=now;saveNow(true);if(state.open){if(state.tab==='chats'||state.tab==='groups')renderSidebar();if(state.tab==='chats'||state.tab==='groups')renderChat();}notice('📅 Scheduled PawLounge message sent.');}
+      notice('📅 Scheduled message queued to Outbox.');
     }
     if(state.scheduledMessages.length>100){state.scheduledMessages=state.scheduledMessages.filter(x=>x.status==='pending').concat(state.scheduledMessages.filter(x=>x.status!=='pending').slice(-30));saveSoon();}
   }
@@ -5620,12 +6654,327 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const base=normalizeMoment(c);if(!base)return null;
     const reactions=c?.reactions&&typeof c.reactions==='object'&&!Array.isArray(c.reactions)?c.reactions:{};
     base.reactions=Object.fromEntries(Object.entries(reactions).filter(([e,v])=>['💗','⭐','🐾'].includes(e)&&Array.isArray(v)).map(([e,v])=>[e,[...new Set(v.map(numeric).filter(Boolean))].slice(0,8)]));
+    base.sharedBy=numeric(c?.sharedBy);
+    base.importedBy=numeric(c?.importedBy);
+    base.pageId=trim(c?.pageId||'',85);base.tags=(Array.isArray(c?.tags)?c.tags:[]).slice(0,8).map(x=>trim(x,24)).filter(Boolean);base.note=trim(c?.note||'',230);base.pos=(c?.pos&&Number.isFinite(Number(c.pos.x))&&Number.isFinite(Number(c.pos.y)))?{x:Math.max(0,Math.min(76,Number(c.pos.x))),y:Math.max(0,Math.min(75,Number(c.pos.y)))}:null;
     base.comments=(Array.isArray(c?.comments)?c.comments:[]).slice(-24).map(x=>({id:trim(x.id,65),from:numeric(x.from),text:trim(x.text,180),at:Number(x.at)||Date.now()})).filter(x=>x.id&&x.from&&x.text);
     return base;
   }
   function pawAlbumBroadcast(a,action,body) {
     for(const member of a.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action,id:a.id,...body});
   }
+  // --- PawBooks 1.0: bookshelf, scrapbook chapters, permissions & keepsakes ---
+  const pawBookUI={query:'',timeline:false,activity:false,selectedPage:'',drag:null};
+  function bookRender(){if(!state.open)return;if(state.tab==='pawbooks')renderPawBooks();else if(state.tab==='moments')renderMoments();}
+  const bookSyncRuntime={lastRequest:new Map(),lastResponse:new Map()};
+  function bookRequestSync(albumId){
+    const a=bookLookup(albumId);if(!a||a.owner===me())return notice('You already own the authoritative copy of this PawBook.');
+    const key=a.id+':'+me();if(Date.now()-(bookSyncRuntime.lastRequest.get(key)?.at||0)<60000)return notice('Please wait before requesting another sync.');
+    const token=integrityNonce();
+    bookSyncRuntime.lastRequest.set(key,{at:Date.now(),token});
+    if(!pawSend(a.owner,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'book-sync-request',id:a.id,requestToken:token}))return notice('Could not request updates from the scrapbook owner.');
+    notice('📚 Requested missing pages and memories. The owner must be online.');
+  }
+  function bookServeSync(a,member,token){
+    if(typeof token!=='string'||!integrityMsgId(token))return;
+    const key=a.id+':'+member;
+    if(Date.now()-(bookSyncRuntime.lastResponse.get(key)||0)<60000)return;
+    bookSyncRuntime.lastResponse.set(key,Date.now());
+    // Send page and memory records separately to stay below BC transport limits.
+    // Avoid leaking personal private pages, which are not in the shared album.
+    const messages=[
+      {action:'book-metadata',id:a.id,name:a.name,nameUpdated:a.nameUpdated,owner:a.owner,
+        members:a.members,coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt,
+        linkedGroup:a.linkedGroup,bookRoles:a.bookRoles,bookUpdated:a.bookUpdated},
+      ...a.bookPages.map(page=>({action:'book-sync-page',id:a.id,page,bookUpdated:a.bookUpdated})),
+      ...a.cards.map(card=>({action:'book-sync-card',id:a.id,card}))
+    ];
+    let index=0;const sendNext=()=>{
+      if(!state.myId||me()!==a.owner||!a.members.includes(member)||index>=messages.length)return;
+      for(let k=0;k<2&&index<messages.length;k++){
+        const item=messages[index++];
+        pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,...item,requestToken:token});
+      }
+      if(index<messages.length)setTimeout(sendNext,1000);
+    };
+    sendNext();
+  }
+  function bookSyncAuthorized(a,from,token){
+    const r=bookSyncRuntime.lastRequest.get(a.id+':'+me());
+    return from===a.owner&&typeof token==='string'&&!!r&&r.token===token&&Date.now()-r.at<90000;
+  }
+  function bookLookup(id){return state.sharedAlbums.find(a=>a.id===id&&a.joined&&a.members.includes(me()));}
+  function bookAccess(a,member=me()){
+    if(!a?.members.includes(member))return 'none';
+    return member===a.owner?'owner':(a.bookRoles?.[member]||'contributor');
+  }
+  function bookCanAdd(a,member=me()){return ['owner','editor','contributor'].includes(bookAccess(a,member));}
+  function bookCanEdit(a,member=me()){return ['owner','editor'].includes(bookAccess(a,member));}
+  function bookPage(a,id){return a.bookPages.find(p=>p.id===id)||(state.privateBookPages[a.id]||[]).find(p=>p.id===id);}
+  function bookPrivate(a){return (state.privateBookPages[a.id]||[]).filter(p=>p.private);}
+  function bookAllPages(a){return [...a.bookPages,...bookPrivate(a)];}
+  function bookPageCards(a,p){return p.private?(p.cards||[]):a.cards.filter(c=>!c.pageId||c.pageId===p.id||(a.bookPages.length===0));}
+  function bookPageSealed(p){return Number(p.sealedUntil)>Date.now();}
+  function bookAlbumEvent(a,type,detail,broadcast=true){
+    const event={id:uniquePawId('evt'),by:me(),type:trim(type,30),detail:trim(detail,110),at:Date.now()};
+    a.bookEvents=[...(a.bookEvents||[]),event].slice(-60);
+    if(broadcast)pawAlbumBroadcast(a,'book-event',{event});
+    return event;
+  }
+  function bookStore(action,detail=''){if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();saveSoon();bookRender();if(detail)notice(detail);}
+  function bookSyncPage(a,p,act='book-page'){
+    if(!p.private)pawAlbumBroadcast(a,act,{page:p,bookUpdated:a.bookUpdated});
+  }
+  function bookTouch(a){a.updated=Date.now();a.bookUpdated=Math.max(Date.now(),(a.bookUpdated||0)+1);}
+  function bookCreatePage(id){
+    const a=bookLookup(id);if(!a)return;
+    const title=window.prompt('New scrapbook page or chapter title (max 60 characters):','A little adventure ♡');if(title===null||!trim(title,60))return;
+    const privatePage=window.confirm('Make this a PRIVATE page visible only on your device?\nOK = private; Cancel = shared with collaborators.');
+    if(!privatePage&&!bookCanEdit(a))return notice('Only editors and the owner can create shared chapters.');
+    const list=privatePage?(state.privateBookPages[a.id]||=[]):a.bookPages;
+    if(list.length>=24)return notice('Page limit reached (24).');
+    const p={id:uniquePawId('page'),title:trim(title,60),caption:'',background:'rose',layout:'polaroid',sealedUntil:0,updated:Date.now(),private:privatePage};
+    if(privatePage)p.cards=[];
+    list.push(p);bookTouch(a);
+    if(!privatePage){bookSyncPage(a,p);bookAlbumEvent(a,'page',`Created “${p.title}”`);}
+    pawBookUI.selectedPage=p.id;bookStore('page','📖 Page created.');
+  }
+  function bookEditPage(albumId,pageId){
+    const a=bookLookup(albumId),p=a&&bookPage(a,pageId);if(!p)return;
+    if(!p.private&&!bookCanEdit(a))return notice('Only scrapbook editors can customize shared pages.');
+    const title=window.prompt('Page title:',p.title);if(title===null||!trim(title,60))return;
+    const caption=window.prompt('Page introduction / caption (max 250 characters):',p.caption||'');if(caption===null)return;
+    const bg=window.prompt('Background: rose, plum, midnight, lavender, forest, gold',p.background);if(bg===null)return;
+    if(!Object.hasOwn(PAW_COVER_COLORS,bg))return notice('Invalid page color.');
+    const layout=window.prompt('Arrangement: grid / list / polaroid / collage',p.layout);if(layout===null)return;
+    if(!['grid','list','polaroid','collage'].includes(layout))return notice('Invalid layout.');
+    Object.assign(p,{title:trim(title,60),caption:trim(caption,250),background:bg,layout,updated:Math.max(Date.now(),(p.updated||0)+1)});
+    bookTouch(a);if(!p.private){bookSyncPage(a,p);bookAlbumEvent(a,'page',`Edited “${p.title}”`);}
+    bookStore('edit','📖 Page updated.');
+  }
+  function bookSealPage(albumId,pageId){
+    const a=bookLookup(albumId),p=a&&bookPage(a,pageId);if(!p||(!p.private&&!bookCanEdit(a)))return;
+    const old=p.sealedUntil?new Date(p.sealedUntil).toISOString().slice(0,16):'';
+    const answer=window.prompt('Open date and time, YYYY-MM-DDTHH:MM (blank to unseal). Not cryptographically sealed:',old);if(answer===null)return;
+    const t=answer.trim()?new Date(answer).getTime():0;
+    if(answer.trim()&&(!Number.isFinite(t)||t<=Date.now()||t>4102444800000))return notice('Choose a valid future date before 2100.');
+    p.sealedUntil=t;p.updated=Math.max(Date.now(),(p.updated||0)+1);bookTouch(a);
+    if(!p.private){bookSyncPage(a,p);bookAlbumEvent(a,'seal',t?'Sealed a time capsule':'Opened a time capsule');}
+    bookStore('seal',t?'🎁 Time capsule set.':'📖 Page unsealed.');
+  }
+  function bookAddNote(albumId,pageId){
+    const a=bookLookup(albumId),p=a&&bookPage(a,pageId);if(!p||(!p.private&&!bookCanAdd(a))||bookPageSealed(p))return;
+    const title=window.prompt('Memory title:', 'A sweet little memory ♡');if(title===null||!trim(title,65))return;
+    const text=window.prompt('Write a note (max 380 characters):','');if(text===null||!trim(text,380))return;
+    const c=normalizePawCard({id:uniquePawId('moment'),title,text,from:me(),sharedBy:me(),source:'PawBooks',at:Date.now(),pageId:p.id,decoration:'🐾'});
+    if(!c)return;
+    if(p.private){if(p.cards.length>=60)return notice('Private page is full.');p.cards.push(c);}
+    else{
+      if(a.cards.length>=60)return notice('Book memory limit reached (60 shared memories).');
+      a.cards.push(c);pawAlbumBroadcast(a,'card',{card:c});bookAlbumEvent(a,'memory',`Added “${c.title}”`);
+    }
+    bookTouch(a);bookStore('card','♡ Memory added.');
+  }
+  function bookAddSnapshot(albumId,pageId){
+    const a=bookLookup(albumId),p=a&&bookPage(a,pageId);if(!p||(!p.private&&!bookCanAdd(a))||bookPageSealed(p))return;
+    if(!window.confirm('Character snapshots require the pictured person’s permission. Have you obtained permission to save and share this picture?'))return;
+    const title=window.prompt('Snapshot caption / title:', 'Outfit memory ♡');if(title===null)return;
+    const img=window.prompt('Paste an HTTPS URL for the consented image (no automatic BC capture):','');if(img===null||!safeImg(img))return notice('An HTTPS image URL is required.');
+    const text=window.prompt('Optional description:', 'A memorable look ♡');if(text===null)return;
+    const c=normalizePawCard({id:uniquePawId('moment'),title:trim(title,65)||'Character snapshot',text:trim(text,380)||'A special portrait ♡',image:safeImg(img),from:me(),sharedBy:me(),source:'Consented snapshot',at:Date.now(),pageId:p.id});
+    if(p.private){(p.cards||=[]).push(c);p.cards=p.cards.slice(-60);}
+    else{if(a.cards.length>=60)return notice('Book is full.');a.cards.push(c);pawAlbumBroadcast(a,'card',{card:c});bookAlbumEvent(a,'snapshot','Added a character snapshot');}
+    bookTouch(a);bookStore('snapshot','📸 Snapshot saved.');
+  }
+  function bookAddFromConversation(mid){
+    const kind=currentConversationKind(),conversation=kind==='group'?state.selectedGroup:state.selected;
+    const m=lookupMessage(kind,conversation,mid);if(!m)return;
+    if(m.from!==me()&&!window.confirm('This message belongs to another player. Confirm you have their explicit permission to share it in this scrapbook. Cancel to keep it private.'))return;
+    return bookChooseAndAdd({id:uniquePawId('moment'),title:`Message from ${name(m.from)}`,text:trim(m.text,380),from:m.from,source:kind==='group'?currentGroup()?.name:name(conversation),at:m.time,decoration:'♡',sharedBy:me()},true);
+  }
+  function bookChooseAndAdd(moment,quoted=false){
+    const books=state.sharedAlbums.filter(a=>a.joined&&bookCanAdd(a));if(!books.length)return notice('Create or join a PawBook first.');
+    const selection=window.prompt('Choose PawBook number:\n'+books.map((a,i)=>`${i+1}. ${a.name}`).join('\n'),'1');if(selection===null)return;
+    const a=books[Number(selection)-1];if(!a)return;
+    const pages=bookAllPages(a).filter(p=>p.private||bookCanAdd(a));
+    const answer=window.prompt('Choose page number, or 0 for the book’s default page:\n0. Unsorted memories\n'+pages.map((p,i)=>`${i+1}. ${p.title}${p.private?' (private)':''}`).join('\n'),'0');if(answer===null)return;
+    const n=Number(answer),p=n>0?pages[n-1]:null;
+    if(n>0&&!p)return notice('Invalid page.');
+    if(p&&bookPageSealed(p))return notice('That time capsule is sealed.');
+    const c=normalizePawCard({...moment,id:uniquePawId('moment'),pageId:p?.id||'',sharedBy:me()});if(!c)return;
+    if(p?.private){(p.cards||=[]).push(c);p.cards=p.cards.slice(-60);}
+    else{if(a.cards.length>=60)return notice('Book is full.');a.cards.push(c);pawAlbumBroadcast(a,'card',{card:c});bookAlbumEvent(a,quoted?'quote':'memory',`Added “${c.title}”`);}
+    state.albumView=a.id;pawBookUI.selectedPage=p?.id||'';bookTouch(a);bookStore('memory','📖 Saved to PawBooks.');
+  }
+  function bookTagMemory(albumId,cardId){
+    const a=bookLookup(albumId);if(!a)return;
+    const all=[...a.cards,...bookPrivate(a).flatMap(p=>p.cards||[])],c=all.find(x=>x.id===cardId);
+    if(!c)return;
+    const privateCard=!a.cards.includes(c);
+    if(!privateCard&&!bookCanEdit(a)&&c.sharedBy!==me())return notice('Only editors or the original contributor can annotate this memory.');
+    const tags=window.prompt('Tags separated by commas (up to 8):',(c.tags||[]).join(', '));if(tags===null)return;
+    const note=window.prompt('Decorative caption / annotation:',c.note||'');if(note===null)return;
+    c.tags=tags.split(',').map(x=>trim(x,24)).filter(Boolean).slice(0,8);c.note=trim(note,230);bookTouch(a);
+    if(!privateCard){pawAlbumBroadcast(a,'book-card-meta',{cardId:c.id,tags:c.tags,note:c.note});bookAlbumEvent(a,'caption',`Annotated “${c.title}”`);}
+    bookStore('annotation','🎀 Annotation saved.');
+  }
+  function bookRoleChange(albumId,member){
+    const a=bookLookup(albumId);if(!a||a.owner!==me()||!a.members.includes(member)||member===me())return;
+    const answer=window.prompt(`Role for ${bcName(member)}: viewer / contributor / editor`,bookAccess(a,member));if(answer===null)return;
+    const role=answer.trim().toLowerCase();if(!['viewer','contributor','editor'].includes(role))return notice('Invalid role.');
+    a.bookRoles[member]=role;bookTouch(a);
+    pawAlbumBroadcast(a,'book-role',{member,role,bookUpdated:a.bookUpdated});bookAlbumEvent(a,'role',`Changed a collaborator to ${role}`);
+    bookStore('role','✓ Collaborator permissions updated.');
+  }
+  function bookGroupLink(albumId){
+    const a=bookLookup(albumId);if(!a||a.owner!==me())return;
+    const choices=Object.values(state.groups).filter(g=>g.joined&&g.accepted.includes(me()));
+    const input=window.prompt('Link to Group Den number (0 = unlink). Group members are NOT invited automatically:\n0. None\n'+choices.map((g,i)=>`${i+1}. ${g.name}`).join('\n'),'0');if(input===null)return;
+    const id=Number(input)>0?choices[Number(input)-1]?.id||'':Number(input)===0?'':null;
+    if(id===null)return notice('Invalid group.');
+    a.linkedGroup=id;bookTouch(a);pawAlbumBroadcast(a,'book-link',{linkedGroup:id,bookUpdated:a.bookUpdated});
+    bookAlbumEvent(a,'group',id?'Linked a Group Den':'Unlinked Group Den');bookStore('link','🏡 Group association updated.');
+  }
+  function bookCardMove(albumId,pageId,cardId,x,y){
+    const a=bookLookup(albumId),p=a&&bookPage(a,pageId);if(!p||p.layout!=='collage'||(!p.private&&!bookCanEdit(a)))return;
+    const c=bookPageCards(a,p).find(x=>x.id===cardId);if(!c)return;
+    const position={x:Math.round(Math.max(0,Math.min(76,x))),y:Math.round(Math.max(0,Math.min(75,y)))};
+    c.pos=position;bookTouch(a);
+    if(!p.private)pawAlbumBroadcast(a,'book-position',{cardId:c.id,pageId:p.id,pos:position});
+    saveSoon();
+  }
+  function bookPointerStart(e){
+    if(e.target?.closest?.('button,input,textarea,a,select'))return;
+    const target=e.target?.closest?.('[data-book-drag-card]');if(!target||e.button!==0)return;
+    const a=bookLookup(target.dataset.bookDragAlbum),p=a&&bookPage(a,target.dataset.bookDragPage);
+    if(!p||p.layout!=='collage'||(!p.private&&!bookCanEdit(a)))return;
+    const surface=target.closest('.pawbook-canvas');if(!surface)return;
+    e.preventDefault();e.stopPropagation();
+    pawBookUI.drag={target,surface,id:a.id,pageId:p.id,cardId:target.dataset.bookDragCard,oldX:e.clientX,oldY:e.clientY,x:parseFloat(target.style.left)||0,y:parseFloat(target.style.top)||0};
+    try{target.setPointerCapture(e.pointerId);}catch{}
+  }
+  function bookPointerMove(e){
+    const d=pawBookUI.drag;if(!d)return;
+    e.stopPropagation();const r=d.surface.getBoundingClientRect();
+    const x=Math.max(0,Math.min(76,d.x+(e.clientX-d.oldX)/Math.max(1,r.width)*100));
+    const y=Math.max(0,Math.min(75,d.y+(e.clientY-d.oldY)/Math.max(1,r.height)*100));
+    d.target.style.left=x+'%';d.target.style.top=y+'%';
+  }
+  function bookPointerEnd(e){
+    const d=pawBookUI.drag;if(!d)return;pawBookUI.drag=null;
+    bookCardMove(d.id,d.pageId,d.cardId,parseFloat(d.target.style.left),parseFloat(d.target.style.top));
+  }
+  function bookPageRow(a,p){
+    const mine=p.private,canEdit=mine||bookCanEdit(a),canAdd=bookCanAdd(a);
+    const cards=bookPageCards(a,p),sealed=bookPageSealed(p);
+    const pageTitle=`${mine?'🔒 ':'📖 '}${escapeText(p.title)}`;
+    const body=sealed?`<div class="pawbook-seal"><span>🎁</span><strong>Memory time capsule</strong><p>Opens ${new Date(p.sealedUntil).toLocaleString()}</p><small>Visible content is hidden by the UI, not encrypted.</small></div>`:
+      `<div class="pawbook-canvas pawbook-layout-${escapeText(p.layout)}">${cards.map((c,i)=>bookCardMarkup(a,p,c,i)).join('')||'<p class="muted">A blank page ready for new memories.</p>'}</div>`;
+    return `<section class="pawbook-chapter" data-pawbook-page-id="${escapeText(p.id)}"><div class="pawbook-chapter-head"><span>${pageTitle}</span><span class="muted">${cards.length} memories</span></div>
+      ${p.caption?`<p class="pawbook-page-caption">${escapeText(p.caption)}</p>`:''}
+      ${body}<div class="pawbook-tools">${canAdd&&!sealed?`<button class="secondary" data-book-note="${escapeText(a.id)}|${escapeText(p.id)}">＋ Note</button><button class="secondary" data-book-snapshot="${escapeText(a.id)}|${escapeText(p.id)}">📸 Snapshot</button>`:''}
+      ${canEdit?`<button class="secondary" data-book-edit="${escapeText(a.id)}|${escapeText(p.id)}">🎨 Edit page</button><button class="secondary" data-book-seal="${escapeText(a.id)}|${escapeText(p.id)}">${sealed?'⏳ Change opening':'🎁 Time capsule'}</button>`:''}</div></section>`;
+  }
+  function bookCardMarkup(a,p,c,i){
+    const pos=c.pos||{x:(i%4)*24,y:Math.floor(i/4)*28};const x=Math.max(0,Math.min(76,Number(pos.x)||0)),y=Math.max(0,Math.min(75,Number(pos.y)||0));
+    const collage=p.layout==='collage';
+    return `<article class="pawbook-memory" ${collage?`style="left:${x}%;top:${y}%;" data-book-drag-card="${escapeText(c.id)}" data-book-drag-album="${escapeText(a.id)}" data-book-drag-page="${escapeText(p.id)}"`:''}>
+      <div class="pawbook-memory-title">${escapeText(c.decoration||'🐾')} ${escapeText(c.title)}</div>
+      ${c.image?`<img src="${escapeText(c.image)}" loading="lazy" alt="Consented memory image"/>`:''}<p>${escapeText(c.text)}</p>
+      ${c.note?`<div class="pawbook-memo">🎀 ${escapeText(c.note)}</div>`:''}
+      ${(c.tags||[]).length?`<div class="pawbook-tags">${c.tags.map(t=>`<span>#${escapeText(t)}</span>`).join('')}</div>`:''}
+      <small>${escapeText(name(c.sharedBy||c.from))} · ${new Date(c.at).toLocaleDateString()}</small>
+      <div class="pawbook-tools">${!p.private?`<button class="secondary" data-paw-card-react="${escapeText(a.id)}|${escapeText(c.id)}|💗">💗 ${c.reactions?.['💗']?.length||0}</button><button class="secondary" data-paw-card-react="${escapeText(a.id)}|${escapeText(c.id)}|⭐">⭐ ${c.reactions?.['⭐']?.length||0}</button><button class="secondary" data-paw-card-react="${escapeText(a.id)}|${escapeText(c.id)}|🐾">🐾 ${c.reactions?.['🐾']?.length||0}</button><button class="secondary" data-paw-card-comment="${escapeText(a.id)}|${escapeText(c.id)}">💬 ${c.comments?.length||0}</button>`:''}
+      ${(p.private||bookCanEdit(a)||c.sharedBy===me())?`<button class="secondary" data-book-tag="${escapeText(a.id)}|${escapeText(c.id)}">✎</button>`:''}</div>
+      ${(c.comments||[]).slice(-3).map(m=>`<p class="pawbook-comment"><b>${escapeText(name(m.from))}:</b> ${escapeText(m.text)}</p>`).join('')}</article>`;
+  }
+  function bookUnsorted(a){
+    return a.cards.filter(c=>!c.pageId||!a.bookPages.some(p=>p.id===c.pageId));
+  }
+  function bookGiftPage(id){
+    const a=bookLookup(id);if(!a||!bookCanEdit(a))return notice('Only editors can prepare a shared memory gift.');
+    const title=window.prompt('Gift page title:', 'A surprise just for you ♡');if(title===null||!trim(title,60))return;
+    const note=window.prompt('Gift message (max 380 characters):','A little gift made of memories ♡');if(note===null||!trim(note,380))return;
+    const date=window.prompt('Opening date: YYYY-MM-DDTHH:MM (blank for immediately):','');if(date===null)return;
+    const time=date.trim()?new Date(date).getTime():0;
+    if(date.trim()&&(!Number.isFinite(time)||time<=Date.now()||time>4102444800000))return notice('Invalid future opening date.');
+    if(a.bookPages.length>=24||a.cards.length>=60)return notice('PawBook is at its page or memory limit.');
+    const p={id:uniquePawId('page'),title:trim(title,60),caption:'🎁 A friendship keepsake',background:'rose',layout:'polaroid',sealedUntil:time,updated:Date.now(),private:false};
+    const c=normalizePawCard({id:uniquePawId('moment'),title:trim(title,65),text:trim(note,380),from:me(),sharedBy:me(),source:'Memory Gift',at:Date.now(),pageId:p.id,decoration:'🎀'});
+    a.bookPages.push(p);a.cards.push(c);bookTouch(a);
+    bookSyncPage(a,p);pawAlbumBroadcast(a,'card',{card:c});bookAlbumEvent(a,'gift',`Prepared “${p.title}”`);
+    bookStore('gift','🎁 Memory gift added!');
+  }
+  function bookKeepsake(id){
+    const a=bookLookup(id);if(!a)return;
+    const includePrivate=bookPrivate(a).length&&window.confirm('Include your LOCAL PRIVATE pages in this personal export? This file will contain their text and image URLs.');
+    const pages=[...a.bookPages,...(includePrivate?bookPrivate(a):[])];
+    const chunks=pages.map(p=>`<section class="page"><h2>${escapeText(p.title)} ${p.private?'(Private)':''}</h2><p>${escapeText(p.caption)}</p>${bookPageSealed(p)?'<p>Time capsule — not yet open.</p>':bookPageCards(a,p).map(c=>`<article><h3>${escapeText(c.title)}</h3>${c.image?`<img src="${escapeText(c.image)}" alt="Snapshot"/>`:''}<p>${escapeText(c.text)}</p><small>${escapeText(name(c.from))} · ${new Date(c.at).toLocaleDateString()}</small></article>`).join('')}</section>`).join('');
+    const unsorted=bookUnsorted(a).map(c=>`<article><h3>${escapeText(c.title)}</h3><p>${escapeText(c.text)}</p></article>`).join('');
+    const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escapeText(a.name)} - PawBook</title><style>body{font-family:Georgia,serif;color:#3c243a;max-width:850px;margin:40px auto;line-height:1.6}h1,h2{color:#873d71}header,.page{padding:30px;break-after:page}article{border:1px solid #e8b9d3;border-radius:12px;margin:16px 0;padding:15px;break-inside:avoid}img{max-width:100%;max-height:400px;object-fit:contain}@media print{body{margin:0}.page{break-after:page}}</style></head><body><header><h1>📚 ${escapeText(a.name)}</h1><p>${a.cards.length} memories · ${a.members.length} collaborators</p><p>From PawLounge · Print this page → Save as PDF</p></header>${chunks}${unsorted?`<section class="page"><h2>Unsorted memories</h2>${unsorted}</section>`:''}</body></html>`;
+    download('PawBook-'+a.name.replace(/[^a-z0-9_-]/gi,'_').slice(0,45)+'.html','text/html;charset=utf-8',html);
+    notice('📖 Printable keepsake exported. Open the HTML file in Firefox and Print → Save as PDF.');
+  }
+  function renderPawBooks(){
+    if(pawBookVault.active&&pawBookVault.locked){
+      ui.body.innerHTML=`<div class="screen pawbooks-screen"><div class="pawbook-heading"><h2>🔐 PawBooks are locked</h2></div><p>Saved books and private pages are protected by your password on this device. Enter it to open the bookshelf.</p>${bookVaultControls()}<p class="muted">Your password is never saved. Incoming scrapbook updates cannot be processed while locked.</p></div>`;
+      return;
+    }
+    const joined=state.sharedAlbums.filter(a=>a.joined),pending=state.sharedAlbums.filter(a=>!a.joined);
+    const q=pawBookUI.query.toLocaleLowerCase(),list=joined.filter(a=>!q||a.name.toLowerCase().includes(q)||a.cards.some(c=>[c.title,c.text,...(c.tags||[])].some(v=>String(v).toLowerCase().includes(q))));
+    const a=bookLookup(state.albumView);if(a){
+      const pages=bookAllPages(a),group=state.groups[a.linkedGroup];
+      const sorted=pawBookUI.timeline?a.cards.slice().sort((x,y)=>(x.at||0)-(y.at||0)):[];
+      ui.body.innerHTML=`<div class="screen pawbooks-screen"><div class="pawbook-heading"><button class="secondary" data-action="bookback">← Bookshelf</button><h2>📚 ${escapeText(a.name)}</h2><span>${a.members.length} collaborators</span></div>
+        <div class="pawbook-toolbar">${a.owner===me()?`<button class="secondary" data-paw-album-rename="${escapeText(a.id)}">✎ Rename</button><button class="secondary" data-paw-cover="${escapeText(a.id)}">🎨 Cover</button><button class="secondary" data-book-group="${escapeText(a.id)}">🏡 Link Group</button><button class="secondary" data-paw-album-invite="${escapeText(a.id)}">✉ Invite</button>`:''}
+          <button class="primary" data-book-new-page="${escapeText(a.id)}">＋ New Page</button><button class="secondary" data-book-export="${escapeText(a.id)}">📖 Keepsake</button>${bookVaultControls()}${a.owner!==me()?`<button class="secondary" data-book-sync="${escapeText(a.id)}">↻ Sync from owner</button>`:''}<button class="secondary" data-book-gift="${escapeText(a.id)}">🎁 Memory gift</button><button class="secondary" data-book-activity="${escapeText(a.id)}">🕒 Activity</button><button class="secondary" data-book-timeline="${escapeText(a.id)}">📜 Chronicle</button>
+          <button class="secondary" data-paw-album-leave="${escapeText(a.id)}">↩ Leave</button></div>
+        <div class="pawbook-cover-hero">${pawCoverMarkup(a)}<div><strong>${escapeText(a.name)}</strong><p>${a.cards.length} memories · ${pages.length} pages</p><p>${group?`Linked Den: ${escapeText(group.name)}`:a.linkedGroup?'Linked Group Den':'A cozy collection of moments'}</p>
+          <div class="pawbook-memberlist">${a.members.map(m=>`<span>${escapeText(name(m))}${m===a.owner?' 👑':''} ${m!==a.owner?`<small>${escapeText(bookAccess(a,m))}</small>`:''} ${a.owner===me()&&m!==me()?`<button class="secondary" data-book-role="${escapeText(a.id)}|${m}">Change role</button>`:''}</span>`).join('')}</div></div></div>
+        ${pawBookUI.activity?`<section class="pawbook-activity"><h3>🕒 Contribution history</h3>${(a.bookEvents||[]).slice(-30).reverse().map(e=>`<div><small>${new Date(e.at).toLocaleString()}</small> · <b>${escapeText(name(e.by))}</b>: ${escapeText(e.detail)}</div>`).join('')||'<p class="muted">No logged contributions yet.</p>'}</section>`:''}
+        ${pawBookUI.timeline?`<section class="pawbook-chronicle"><h3>📜 Friendship Chronicle</h3>${sorted.map(c=>`<div><b>${new Date(c.at).toLocaleDateString()}</b> · ${escapeText(c.title)} <small>${escapeText(c.text.slice(0,140))}</small></div>`).join('')||'<p class="muted">Save memories to begin your timeline.</p>'}</section>`:''}
+        <div class="pawbook-pages">${pages.map(p=>bookPageRow(a,p)).join('')}${bookUnsorted(a).length?`<section class="pawbook-chapter"><h3>📜 Unsorted memories</h3><div class="pawbook-canvas pawbook-layout-grid">${bookUnsorted(a).map((c,i)=>bookCardMarkup(a,{id:'',layout:'grid',private:false},c,i)).join('')}</div></section>`:''}
+        ${!pages.length&&!a.cards.length?'<div class="pawbook-empty">📖 A new story begins. Add your first page to start collecting memories.</div>':''}</div></div>`;
+      return;
+    }
+    ui.body.innerHTML=`<div class="screen pawbooks-screen"><div class="pawbook-heading"><h2>📚 PawBooks · My Bookshelf</h2><button class="primary" data-action="newalbum">＋ New PawBook</button>${bookVaultControls()}</div>
+      <p class="muted">Your shared stories live here. Existing scrapbooks are preserved and now support chapters, covers, private pages, collaborative comments and keepsake exports.</p>
+      <div class="pawbook-toolbar"><input class="field" id="pawbook-search" type="search" value="${escapeText(pawBookUI.query)}" placeholder="Search books and memories…"/></div>
+      ${pending.map(p=>`<div class="pawbook-invite"><b>${escapeText(p.name)}</b> · Invitation from ${escapeText(name(p.owner))}<button class="primary" data-paw-album-accept="${escapeText(p.id)}">Accept</button><button class="secondary" data-paw-album-decline="${escapeText(p.id)}">Decline</button></div>`).join('')}
+      <div class="pawbook-shelf">${list.map(a=>`<button type="button" class="pawbook-shelf-card" data-paw-album="${escapeText(a.id)}">${pawCoverMarkup(a)}<strong>${escapeText(a.name)}</strong><small>${a.cards.length} memories · ${a.members.length} members · ${a.bookPages.length} chapters</small></button>`).join('')||'<div class="pawbook-empty">No matching books yet. Create one to begin your shared story ♡</div>'}</div>
+      <div class="pawbook-bottom"><button class="secondary" data-action="pawbooksmoments">♡ Private Paw Moments</button></div></div>`;
+  }
+  function bookHandlePacket(a,p,from){
+    const act=p.action,owned=from===a.owner,editor=bookCanEdit(a,from),member=a.members.includes(from);
+    if(!a.joined||!member)return false;
+    if(act==='book-role'){
+      if(!owned||!Number.isSafeInteger(Number(p.bookUpdated))||Number(p.bookUpdated)<=Number(a.bookUpdated||0))return false;
+      const n=numeric(p.member),role=p.role;if(!owned||!a.members.includes(n)||n===a.owner||!['viewer','contributor','editor'].includes(role))return false;
+      a.bookRoles[n]=role;a.bookUpdated=Number(p.bookUpdated);
+    }else if(act==='book-link'){
+      if(!owned||!Number.isSafeInteger(Number(p.bookUpdated))||Number(p.bookUpdated)<=Number(a.bookUpdated||0))return false;
+      if(!owned||p.linkedGroup&&(!/^g_[\w-]{8,44}$/.test(p.linkedGroup)))return false;
+      a.linkedGroup=trim(p.linkedGroup||'',65);a.bookUpdated=Number(p.bookUpdated);
+    }else if(act==='book-page'){
+      const raw=normalizeBookPage(p.page);if(!raw||raw.private||!editor)return false;
+      const old=a.bookPages.find(x=>x.id===raw.id);
+      if(old&&raw.updated<=old.updated)return false;
+      if(!old&&a.bookPages.length>=24)return false;
+      if(old)Object.assign(old,raw);else a.bookPages.push(raw);
+    }else if(act==='book-position'){
+      const card=a.cards.find(c=>c.id===p.cardId),page=a.bookPages.find(c=>c.id===p.pageId),pos=p.pos;
+      if(!card||!page||!editor||page.layout!=='collage'||card.pageId!==page.id||!Number.isFinite(pos?.x)||!Number.isFinite(pos?.y)||pos.x<0||pos.x>76||pos.y<0||pos.y>75)return false;
+      card.pos={x:pos.x,y:pos.y};
+    }else if(act==='book-card-meta'){
+      const card=a.cards.find(c=>c.id===p.cardId);if(!card||!(editor||card.sharedBy===from)||!Array.isArray(p.tags)||p.tags.length>8)return false;
+      card.tags=p.tags.map(x=>trim(x,24)).filter(Boolean);card.note=trim(p.note||'',230);
+    }else if(act==='book-event'){
+      const e=normalizeBookEvents([p.event])[0];if(!e||e.by!==from||a.bookEvents.some(x=>x.id===e.id))return false;
+      a.bookEvents.push(e);a.bookEvents=a.bookEvents.slice(-60);
+    }else return false;
+    a.updated=Date.now();return true;
+  }
+
   function customizePawCover(albumId) {
     const a=state.sharedAlbums.find(x=>x.id===albumId&&x.owner===me()&&x.joined);if(!a)return;
     const tone=window.prompt('Cover color: rose / plum / midnight / lavender / forest / gold',a.coverColor||'rose');
@@ -5639,7 +6988,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!['classic','polaroid','floral'].includes(frame))return notice('Choose classic, polaroid or floral.');
     Object.assign(a,{coverColor:tone,coverImage:trim(image,500),coverFrame:frame,coverAt:Date.now(),updated:Date.now()});
     pawAlbumBroadcast(a,'cover',{owner:a.owner,coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt});
-    saveSoon();renderMoments();
+    saveSoon();bookRender();
   }
   function changePawPageLayout(albumId) {
     const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.owner===me());if(!a)return;
@@ -5648,7 +6997,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!PAW_PAGE_LAYOUTS.includes(style))return notice('Choose grid, list or polaroid.');
     a.pageLayout=style;a.updated=Date.now();a.pageAt=Date.now();
     pawAlbumBroadcast(a,'layout',{owner:a.owner,layout:style,pageAt:a.pageAt,cardIds:a.cards.map(c=>c.id)});
-    saveSoon();renderMoments();
+    saveSoon();bookRender();
   }
   function movePawCard(albumId,cardId,delta) {
     const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.owner===me());if(!a)return;
@@ -5657,14 +7006,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     [a.cards[index],a.cards[next]]=[a.cards[next],a.cards[index]];
     a.updated=Date.now();a.pageAt=Math.max(Date.now(),(a.pageAt||0)+1);
     pawAlbumBroadcast(a,'layout',{owner:a.owner,layout:a.pageLayout||'grid',pageAt:a.pageAt,cardIds:a.cards.map(c=>c.id)});
-    saveSoon();renderMoments();
+    saveSoon();bookRender();
   }
   function reactPawCard(albumId,cardId,emoji) {
     const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.members.includes(me()));
     const c=a?.cards.find(x=>x.id===cardId);if(!c||!['💗','⭐','🐾'].includes(emoji))return;
     c.reactions ||= {};const list=c.reactions[emoji] ||= [];
     const remove=list.includes(me());c.reactions[emoji]=remove?list.filter(x=>x!==me()):[...new Set([...list,me()])];
-    pawAlbumBroadcast(a,'react',{cardId,emoji,remove});saveSoon();renderMoments();
+    pawAlbumBroadcast(a,'react',{cardId,emoji,remove});saveSoon();bookRender();
   }
   function commentPawCard(albumId,cardId) {
     const a=state.sharedAlbums.find(x=>x.id===albumId&&x.joined&&x.members.includes(me()));
@@ -5673,16 +7022,16 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(text===null||!trim(text,180))return;
     const comment={id:uniquePawId('reply'),from:me(),text:trim(text,180),at:Date.now()};
     c.comments ||= [];c.comments.push(comment);c.comments=c.comments.slice(-24);
-    pawAlbumBroadcast(a,'comment',{cardId,comment});saveSoon();renderMoments();
+    pawAlbumBroadcast(a,'comment',{cardId,comment});saveSoon();bookRender();
   }
   function pawCoverMarkup(a) {
     const color=PAW_COVER_COLORS[a.coverColor]||PAW_COVER_COLORS.rose;
-    const img=a.coverImage&&/^https:\/\/[^\s]+$/i.test(a.coverImage)?`<img src="${escapeText(a.coverImage)}" loading="lazy" alt="Scrapbook cover"/>`:'';
+    const img=a.coverImage&&/^https:\/\/[^\s]+$/i.test(a.coverImage)?`<img src="${escapeText(a.coverImage)}" loading="lazy" referrerpolicy="no-referrer" alt="Scrapbook cover"/>`:'';
     return `<div class="paw-cover paw-cover-${escapeText(a.coverFrame||'classic')}" style="--paw-cover:${color}">${img}<div class="paw-cover-label">📒 ${escapeText(a.name)}</div></div>`;
   }
   function pawCardMarkup(a,c) {
     const reactions=['💗','⭐','🐾'].map(e=>`<button class="secondary" data-paw-card-react="${escapeText(a.id)}|${escapeText(c.id)}|${e}" title="React">${e} ${c.reactions?.[e]?.length||0}</button>`).join('');
-    return `<article class="paw-page"><b>${escapeText(c.title)}</b><p>${escapeText(c.text)}</p>${c.image?`<img src="${escapeText(c.image)}" loading="lazy" alt="Scrapbook picture"/>`:''}<div class="paw-memory-actions">${reactions}<button class="secondary" data-paw-card-comment="${escapeText(a.id)}|${escapeText(c.id)}">💬 Comment</button>${a.owner===me()?`<button class="secondary" data-paw-card-move="${escapeText(a.id)}|${escapeText(c.id)}|-1" title="Previous page">←</button><button class="secondary" data-paw-card-move="${escapeText(a.id)}|${escapeText(c.id)}|1" title="Next page">→</button>`:''}</div>
+    return `<article class="paw-page"><b>${escapeText(c.title)}</b>${c.importedBy?`<div class="muted" title="Historical memory provided by the album owner, not independently verified">⚠ Imported by ${escapeText(bcName(c.importedBy))} · attribution unverified</div>`:''}<p>${escapeText(c.text)}</p>${c.image?`<img src="${escapeText(c.image)}" loading="lazy" referrerpolicy="no-referrer" alt="Scrapbook picture"/>`:''}<div class="paw-memory-actions">${reactions}<button class="secondary" data-paw-card-comment="${escapeText(a.id)}|${escapeText(c.id)}">💬 Comment</button>${a.owner===me()?`<button class="secondary" data-paw-card-move="${escapeText(a.id)}|${escapeText(c.id)}|-1" title="Previous page">←</button><button class="secondary" data-paw-card-move="${escapeText(a.id)}|${escapeText(c.id)}|1" title="Next page">→</button>`:''}</div>
     ${(c.comments||[]).slice(-8).map(m=>`<div class="paw-memory-comment"><b>${escapeText(name(m.from))}:</b> ${escapeText(m.text)}</div>`).join('')}</article>`;
   }
   function pawGroupBroadcast(g,p,summary='PawLounge group update') {
@@ -5729,7 +7078,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(state.sharedAlbums.length>=30)return notice('Maximum 30 scrapbooks.');
     const name=window.prompt('Shared scrapbook title (max 70 characters):','Our Paw Moments ♡');if(!name?.trim())return;
     const a=normalizeAlbum({id:uniquePawId('album'),owner:me(),name,nameUpdated:Date.now(),members:[me()],joined:true,cards:[],updated:Date.now()});
-    state.sharedAlbums.push(a);state.albumView=a.id;saveSoon();renderMoments();
+    state.sharedAlbums.push(a);state.albumView=a.id;state.tab='pawbooks';saveSoon();renderPawBooks();
   }
   function renderSharedAlbums(){
     return `<section class="paw-albums"><h3>📒 Shared Scrapbooks</h3><div class="paw-items">${state.sharedAlbums.map(a=>`<div class="paw-item"><b>${escapeText(a.name)}</b> <span class="muted">· ${a.members.length} member(s) · ${a.cards.length} moments</span>
@@ -5782,7 +7131,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     state.sharedAlbums=state.sharedAlbums.filter(album=>album.id!==a.id);
     if(state.albumView===a.id)state.albumView='';
     saveNow(true);
-    renderMoments();
+    bookRender();
 
     if(transfer){
       for(const member of others){
@@ -5810,38 +7159,35 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!member||!myFriends().includes(member)||member===me())return notice('Choose a BC friend.');
     if(a.members.includes(member))return notice('Already collaborating.');
     if(a.members.length>=8)return notice('Maximum 8 collaborators per scrapbook.');
-    const packet={type:'KCPawAlbum',v:1,action:'invite',id:a.id,owner:a.owner,name:a.name,nameUpdated:a.nameUpdated,members:[...a.members,member],cards:a.cards.slice(-8),coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt,pageLayout:a.pageLayout,pageAt:a.pageAt};
-    if(pawSend(member,'KCPawAlbum',packet))notice('📒 Scrapbook invitation sent.');else notice('Invitation failed.');
+    (a.pendingInvites ||= []).push(member);a.pendingInvites=[...new Set(a.pendingInvites)].slice(-8);saveSoon();
+    const packet={type:'KCPawAlbum',v:1,action:'invite',id:a.id,owner:a.owner,name:a.name,nameUpdated:a.nameUpdated,members:[...a.members,member],cards:a.cards.slice(-8),coverColor:a.coverColor,coverImage:a.coverImage,coverFrame:a.coverFrame,coverAt:a.coverAt,pageLayout:a.pageLayout,pageAt:a.pageAt,bookPages:a.bookPages,bookRoles:a.bookRoles,linkedGroup:a.linkedGroup,bookUpdated:a.bookUpdated};
+    if(pawSend(member,'KCPawAlbum',packet))notice('📒 Scrapbook invitation sent.');else {a.pendingInvites=(a.pendingInvites||[]).filter(n=>n!==member);saveSoon();notice('Invitation failed.');}
   }
   function answerAlbumInvite(id,accept){
     const a=state.sharedAlbums.find(x=>x.id===id);if(!a||a.joined)return;
     if(accept){a.joined=true;a.members=[...new Set([...a.members,me()])];state.albumView=a.id;}
     else state.sharedAlbums=state.sharedAlbums.filter(x=>x!==a);
     pawSend(a.owner,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'response',id:a.id,accepted:!!accept});
-    saveSoon();if(state.tab==='catchup')renderCatchUp();else renderMoments();
+    saveSoon();if(state.tab==='catchup')renderCatchUp();else if(state.tab==='pawbooks')renderPawBooks();else renderMoments();
   }
   function addMomentToAlbum(momentId){
     const moment=state.moments.find(x=>x.id===momentId);if(!moment)return;
-    const albums=state.sharedAlbums.filter(a=>a.joined);
-    if(!albums.length){notice('Create or join a Shared Scrapbook first.');return;}
-    const answer=window.prompt('Choose scrapbook number:\n'+albums.map((a,i)=>`${i+1}. ${a.name}`).join('\n'),'1');
-    if(answer===null)return;
-    const a=albums[Number(answer)-1];if(!a)return;
-    if(a.cards.some(x=>x.id===moment.id))return notice('Moment already in album.');
-    a.cards.push({...moment});a.cards=a.cards.slice(-60);a.updated=Date.now();
-    for(const member of a.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'card',id:a.id,card:moment});
-    state.albumView=a.id;saveSoon();renderMoments();
+    if(moment.from!==me()&&!window.confirm('This saved moment quotes another player. Confirm they agreed it can be shared with the scrapbook collaborators. Cancel to keep it private.'))return;
+    bookChooseAndAdd(moment,moment.from!==me());
   }
   function receivePawAlbum(data,from){
-    if(!myFriends().includes(from))return;
-    let p;try{p=JSON.parse(String(data.Message||''));}catch{return;}
-    if(p?.type!=='KCPawAlbum'||p.v!==1)return;
+    if(!myFriends().includes(from)||pawBookVault.locked)return;
+    let p;try{p=pawParseWireJSON(String(data.Message||''),30000);}catch{return;}
+    if(p?.type!=='KCPawAlbum'||p.v!==1||!['invite','rename','response','sync','leave','owner-transfer','cover','layout','react','comment','card','book-page','book-position','book-card-meta','book-role','book-link','book-event','book-sync-request','book-sync-card','book-sync-page','book-metadata'].includes(p.action))return;
     const id=trim(p.id,80);if(!/^album_[\w-]{5,45}$/.test(id))return;
+    const legacyKey=p.action==='invite'?`${id}:invite`:p.action==='card'&&integrityMsgId(p.card?.id)?`${id}:card:${p.card.id}`:p.action==='comment'&&integrityMsgId(p.comment?.id)?`${id}:comment:${p.comment.id}`:'';
+    if(!integrityAcceptEvent('album',from,p,legacyKey))return;
     let album=state.sharedAlbums.find(x=>x.id===id);
     if(p.action==='invite'){
       if(numeric(p.owner)!==from||album)return;
-      const normalized=normalizeAlbum({id,owner:from,name:p.name,nameUpdated:p.nameUpdated,members:p.members,joined:false,cards:p.cards||[],coverColor:p.coverColor,coverImage:p.coverImage,coverFrame:p.coverFrame,coverAt:p.coverAt,pageLayout:p.pageLayout,pageAt:p.pageAt,updated:Date.now()});
+      const normalized=normalizeAlbum({id,owner:from,name:p.name,nameUpdated:p.nameUpdated,members:p.members,joined:false,cards:p.cards||[],coverColor:p.coverColor,coverImage:p.coverImage,coverFrame:p.coverFrame,coverAt:p.coverAt,pageLayout:p.pageLayout,pageAt:p.pageAt,bookPages:p.bookPages,bookRoles:p.bookRoles,linkedGroup:p.linkedGroup,bookUpdated:p.bookUpdated,updated:Date.now()});
       if(!normalized||!normalized.members.includes(me()))return;
+      for(const card of normalized.cards){card.importedBy=from;card.sharedBy=from;}
       state.sharedAlbums.push(normalized);state.sharedAlbums=state.sharedAlbums.slice(-30);
       notice(`📒 ${bcName(from)} invited you to a Shared Scrapbook.`);
     }else if(p.action==='rename'&&album&&from===album.owner){
@@ -5849,14 +7195,21 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       album.updated=Date.now();
       notice(`📒 ${bcName(from)} renamed the scrapbook to “${album.name}”.`);
     }else if(p.action==='response'&&album&&album.owner===me()){
+      if(!album.members.includes(from)&&!(album.pendingInvites||[]).includes(from))return;
+      album.pendingInvites=(album.pendingInvites||[]).filter(n=>n!==from);
       if(p.accepted===true&&!album.members.includes(from)){album.members.push(from);if(album.members.length>8)album.members=album.members.slice(0,8);}
       if(p.accepted!==true)album.members=album.members.filter(id=>id!==from);
       album.updated=Date.now();
       // Sync the new collaborator list with everyone who has already joined.
-      for(const member of album.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id:album.id,owner:me(),members:album.members,name:album.name,nameUpdated:album.nameUpdated});
+      for(const member of album.members)if(member!==me())pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id:album.id,owner:me(),members:album.members,name:album.name,nameUpdated:album.nameUpdated,bookRoles:album.bookRoles,linkedGroup:album.linkedGroup,bookUpdated:album.bookUpdated});
     }else if(p.action==='sync'&&album&&from===album.owner&&Array.isArray(p.members)){
       album.members=[...new Set([album.owner,...p.members.map(numeric).filter(Boolean)])].slice(0,8);album.updated=Date.now();
       acceptAlbumName(album,p);
+      if(Number(p.bookUpdated)>Number(album.bookUpdated||0)){
+        album.bookRoles=normalizeBookRoles(p.bookRoles,album.members);
+        album.linkedGroup=trim(p.linkedGroup||'',65);
+        album.bookUpdated=Number(p.bookUpdated);
+      }
       if(album.joined&&!album.members.includes(me())){
         state.sharedAlbums=state.sharedAlbums.filter(x=>x.id!==id);
         if(state.albumView===id)state.albumView='';
@@ -5867,7 +7220,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(album.owner===me()){
         // The owner updates the rest of the collaborators after someone leaves.
         for(const member of album.members)if(member!==me())
-          pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id,owner:me(),members:album.members,name:album.name,nameUpdated:album.nameUpdated});
+          pawSend(member,'KCPawAlbum',{type:'KCPawAlbum',v:1,action:'sync',id,owner:me(),members:album.members,name:album.name,nameUpdated:album.nameUpdated,bookRoles:album.bookRoles,linkedGroup:album.linkedGroup,bookUpdated:album.bookUpdated});
       }
     }else if(p.action==='owner-transfer'&&album?.joined&&from===album.owner&&Array.isArray(p.members)){
       const incoming=[...new Set(p.members.map(numeric).filter(Boolean))].slice(0,8);
@@ -5901,23 +7254,51 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       const text=trim(raw.text,180);if(!text)return;
       c.comments ||= [];if(c.comments.some(x=>x.id===raw.id))return;
       c.comments.push({id:trim(raw.id,65),from,text,at:Number(raw.at)||Date.now()});c.comments=c.comments.slice(-24);
-    }else if(p.action==='card'&&album?.joined&&album.members.includes(from)){
-      const card=normalizePawCard(p.card);if(!card||album.cards.some(x=>x.id===card.id))return;
+    }else if(p.action==='card'&&album?.joined&&album.members.includes(from)&&bookCanAdd(album,from)){
+      const card=normalizePawCard(p.card);if(!card||album.cards.some(x=>x.id===card.id)||(card.sharedBy&&card.sharedBy!==from))return;
+      card.sharedBy=from;
+      if(card.from!==from)card.importedBy=from;
       album.cards.push(card);album.cards=album.cards.slice(-60);album.updated=Date.now();notice(`♡ ${bcName(from)} added a scrapbook memory.`);
+    }else if(p.action==='book-sync-request'&&album?.joined&&album.owner===me()&&album.members.includes(from)){
+      bookServeSync(album,from,p.requestToken);
+    }else if(p.action==='book-sync-page'&&album?.joined&&from===album.owner){
+      if(!bookSyncAuthorized(album,from,p.requestToken))return;
+      if(!bookHandlePacket(album,{...p,action:'book-page'},from))return;
+    }else if(p.action==='book-sync-card'&&album?.joined&&from===album.owner){
+      if(!bookSyncAuthorized(album,from,p.requestToken))return;
+      const card=normalizePawCard(p.card);
+      if(!card||!card.sharedBy||!album.members.includes(card.sharedBy)||album.cards.some(c=>c.id===card.id)||album.cards.length>=60)return;
+      // Historical copies provided by the owner are not independently verified.
+      if(card.sharedBy!==from)card.importedBy=from;
+      album.cards.push(card);
+    }else if(p.action==='book-metadata'&&album?.joined&&from===album.owner){
+      if(!bookSyncAuthorized(album,from,p.requestToken))return;
+      if(Number(p.bookUpdated)<Number(album.bookUpdated||0)||!Array.isArray(p.members))return;
+      album.members=[...new Set([album.owner,...p.members.map(numeric).filter(Boolean)])].slice(0,8);
+      album.bookRoles=normalizeBookRoles(p.bookRoles,album.members);
+      album.linkedGroup=trim(p.linkedGroup||'',65);album.bookUpdated=Number(p.bookUpdated)||0;
+      acceptAlbumName(album,p);
+      if(Object.hasOwn(PAW_COVER_COLORS,p.coverColor)&&['classic','polaroid','floral'].includes(p.coverFrame)){
+        album.coverColor=p.coverColor;album.coverFrame=p.coverFrame;album.coverImage=safeImg(p.coverImage);
+        album.coverAt=Math.max(Number(album.coverAt)||0,Number(p.coverAt)||0);
+      }
+    }else if(p.action.startsWith('book-')&&album?.joined){
+      if(!bookHandlePacket(album,p,from))return;
     }else return;
-    saveSoon();if(state.open&&(state.tab==='moments'||state.tab==='catchup'))render();
+    if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();
+    saveSoon();if(state.open&&(state.tab==='moments'||state.tab==='pawbooks'||state.tab==='catchup'))render();
   }
   async function pawBackupData(){
     await flushHistoryArchive();
     const db=await historyDb(),rows=await new Promise((resolve,reject)=>{
       const out=[],tx=db.transaction('messages','readonly');
       const req=tx.objectStore('messages').index('byAccount').openCursor(IDBKeyRange.only(state.myId));
-      req.onsuccess=()=>{const cursor=req.result;if(cursor){out.push(cursor.value);cursor.continue();}};
+      req.onsuccess=()=>{const cursor=req.result;if(cursor){out.push(pawDecodeHistoryRow(cursor.value));cursor.continue();}};
       req.onerror=()=>reject(req.error);tx.oncomplete=()=>resolve(out);tx.onerror=()=>reject(tx.error);
     });
     return {format:'PawLounge-backup',version:1,account:state.myId,exported:new Date().toISOString(),settings:state.settings,
       chats:state.chats,groups:state.groups,profiles:state.profiles,moments:state.moments,circles:state.circles,
-      sharedAlbums:state.sharedAlbums,invitations:state.invitations,pawGuestbook:state.pawGuestbook,
+      sharedAlbums:state.sharedAlbums,privateBookPages:state.privateBookPages,invitations:state.invitations,pawGuestbook:state.pawGuestbook,
       catchUpSince:state.catchUpSince,roomFavorites:state.roomFavorites,roomRecent:state.roomRecent,
       roomSort:state.roomSort,scheduledMessages:state.scheduledMessages,messages:rows,roomHistory:state.roomHistory};
   }
@@ -5943,6 +7324,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }catch(e){console.warn('[PawLounge] Backup failed',e);notice(`Backup failed: ${trim(e.message,100)}`);}
   }
   async function importPawBackup(file){
+    if(pawBookVault.active&&pawBookVault.locked)return notice('Unlock PawBooks before importing backups.');
     if(!file||file.size>120*1024*1024)return notice('Backup is missing or over 120 MB.');
     try{
       let data=JSON.parse(await file.text());
@@ -5965,6 +7347,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       for(const moment of data.moments||[]){const m=normalizeMoment(moment);if(m&&!state.moments.some(x=>x.id===m.id))state.moments.push(m);}
       for(const circle of data.circles||[]){if(/^circle_[\w-]{4,32}$/.test(circle?.id||'')&&!state.circles.some(c=>c.id===circle.id))state.circles.push({id:circle.id,name:trim(circle.name,45),members:(circle.members||[]).map(numeric).filter(Boolean)});}
       for(const album of data.sharedAlbums||[]){const a=normalizeAlbum(album);if(a&&!state.sharedAlbums.some(x=>x.id===a.id))state.sharedAlbums.push(a);}
+      for(const [bookId,pages] of Object.entries(normalizePrivateBookPages(data.privateBookPages))){
+        const current=state.privateBookPages[bookId]||[];const known=new Set(current.map(p=>p.id));
+        state.privateBookPages[bookId]=[...current,...pages.filter(p=>!known.has(p.id))].slice(0,24);
+      }
       for(const inv of data.invitations||[]){const v=normalizeInvitation(inv);if(v&&!state.invitations.some(x=>x.id===v.id))state.invitations.push(v);}
       for(const entry of data.pawGuestbook||[]){const v=normalizeGuestEntry(entry);if(v&&!state.pawGuestbook.some(x=>x.id===v.id))state.pawGuestbook.push(v);}
       state.circles=state.circles.slice(-30);state.sharedAlbums=state.sharedAlbums.slice(-30);state.invitations=state.invitations.slice(-70);state.pawGuestbook=state.pawGuestbook.slice(-50);state.moments=state.moments.slice(-MOMENT_LIMIT);
@@ -5977,8 +7363,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function renderMoments() {
     const moments=state.moments.slice().reverse();
     ui.body.innerHTML=`<div class="screen kc-moments-screen"><div class="sectiontitle">♡ Paw Moments</div><p class="muted">Your private scrapbook of saved messages and memories. Nothing is shared automatically.</p>
-      <div class="flex"><button class="primary" data-action="newmoment">＋ Write a Paw Moment</button><button class="secondary" data-action="newalbum">＋ Shared Scrapbook</button><button class="secondary" data-action="momentsfromchat">← Back to Chats</button></div>
-      ${renderSharedAlbums()}
+      <div class="flex"><button class="primary" data-action="newmoment">＋ Write a Paw Moment</button><button class="secondary" data-action="openpawbooks">📚 Open PawBooks</button><button class="secondary" data-action="momentsfromchat">← Back to Chats</button></div>
       <div class="kc-moments-grid">${moments.map(m=>`<article class="kc-moment-card"><div class="kc-moment-decor">${escapeText(m.decoration)}</div><div class="kc-moment-title">${escapeText(m.title)}</div>${m.image?`<img src="${escapeText(m.image)}" alt="Moment image" loading="lazy"/>`:''}<blockquote>${escapeText(m.text)}</blockquote><div class="muted">${escapeText(m.source)} · ${new Date(m.at).toLocaleDateString()}</div><div class="flex"><button class="secondary" data-momentshare="${escapeText(m.id)}">💌 Share</button><button class="secondary" data-paw-album-moment="${escapeText(m.id)}">📒 Add to album</button><button class="secondary" data-momentdelete="${escapeText(m.id)}">Delete</button></div></article>`).join('')||'<p class="muted">No moments yet. Save one from a message using ☆.</p>'}</div></div>`;
   }
   function addOwnMoment() {
@@ -5987,7 +7372,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const image=window.prompt('Optional HTTPS image URL (leave blank for none):','');if(image===null)return;
     if(image.trim()&&!/^https:\/\//i.test(image.trim())){notice('Paw Moment pictures require HTTPS URLs.');return;}
     const moment=normalizeMoment({id:`moment_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,title,text:content,from:me(),source:'My scrapbook',at:Date.now(),image,decoration:'🐾'});
-    if(moment){state.moments.push(moment);state.moments=state.moments.slice(-MOMENT_LIMIT);saveSoon();renderMoments();}
+    if(moment){state.moments.push(moment);state.moments=state.moments.slice(-MOMENT_LIMIT);saveSoon();bookRender();}
   }
   function sendPawMoment(momentId) {
     const m=state.moments.find(x=>x.id===momentId);if(!m)return;
@@ -5996,14 +7381,15 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!state.profiles[target]?.kitty){notice('Your friend needs PawLounge/Kittychat (confirmed by Paw Profile or status handshake) to receive this card.');return;}
     if(!window.confirm(`Share "${m.title}" with ${bcName(target)}?`))return;
     const body={type:'KCMoment',v:1,moment:{...m,received:true}};
-    try{window.ServerSend('AccountBeep',{MemberNumber:target,BeepType:'KCMoment',IsSecret:true,Message:JSON.stringify(body)});notice('💌 Paw Moment sent; recipient needs a compatible PawLounge or Kittychat build.');}
+    try{window.ServerSend('AccountBeep',{MemberNumber:target,BeepType:'KCMoment',IsSecret:true,Message:pawWireJSON(body)});notice('💌 Paw Moment sent; recipient needs a compatible PawLounge or Kittychat build.');}
     catch(err){notice('Could not share Paw Moment.');}
   }
   function receivePawMoment(data,from) {
     if(!myFriends().includes(from))return;
     try{
-      const obj=JSON.parse(String(data.Message||''));
+      const obj=pawParseWireJSON(String(data.Message||''),6000);
       if(obj?.type!=='KCMoment'||obj.v!==1)return;
+      if(!integrityAcceptEvent('moment',from,obj,integrityMsgId(obj.moment?.id)?obj.moment.id:''))return;
       const m=normalizeMoment(obj.moment);if(!m)return;
       m.from=from;m.received=true;m.source=bcName(from);
       if(state.moments.some(x=>x.id===m.id&&x.from===from))return;
@@ -6176,8 +7562,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     <p class="muted">Keyboard: Alt+K open/close, Alt+Shift+1–6 select tabs, Alt+↑/↓ move through contacts, Escape closes PawLounge, Enter sends and Shift+Enter adds a line.</p>
     <div class="smalltitle">🖱 Side panel scrolling</div>${control('panelScrollbars','Always show left and right panel scrollbars')}
     <p class="muted">Scroll the kitty name list and right widgets separately with the mouse wheel, trackpad, touch, or scrollbar. Your conversation stays in place.</p>
-    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws to verified PawLounge friends')}<div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
-    ${pawPrivacySettingsMarkup()}<section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
+    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws in Beeps and Whispers')}<p class="muted">The other player must use PawLounge. Beeps work with verified BC friends; Whispers work with anyone in your current BC room. Typing paws disappear automatically after you stop typing.</p><div class="smalltitle">🔡 PawLounge data encoding</div>${control('encodePrivateChat','Encode native whisper/beep messages for updated PawLounge recipients only')}<p class="muted">Saved settings, cached messages, and archived message text use the PL2 reversible codec. Compatible PawLounge packets use PL2 automatically. Optional encoded whispers/beeps appear as unreadable tokens in native BC and older plugins. This is obfuscation, NOT encryption; it cannot stop tampering, protect messages from a modified client, or hide data from BC. Leave this unchecked when messaging people without PawLounge v0.9.14.</p><div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
+    ${pawPrivacySettingsMarkup()}<section class="paw-settings-section"><div class="smalltitle">🛡 Message Integrity Shield · active</div><p class="muted">Incoming addon packets are checked for valid senders, permissions, lengths, rate limits and replays. Group delivery acknowledgments are recipient-client reports, not proof of receipt or reading. Older plugin clients have limited replay protection.</p><p class="muted">This session: ${integrity.rejects} rejected · ${integrity.duplicates} duplicates blocked · ${integrity.rateLimited} rate-limited</p></section><section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
       <p class="muted">Show a short status to your BC friends who use PawLounge. Your full Paw Profile stays separate.</p>
       <label>Status preset<select class="field" data-setting="friendStatusMode">${Object.keys(STATUS_MODES).map(mode=>`<option value="${escapeText(mode)}" ${p.friendStatusMode===mode?'selected':''}>${STATUS_MODES[mode]} ${escapeText(mode)}</option>`).join('')}</select></label>
       <label>Custom status message<input class="field" data-setting="friendStatusText" value="${escapeText(p.friendStatusText)}" placeholder="Cuddles welcome ♡" maxlength="100"/></label>
@@ -6220,11 +7606,26 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return sent;
   }
   function clickUI(e) {
-    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role]');
+    const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
     if (!target) return;
+    if(target.dataset.outboxRetry!==undefined){retryFailedOutbox(target.dataset.outboxRetry);return;}
+    if(target.dataset.outboxCancel!==undefined){cancelQueuedOutbox(target.dataset.outboxCancel);return;}
     if(target.dataset.pawCircleToggle!==undefined){const [id,field]=target.dataset.pawCircleToggle.split(':');togglePawCircleFlag(id,field);return;}
     if(target.dataset.pawCircleDelete!==undefined){const id=target.dataset.pawCircleDelete;if(window.confirm('Delete this friend circle?')){state.circles=state.circles.filter(c=>c.id!==id);if(state.circleFilter===id)state.circleFilter='';saveSoon();renderCircles();}return;}
     if(target.dataset.pawCancelSchedule!==undefined){cancelPawSchedule(target.dataset.pawCancelSchedule);return;}
+    if(target.dataset.bookNewPage!==undefined){bookCreatePage(target.dataset.bookNewPage);return;}
+    if(target.dataset.bookEdit!==undefined){const [a,p]=target.dataset.bookEdit.split('|');bookEditPage(a,p);return;}
+    if(target.dataset.bookNote!==undefined){const [a,p]=target.dataset.bookNote.split('|');bookAddNote(a,p);return;}
+    if(target.dataset.bookSeal!==undefined){const [a,p]=target.dataset.bookSeal.split('|');bookSealPage(a,p);return;}
+    if(target.dataset.bookSnapshot!==undefined){const [a,p]=target.dataset.bookSnapshot.split('|');bookAddSnapshot(a,p);return;}
+    if(target.dataset.bookTag!==undefined){const [a,c]=target.dataset.bookTag.split('|');bookTagMemory(a,c);return;}
+    if(target.dataset.bookRole!==undefined){const [a,m]=target.dataset.bookRole.split('|');bookRoleChange(a,numeric(m));return;}
+    if(target.dataset.bookGroup!==undefined){bookGroupLink(target.dataset.bookGroup);return;}
+    if(target.dataset.bookExport!==undefined){bookKeepsake(target.dataset.bookExport);return;}
+    if(target.dataset.bookGift!==undefined){bookGiftPage(target.dataset.bookGift);return;}
+    if(target.dataset.bookSync!==undefined){bookRequestSync(target.dataset.bookSync);return;}
+    if(target.dataset.bookActivity!==undefined){pawBookUI.activity=!pawBookUI.activity;renderPawBooks();return;}
+    if(target.dataset.bookTimeline!==undefined){pawBookUI.timeline=!pawBookUI.timeline;renderPawBooks();return;}
     if(target.dataset.pawCover!==undefined){customizePawCover(target.dataset.pawCover);return;}
     if(target.dataset.pawPages!==undefined){changePawPageLayout(target.dataset.pawPages);return;}
     if(target.dataset.pawCardReact!==undefined){const [a,c,emoji]=target.dataset.pawCardReact.split('|');reactPawCard(a,c,emoji);return;}
@@ -6232,7 +7633,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(target.dataset.pawCardMove!==undefined){const [a,c,delta]=target.dataset.pawCardMove.split('|');movePawCard(a,c,Number(delta));return;}
     if(target.dataset.pawVote!==undefined){const [id,index]=target.dataset.pawVote.split('|');votePawPoll(id,Number(index));return;}
     if(target.dataset.pawRole!==undefined){pawGroupRole(numeric(target.dataset.pawRole));return;}
-    if(target.dataset.pawAlbum!==undefined){state.albumView=target.dataset.pawAlbum;renderMoments();return;}
+    if(target.dataset.pawAlbum!==undefined){state.albumView=target.dataset.pawAlbum;state.tab='pawbooks';renderPawBooks();return;}
     if(target.dataset.pawAlbumInvite!==undefined){inviteAlbumFriend(target.dataset.pawAlbumInvite);return;}
     if(target.dataset.pawAlbumRename!==undefined){renameSharedAlbum(target.dataset.pawAlbumRename);return;}
     if(target.dataset.pawAlbumLeave!==undefined){leaveSharedAlbum(target.dataset.pawAlbumLeave);return;}
@@ -6244,6 +7645,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.facepop !== undefined) { popFace(target); return; }
     if (target.dataset.jumpreply!==undefined) {const el=ui.shadow?.querySelector(`[data-message-id="${CSS.escape(target.dataset.jumpreply)}"]`);if(el){el.scrollIntoView({block:'center'});el.classList.add('kc-highlight-message');}else notice('Use Load older messages to find the original.');return;}
     if (target.dataset.replyMsg!==undefined) {setReplyTarget(target.dataset.replyMsg);return;}
+    if (target.dataset.bookSaveMessage!==undefined){saveMessageToBook(target.dataset.bookSaveMessage);return;}
     if (target.dataset.saveMoment!==undefined) {saveMessageAsMoment(target.dataset.saveMoment);return;}
     if (target.dataset.reactionId!==undefined) {replyAndReact(currentConversationKind(),target.dataset.reactionId,target.dataset.emoji);return;}
     if (target.dataset.roleToggle!==undefined) {const g=currentGroup(),id=numeric(target.dataset.roleToggle);if(g?.creator===me()&&g.members.includes(id)&&id!==me()){g.moderators||=[];g.moderators=g.moderators.includes(id)?g.moderators.filter(x=>x!==id):[...g.moderators,id];syncGroup(g);saveSoon();renderGroupChat();}return;}
@@ -6259,10 +7661,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(target.dataset.roomstar!==undefined){const r=state.rooms[Number(target.dataset.roomstar)];if(r){const key=`${r.Space}:${r.Name.toUpperCase()}`;const found=state.roomFavorites.findIndex(x=>`${x.Space}:${x.Name.toUpperCase()}`===key);if(found>=0)state.roomFavorites.splice(found,1);else state.roomFavorites.push({Name:r.Name,Space:r.Space});saveSoon();renderRooms();}return;}
     if(target.dataset.favvisit!==undefined){joinRoomFromRadar(state.roomFavorites[Number(target.dataset.favvisit)]);return;}
     if (target.dataset.momentshare!==undefined){sendPawMoment(target.dataset.momentshare);return;}
-    if (target.dataset.momentdelete!==undefined){if(window.confirm('Delete this saved Paw Moment?')){state.moments=state.moments.filter(m=>m.id!==target.dataset.momentdelete);saveSoon();renderMoments();}return;}
+    if (target.dataset.momentdelete!==undefined){if(window.confirm('Delete this saved Paw Moment?')){state.moments=state.moments.filter(m=>m.id!==target.dataset.momentdelete);saveSoon();bookRender();}return;}
     if(target.dataset.join!==undefined){joinRoomFromRadar(state.rooms[Number(target.dataset.join)]);return;}
     const act = target.dataset.action;
-    if (act === 'close') toggle(false);
+    if (act === 'bookvaultenable') void bookVaultEnable();
+    else if (act === 'bookvaultunlock') void bookVaultUnlock();
+    else if (act === 'bookvaultlock') void bookVaultLock();
+    else if (act === 'securechat') pawSecureOpenModal();
+    else if (act === 'pawsecuresave') pawSecureSaveKey();
+    else if (act === 'pawsecureforget') pawSecureForgetKey();
+    else if (act === 'pawsecureclose') pawSecureCloseModal();
+    else if (act === 'pawsecuregenerate') pawSecureGenerateKey();
+    else if (act === 'close') toggle(false);
     else if (act === 'inboxscrollleft' || act === 'inboxscrollright') scrollInboxFilters(act === 'inboxscrollleft' ? -1 : 1);
     else if (act === 'opencircles') {state.tab='circles';render();}
     else if (act === 'newcircle') createPawCircle();
@@ -6271,6 +7681,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'leaveguestbook') leavePawGuestbook();
     else if (act === 'markcatchup') {state.catchUpSince=Date.now();saveSoon();renderCatchUp();}
     else if (act === 'newalbum') createSharedAlbum();
+    else if (act === 'openpawbooks') {state.tab='pawbooks';state.albumView='';render();}
+    else if (act === 'pawbooksmoments'){state.tab='moments';render();}
+    else if (act === 'bookback'){state.albumView='';pawBookUI.timeline=false;pawBookUI.activity=false;renderPawBooks();}
     else if (act === 'nickname') pawNickname();
     else if (act === 'schedulepaw') schedulePawMessage();
     else if (act === 'grouppoll') makePawPoll();
@@ -6305,7 +7718,23 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'cancelreply') {state.replyTarget=null;renderReplyBar();}
     else if (act==='newmoment')addOwnMoment();
     else if (act==='momentsfromchat'){state.tab='chats';render();}
-    else if (act === 'recovergroup') {const g=currentGroup();if(g){let count=0;for(const n of g.accepted)if(n!==me()&&sendGroupWire(n,{t:'historyRequest',id:g.id,after:Date.now()-7*86400000},'🐾 History request',true))count++;notice(`Requested recent history from ${count} group participant(s).`);}}
+    else if (act === 'recovergroup') {const g=currentGroup();if(g){
+      const recipients=g.accepted.filter(n=>n!==me()&&myFriends().includes(n));
+      if(recipients.length<RECOVERY_QUORUM){notice('Recovery requires two other accepted group members who are BC friends.');return;}
+      // One round = one separate challenge per other member and at most 90s.
+      for(const n of g.accepted)integrity.recovery.delete(integrityRecoveryKey(g.id,n));
+      const round={until:Date.now()+RECOVERY_TTL,candidates:new Map(),members:new Set(),reporters:new Set(),confirmed:0};
+      integrity.quorums.set(g.id,round);
+      const after=Date.now()-7*86400000;
+      for(const n of recipients){
+        const rid=integrityRequestRecovery(g.id,n,after);
+        if(sendGroupWire(n,{t:'historyRequest',id:g.id,after,rid,quorum:RECOVERY_QUORUM},'🐾 History quorum request',true))round.members.add(n);
+        else integrity.recovery.delete(integrityRecoveryKey(g.id,n));
+      }
+      if(round.members.size<RECOVERY_QUORUM){integrity.quorums.delete(g.id);notice('Unable to contact two members for recovery.');}
+      else notice(`Requested recovery witnesses from ${round.members.size} people. Awaiting two matching reports per message.`);
+      if(state.open)renderGroupChat();
+    }}
     else if (act === 'stickers') ui.shadow.getElementById('kc-stickers')?.classList.toggle('hidden');
     else if (act === 'profile') sendProfile();
     else if (act === 'viewpawprofile') openViewProfileModal(state.selected);
@@ -6344,6 +7773,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function inputUI(e) {
     const t = e.target;
+    if(t.id==='pawbook-search'){pawBookUI.query=t.value;const pos=t.selectionStart;renderPawBooks();const field=ui.shadow.getElementById('pawbook-search');field?.focus();field?.setSelectionRange(pos,pos);return;}
     if (t.id === 'kc-search') { state.search = t.value; // Preserve focus and cursor after sidebar repaint.
       const pos = t.selectionStart; renderSidebar(); const s = ui.shadow.getElementById('kc-search'); s?.focus(); s?.setSelectionRange(pos,pos); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; }
     else if (t.id === 'kc-compose') {if (currentGroup() && state.tab==='groups'){currentGroup().draft=trim(t.value,MAX_GROUP_TEXT);saveSoon();return;}const c = state.chats[state.selected]; if (c) { c.draft = t.value; saveSoon(); sendTyping(); } }
@@ -6391,7 +7821,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(next){e.preventDefault();e.stopPropagation();selectChat(next);}return;
     }
     if(!e.ctrlKey&&e.shiftKey&&e.altKey&&!e.metaKey&&/^[1-7]$/.test(e.key)&&!e.target?.matches?.('input,textarea,select')){
-      const tab=['chats','groups','catchup','rooms','stickers','moments','settings'][Number(e.key)-1];
+      const tab=['chats','groups','pawbooks','catchup','rooms','stickers','moments'][Number(e.key)-1];
       if(tab){e.preventDefault();e.stopPropagation();state.tab=tab;render();return;}
     }
     if (e.key === 'Escape' && state.profileModal) { e.stopPropagation(); closeProfileModal(); return; }
@@ -6412,7 +7842,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function tick() {
     const id = me();
     if (!id) { if (!ui.host && document.body) buildUI(); return; }
-    if (state.myId !== id) { if (state.myId) saveNow(true); motionRuntime.active=0; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); ui.host = null; ui.shadow = null; state.open = false; } loadForAccount(id); }
+    if (state.myId !== id) { if (state.myId) saveNow(true); pawSecureResetSession(); motionRuntime.active=0; typingSendTimes.clear();state.typingUntil={}; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); recentRoomPortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); ui.host = null; ui.shadow = null; state.open = false; } loadForAccount(id); }
     if (ui.host && (!ui.host.isConnected || !ui.panel || !ui.shadow || !ui.fab || !ui.body || !ui.fab.isConnected)) { motionRuntime.active=0; try { ui.host.remove(); } catch {} Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null}); }
     if (!ui.host) buildUI();
     // Recover from BC or another addon replacing part of the mounted UI.
@@ -6429,6 +7859,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }
     restoreSubbycatRoomHistory();
     deliverScheduledMessages();
+    dispatchOutbox();
     if (state.open && state.tab === 'rooms' && !state.roomLoading && state.roomError.startsWith('BC room search has not loaded yet.') && typeof window.ServerRoomSearch === 'function') void searchRooms('bc-search-ready');
     if (state.open && state.tab==='chats') {
       const roster=roomRosterSignature();
@@ -6450,7 +7881,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     state.started = true;
   }
   window.KittyChat = Object.freeze({ version: VERSION,
-    nativeMuteDiagnostics: id => ({ version: VERSION, member: numeric(id), muted: isMutedNativeContact(id), bcSoundHooks: !!(state.mod || state.hooks.length), serverShowBeepAvailable: typeof window.ServerShowBeep === 'function', notificationRaiseAvailable: typeof window.NotificationRaise === 'function', silenced: {...mutedNativeAudioStats} }),
+    nativeMuteDiagnostics: id => ({ version: VERSION, member: numeric(id), muted: isMutedNativeContact(id), bcSoundHooks: !!state.mod, serverShowBeepAvailable: typeof window.ServerShowBeep === 'function', notificationRaiseAvailable: typeof window.NotificationRaise === 'function', silenced: {...mutedNativeAudioStats} }),
+    presenceDiagnostics: () => ({ version: VERSION, modSdkHookInstalled: pawOnlinePresence.modSdkHookInstalled, lastNativeResponse: pawOnlinePresence.seenAt || null, knownOnlineCount: pawOnlinePresence.ids.size, lastQuery: pawOnlinePresence.lastQuery || null }),
     performanceDiagnostics: () => ({ ...motionRuntime,
       portraitQueued: portraitRuntime.queued,
       archivePending: historyArchive.queue?.length ?? null,
@@ -6460,7 +7892,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     open: () => { safeTick(); toggle(true); }, close: () => toggle(false),
     select: id => { if (!me()) return false; const n = numeric(id); if (!n) return false; selectChat(n); toggle(true); return true; },
     setAssetBase: url => { if (!/^https:\/\/[^\s]+\/$/.test(url)) return false; state.settings.assetBase=url; saveSoon(); render(); return true; },
-    refreshMugshots: () => { if (!ui.shadow) return 0; steadyRemotePortraits.clear(); wceSnapshotRuntime.temporaryPortraits.clear(); wceSnapshotRuntime.attempts.clear(); for (const c of ui.shadow.querySelectorAll('.kc-bc-mugshot')) {c.classList.remove('is-painted'); c.parentElement?.classList.remove('kc-has-mugshot');} schedulePortraits(); return ui.shadow.querySelectorAll('.kc-bc-mugshot').length; },
+    refreshMugshots: () => { if (!ui.shadow) return 0; steadyRemotePortraits.clear(); recentRoomPortraits.clear(); wceSnapshotRuntime.temporaryPortraits.clear(); wceSnapshotRuntime.attempts.clear(); for (const c of ui.shadow.querySelectorAll('.kc-bc-mugshot')) {c.classList.remove('is-painted'); c.parentElement?.classList.remove('kc-has-mugshot');} schedulePortraits(); return ui.shadow.querySelectorAll('.kc-bc-mugshot').length; },
     mugshotDiagnostics,
     mugshotReport: id => {
       const d=mugshotDiagnostics(id);
@@ -6476,6 +7908,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     refreshRooms: () => { if (!ui.body) safeTick(); state.tab='rooms'; toggle(true); return searchRooms('console-refresh'); },
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
+    zeroFlickerDiagnostics:()=>({...sidebarDiffStats,sideScroll:ui.menu?.querySelector('.contacts-scroll')?.scrollTop||0,filterScroll:ui.menu?.querySelector('.kc-inbox-filters')?.scrollLeft||0}),
+    dataCodecDiagnostics:()=>({version:VERSION,codec:'PL2',storage:'reversible-encoded localStorage',archive:'encoded message text only; metadata indexed',packets:'PL2 with legacy JSON/KC1 receive fallback',privateChatEncoded:!!state.settings.encodePrivateChat,cryptographic:false,...pawCodecMetrics}),
+    integrityDiagnostics:()=>({version:VERSION,enabled:true,checks:['sender','member-permissions','size','rate-limit','nonce-replay','group-ack-challenge','recovery-request','two-peer-recovery-quorum','message-ids'],accepted:integrity.accepted,rejected:integrity.rejects,duplicates:integrity.duplicates,rateLimited:integrity.rateLimited,legacyEvents:integrity.legacy,rememberedEvents:state.integritySeen.length,pendingRecoveryRequests:integrity.recovery.size,pendingRecoveryQuorums:integrity.quorums.size}),
+    outboxDiagnostics:()=>({version:VERSION,entries:state.deliveryOutbox.map(x=>({id:x.id,kind:x.kind,to:x.to,status:x.status,mode:x.mode,targets:{...x.targets},reason:x.reason,created:x.created})),sentThisSession:outboxRuntime.sent}),
     socialStudioDiagnostics:()=>({version:VERSION,pendingScheduled:state.scheduledMessages.filter(x=>x.status==='pending').length,quietHours:inPawQuietHours(),favoriteFriends:Object.values(state.chats).filter(x=>x.favorite).length,groupPolls:Object.values(state.groups).reduce((sum,g)=>sum+(g.polls||[]).length,0),scrapbooks:state.sharedAlbums.length,layoutEdit:state.settings.layoutEdit}),
     roomRosterDiagnostics:()=>({version:VERSION,insideRoom:window.CurrentScreen==='ChatRoom',filter:state.contactsMode,room:window.CurrentScreen==='ChatRoom'?(window.ChatRoomData?.Name||''):null,visibleMembers:currentRoomRoster().map(c=>({id:numeric(c.MemberNumber),name:trim(c.Nickname||c.Name||'',80)}))}),
     expansionDiagnostics: () => ({version:VERSION,roomSort:state.roomSort,roomFavorites:state.roomFavorites.length,recentRooms:state.roomRecent.length,moments:state.moments.length,replyActive:!!state.replyTarget,inboxFilter:state.contactsMode,pendingRequests:Object.values(state.chats).filter(c=>c.requestPending).length,replyLater:Object.values(state.chats).filter(c=>c.replyLater).length,moderatorAssignments:Object.values(state.groups).reduce((n,g)=>n+(g.moderators?.length||0),0)}),
@@ -6493,7 +7929,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if (state.open && state.tab==='settings') renderSettings();
       return true;
     },
-    diagnostics: () => ({ version:VERSION, account:state.myId, mugshotMode:'BC live canvas / WCE bce-past-profiles readonly snapshot / kitten; only temporary in-memory rendering, no persistent mugshot storage', hooked:!!state.mod || state.hooks.length > 0,
+    diagnostics: () => ({ version:VERSION, account:state.myId, mugshotMode:'BC live canvas / WCE bce-past-profiles readonly snapshot / kitten; only temporary in-memory rendering, no persistent mugshot storage', hooked:!!state.mod,
       conversations:Object.keys(state.chats).length, nativeMessages:true, groups:Object.keys(state.groups).length, windowRect:state.windowRect, theme:state.settings.theme, hasUI:!!ui.host, bootError:state.bootError, bootAttempts:state.bootAttempts }) });
   window.PawLounge = window.KittyChat;
   window.PawLoungeBootDiag = () => window.KittyChatBootDiag();
@@ -6502,6 +7938,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     try {
       state.bootAttempts++;
       tick();
+      pawPresenceTick();
       BOOT.attempts = state.bootAttempts;
       markBoot(ui.fab?.isConnected ? (me() ? 'ready' : 'waiting-for-login') : 'waiting-for-dom');
       state.bootError = '';
