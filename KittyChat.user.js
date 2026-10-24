@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.12
+// @version      1.0.13
 // @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.12';
+  const VERSION = '1.0.13';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -3510,6 +3510,8 @@
 #kc-fab{all:unset;position:fixed;right:16px;bottom:100px;z-index:2147483000;width:64px;height:64px;border:0;border-radius:0;background:transparent;box-shadow:none;display:flex;align-items:center;justify-content:center;cursor:grab;touch-action:none;user-select:none;filter:drop-shadow(0 7px 8px #190b24ae);transition:transform .19s ease,filter .19s ease;overflow:visible}
 /* Yield the launcher to other mods / BC menus without changing its saved drag position. */
 #kc-fab.kc-yielding{visibility:hidden!important;opacity:0!important;pointer-events:none!important;transition:none!important}
+/* A non-interactive host lets BC receive clicks outside these actual controls. */
+#kc-fab:not(.kc-yielding),#kc-panel.open{pointer-events:auto!important}
 #kc-fab:hover{transform:translateY(-4px) rotate(-3deg);filter:drop-shadow(0 11px 12px #9d427a88)}#kc-fab:active{cursor:grabbing}#kc-fab .asset{width:64px;height:64px;font-size:34px;pointer-events:none}#kc-fab .counter{position:absolute;right:-2px;top:2px;font:bold 11px system-ui;color:#fff1f8;background:#532843;border:2px solid #e79bbd;border-radius:7px;transform:rotate(13deg);box-shadow:0 3px 8px #20132399;min-width:25px;text-align:center;padding:2px 5px}
 .asset{display:inline-flex;align-items:center;justify-content:center;position:relative;overflow:hidden;font-size:inherit}.asset>img{position:absolute;width:100%;height:100%;object-fit:contain;z-index:1}.asset>span{display:flex;align-items:center;justify-content:center;width:100%;height:100%}.asset>img:not([style*="display: none"])+span{visibility:hidden}.avatar{width:46px;height:46px;flex:0 0 46px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--bubble2);border:2px solid #ffffff18;overflow:hidden;font-size:25px;box-shadow:0 4px 10px #0002}.avatar img{width:100%;height:100%;object-fit:cover}.avatar .asset{width:100%;height:100%}
 #kc-panel{position:fixed;right:24px;bottom:182px;width:min(1260px,calc(100vw - 20px));height:min(840px,calc(100dvh - 35px));z-index:2147483001;display:none;flex-direction:column;border-radius:28px;overflow:hidden;background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow);color:var(--ink)}#kc-panel.open{display:flex}
@@ -5684,6 +5686,17 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (ui.host || !document.body) return;
     try {
     const host = document.createElement('div'); host.id = 'kittychat-host';
+    // BC creates different canvas/UI stacking contexts after sign-in. Giving
+    // only the shadow child a high z-index is not sufficient if the host ends
+    // up underneath a BC or addon overlay. This zero-sized fixed host creates
+    // an explicit top-level layer and never intercepts pointer input itself.
+    host.style.setProperty('position','fixed','important');
+    host.style.setProperty('left','0','important');
+    host.style.setProperty('top','0','important');
+    host.style.setProperty('width','0','important');
+    host.style.setProperty('height','0','important');
+    host.style.setProperty('z-index','2147483000','important');
+    host.style.setProperty('pointer-events','none','important');
     const shadow = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = stylesheet(); shadow.appendChild(style);
     const wrap = document.createElement('div'); wrap.innerHTML = `
@@ -6034,7 +6047,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // button has a very high z-index.  Detect overlapping, VISIBLE foreign DOM
   // windows (including dialogs inside open Shadow DOM), plus BC canvas menus.
   // This doesn't patch BC or any third-party mod functions.
-  const fabCoexistence={reason:'',checks:0,hidden:0};
+  const fabCoexistence={reason:'',checks:0,hidden:0,alwaysShow:false};
   const FOREIGN_WINDOW_SELECTOR='dialog[open],[role="dialog"],[aria-modal="true"],[id*="lian" i],[class*="lian" i],[id*="modal" i],[class*="modal" i],[id*="popup" i],[class*="popup" i],[id*="overlay" i],[class*="overlay" i],[id*="window" i],[class*="window" i]';
   function findOverlappingForeignWindow(rect) {
     const overlapping=(box)=>box.width>=120 && box.height>=85 &&
@@ -6064,15 +6077,19 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         const label=`${node.id||''} ${typeof node.className==='string'?node.className:''}`;
         const namedWindow=/(?:lian(?:chat)?|modal|popup|overlay|dialog|floating[-_ ]?window|addon[-_ ]?menu)/i.test(label);
         const modal=node.matches?.('dialog[open],[role="dialog"],[aria-modal="true"]');
-        // Generic BC canvas wrappers and fullscreen overlay hosts often have
-        // fixed positioning/high z-index. They aren't mod windows, and hiding
-        // our only launcher under them makes PawLounge impossible to open.
+        // We only yield for a *specific visible window*. Broad BC canvas
+        // wrappers, invisible overlay roots, document-sized screens and UI
+        // holders should never hide the only way to open PawLounge.
         if(!modal&&!namedWindow)continue;
-        if(namedWindow&&!modal&&/^(?:chatroom|online|main|game|canvas|screen|container)$/i.test(String(node.id||'')))continue;
+        if(node===document.body||node===document.documentElement)continue;
+        if(namedWindow&&!modal&&/^(?:chatroom|online|main|game|canvas|screen|container|information|information-sheet)$/i.test(String(node.id||'')))continue;
         let box;
         try {box=node.getBoundingClientRect();}catch {continue;}
         if(!overlapping(box))continue;
-        // Ignore a mere launcher/icon with a dialog-like class, not a window.
+        if(box.width>=innerWidth*.9 && box.height>=innerHeight*.9)continue;
+        // Non-dialog popups need an independently positioned window surface.
+        // A named container inside the normal BC layout is not a popup.
+        if(!modal&&!['fixed','absolute','sticky'].includes(position))continue;
         if(namedWindow&&(box.width<150||box.height<100)&&!modal)continue;
         return `${node.id||node.tagName.toLowerCase()}`.slice(0,80);
       }
@@ -6088,20 +6105,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     // Never hide the launcher midway through a drag; the next check handles it.
     if(fab.classList.contains('kc-moving'))return;
     let reason='';
-    if(!state.open){
+    if(!state.open&&!fabCoexistence.alwaysShow){
       try {
-        const screen=String(window.CurrentScreen||'');
-        // Native BC profile, wardrobe, addon and game screens draw on canvas;
-        // they cannot be detected from DOM geometry.
-        const module=String(window.CurrentModule||'');
-        const inChatRoom=(screen==='Online'&&module==='ChatRoom')||screen==='ChatRoom';
-        const nativeMenu=inChatRoom&&!!window.CurrentCharacter &&
-          (!!window.DialogFocusItem||!!window.DialogMenuMode);
-        // Native BC uses Online/ChatRoom, not CurrentScreen='ChatRoom'.
-        // Do not hide the only launcher just because the user is in BC.
-        if(nativeMenu)reason='BC character menu';
-        else if(screen&&screen!=='Online'&&screen!=='ChatRoom'&&screen!=='Login'&&module!=='Online')reason=`BC screen: ${screen}/${module}`;
-        else reason=findOverlappingForeignWindow(fab.getBoundingClientRect());
+        // CurrentScreen changes across BC login, lobby and chat room. Do not
+        // hide the launcher from screen names: the previous allowlist wrongly
+        // hid PawLounge throughout normal signed-in screens. Furthermore,
+        // CurrentCharacter / DialogMenuMode may remain populated after a
+        // dialog closes; neither proves a visible native popup exists.
+        reason=findOverlappingForeignWindow(fab.getBoundingClientRect());
       } catch(e) {
         // UI cooperation is best-effort and must never break PawLounge.
         reason='';
@@ -8396,7 +8407,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
     displayDiagnostics:()=>({version:VERSION,zoomFactor:pawViewportScale.ratio,referenceDpr:state.settings.zoomReferenceDpr,currentDpr:window.devicePixelRatio,mobile:pawViewportScale.mobile,updates:pawViewportScale.updates}),
-    launcherCoexistenceDiagnostics:()=>({version:VERSION,checks:fabCoexistence.checks,hiddenChecks:fabCoexistence.hidden,reason:fabCoexistence.reason,hidden:!!ui.fab?.classList.contains('kc-yielding'),screen:window.CurrentScreen||null}),
+    launcherCoexistenceDiagnostics:()=>({version:VERSION,checks:fabCoexistence.checks,hiddenChecks:fabCoexistence.hidden,reason:fabCoexistence.reason,hidden:!!ui.fab?.classList.contains('kc-yielding'),screen:window.CurrentScreen||null,hostLayer:ui.host?getComputedStyle(ui.host).zIndex:null,visible:!!ui.fab?.isConnected&&!ui.fab?.classList.contains('kc-yielding'),alwaysShow:fabCoexistence.alwaysShow}),
+    alwaysShowLauncher:(enable=true)=>{fabCoexistence.alwaysShow=!!enable;syncFabCoexistence();return fabCoexistence.alwaysShow;},
     zeroFlickerDiagnostics:()=>({...sidebarDiffStats,sideScroll:ui.menu?.querySelector('.contacts-scroll')?.scrollTop||0,filterScroll:ui.menu?.querySelector('.kc-inbox-filters')?.scrollLeft||0}),
     dataCodecDiagnostics:()=>({version:VERSION,codec:'PL2',storage:'reversible-encoded localStorage',archive:'encoded message text only; metadata indexed',packets:'PL2 with legacy JSON/KC1 receive fallback',privateChatEncoded:!!state.settings.encodePrivateChat,cryptographic:false,...pawCodecMetrics}),
     integrityDiagnostics:()=>({version:VERSION,enabled:true,checks:['sender','member-permissions','size','rate-limit','nonce-replay','group-ack-challenge','recovery-request','two-peer-recovery-quorum','message-ids'],accepted:integrity.accepted,rejected:integrity.rejects,duplicates:integrity.duplicates,rateLimited:integrity.rateLimited,legacyEvents:integrity.legacy,rememberedEvents:state.integritySeen.length,pendingRecoveryRequests:integrity.recovery.size,pendingRecoveryQuorums:integrity.quorums.size}),
@@ -8459,7 +8471,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     attempts: state.bootAttempts, error: state.bootError || BOOT.error,
     hasLauncher: !!ui.fab, hasPanel: !!ui.panel,
     hostConnected: !!ui.host?.isConnected,
-    launcherVisible: !!ui.fab?.isConnected && getComputedStyle(ui.fab).display !== 'none',
+    launcherVisible: !!ui.fab?.isConnected && !ui.fab.classList.contains('kc-yielding') &&
+      getComputedStyle(ui.fab).display !== 'none' && getComputedStyle(ui.fab).visibility !== 'hidden' &&
+      getComputedStyle(ui.fab).opacity !== '0',
+    launcherHiddenReason: fabCoexistence.reason,
+    launcherDisplay:ui.fab?.isConnected ? getComputedStyle(ui.fab).display : 'absent',
+    screen:String(window.CurrentScreen||''), module:String(window.CurrentModule||''),
     panelOpen: !!state.open, windowRect: state.windowRect,
     olderVersionConflict: document.getElementById('kittychat-version-conflict')?.textContent || null });
   safeTick();
