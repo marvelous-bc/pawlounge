@@ -3,8 +3,8 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.0.17
-// @description  Illustrated PawLounge social den with bespoke cat art, group chats, draggable and resizable window
+// @version      1.1
+// @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
 // @match        https://*.bondageprojects.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.0.17';
+  const VERSION = '1.1';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -50,7 +50,7 @@
         const warning = document.createElement('div');
         warning.id = 'kittychat-version-conflict';
         warning.style.cssText = 'position:fixed;bottom:22px;right:12px;z-index:2147483646;max-width:310px;padding:12px 14px;border:2px solid #ef7ab6;background:#2a152d;color:#ffe9f5;border-radius:14px;font:13px/1.45 system-ui;box-shadow:0 8px 30px #0009';
-        warning.textContent = `Kittychat ${VERSION} cannot start: version ${previous} is already running. Disable old Kittychat scripts, then reload.`;
+        warning.textContent = `PawLounge is already open in another version. Disable the duplicate script and reload Bondage Club.`;
         document.body.appendChild(warning);
       };
       if (document.body) showConflict();
@@ -101,7 +101,7 @@
   const DEFAULT_SETTINGS = { theme: 'midnight', fontSize:'large', notifications: true, sounds: false,
     typing: false, panelScrollbars: true, zoomReferenceDpr:0, assetBase: DEFAULT_ASSET_BASE, avatar: '', signature: 'Purrs and pawprints ♡',
     pawHero: '', pawAbout: 'Professional cuddle thief ♡', pawLikes: '', pawDislikes: '', pawLookingFor: '',
-    friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
+    friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, friendStatusMinutes:0, friendStatusExpiresAt:0, petPersona:'curious-kitten', petPersonaShare:true, petPersonaDescription:'', shareLivePlushie:false, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
     shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
     encodePrivateChat:false,quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
@@ -110,7 +110,7 @@
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
     title: null, subtitle: null, input: null, menu: null, status: null, rightArrowObserver: null };
   const state = { myId: 0, settings: { ...DEFAULT_SETTINGS }, chats: {}, profiles: {}, groups: {}, selectedGroup: '', groupCreateOpen: false, windowRect: null,
-    selected: 0, roomHistory: [], tab: 'chats', search: '', groupSearch: '', roomSearch: '', roomSort: 'most', roomFavorites: [], roomRecent: [], rooms: [], moments: [], replyTarget:null, momentView:null,
+    selected: 0, roomHistory: [], roomMemories:[], roomMemoryDraft:{name:'',notes:'',tags:''}, tab: 'chats', search: '', groupSearch: '', roomSearch: '', roomSort: 'most', roomFavorites: [], roomRecent: [], rooms: [], moments: [], replyTarget:null, momentView:null,
     roomError: '', roomLoading: false, roomSearched: false, roomCounts: {}, roomSearchWarnings: [], roomSearchTrigger: 'not-started', roomLastStarted: 0, roomLastFinished: 0, open: false, contactsMode: 'all',
     composerMode: 'beep', typingUntil: {}, lastTypingSent: 0, lastSave: null,
     hooks: [], mod: null, suppressOutgoing: false, recentFingerprints: new Map(),
@@ -118,7 +118,15 @@
   // Friend-status packets are private Kittychat control messages, not public
   // chat/beeps. Keep all delivery state in memory; only settings/received status
   // are saved with existing Kittychat account data.
-  const STATUS_MODES = Object.freeze({ Available:'🟢', Cuddly:'💗', Busy:'🔕', Away:'🌙', 'Do not disturb':'⛔' });
+  const STATUS_MODES = Object.freeze({ Available:'🟢', Cuddly:'💗', Busy:'🔕', Away:'🌙', 'Do not disturb':'⛔', 'Looking for cuddles':'🫂', 'Busy roleplaying':'🎭', Approachable:'🌸', 'Feeling mischievous':'😼', 'Quiet company':'🕯️', 'Open to whispers':'💌' });
+  const PET_PERSONAS = Object.freeze({
+    'curious-kitten': {icon:'🐱',name:'Curious Kitten',trait:'Curious · gentle · playful',lines:['*tilts her head inquisitively, ears perking up*','*pads a little closer, tail swishing with curiosity*','*purrs softly and bats at a dangling ribbon*']},
+    'mischievous-fox': {icon:'🦊',name:'Mischievous Fox',trait:'Clever · teasing · adventurous',lines:['*grins and flicks her fluffy tail with mischief*','*sneaks closer with a playful, cunning look*','*chuckles while circling around her friend*']},
+    'loyal-puppy': {icon:'🐶',name:'Loyal Puppy',trait:'Devoted · energetic · affectionate',lines:['*wags her tail excitedly at the familiar voice*','*leans into the offered headpats happily*','*sits nearby with an attentive, cheerful look*']},
+    'sleepy-cat': {icon:'😴',name:'Sleepy Cat',trait:'Calm · cuddly · dreamy',lines:['*curls into a cozy little ball and yawns*','*slow-blinks contentedly while purring*','*stretches lazily before settling down again*']},
+    'shy-bunny': {icon:'🐰',name:'Shy Bunny',trait:'Soft · shy · sweet',lines:['*peeks out shyly, ears trembling a little*','*nuzzles closer after a moment of hesitation*','*wiggles her nose, cheeks turning pink*']},
+    'proud-kitty': {icon:'👑',name:'Proud Kitty',trait:'Confident · elegant · independent',lines:['*raises her chin with a distinctly regal purr*','*flicks her tail and surveys the room proudly*','*accepts a gentle headpat with dignified approval*']}
+  });
   const statusWire = {
     requested: new Map(), responded: new Map(), pending: [], queued: new Set(),
     dispatchTimer: null, bootAccount: 0, lastPublished: 0, packetsSent: 0,
@@ -658,12 +666,12 @@
     return Date.now()-pawOnlinePresence.seenAt<130000&&pawOnlinePresence.ids.has(numeric(member));
   }
   function statusView(member) {
-    if (numeric(member) === me()) return state.settings.shareFriendStatus ? {
+    if (numeric(member) === me()) return (state.settings.shareFriendStatus && (!state.settings.friendStatusExpiresAt || state.settings.friendStatusExpiresAt>Date.now())) ? {
       mode:state.settings.friendStatusMode, text:trim(state.settings.friendStatusText,100)
     } : null;
     if(!pawFriendConfirmedOnline(member))return null;
     const raw=state.profiles[numeric(member)]?.friendStatus;
-    if (!raw || !Object.hasOwn(STATUS_MODES,raw.mode)) return null;
+    if (!raw || !Object.hasOwn(STATUS_MODES,raw.mode) || (Number(raw.expiresAt)>0 && Number(raw.expiresAt)<=Date.now())) return null;
     return {mode:raw.mode,text:trim(raw.text || '',100)};
   }
   function statusLabel(member) {
@@ -676,8 +684,9 @@
   }
   function statusUpdatePayload() {
     return {type:'KCStatus',version:1,action:'update',
-      mode:state.settings.shareFriendStatus ? state.settings.friendStatusMode : '',
-      text:state.settings.shareFriendStatus ? trim(state.settings.friendStatusText,100) : '',
+      mode:statusView(me()) ? state.settings.friendStatusMode : '',
+      text:statusView(me()) ? trim(state.settings.friendStatusText,100) : '',
+      expiresAt:state.settings.friendStatusExpiresAt||0,
       at:Date.now()};
   }
   function sendStatusPacket(member,action='update') {
@@ -703,6 +712,16 @@
     // Never send an old status; create the payload at dispatch time.
     sendStatusPacket(member,'update');
     if (statusWire.pending.length) statusWire.dispatchTimer=setTimeout(drainStatusQueue,750);
+  }
+  function expireFriendStatusIfNeeded(){
+    if(state.myId===me()&&state.settings.shareFriendStatus&&state.settings.friendStatusExpiresAt>0&&state.settings.friendStatusExpiresAt<=Date.now()){
+      state.settings.shareFriendStatus=false;state.settings.friendStatusExpiresAt=0;saveSoon();publishFriendStatus(false);
+      if(state.open&&state.tab==='settings')renderSettings();
+    }
+  }
+  function scheduleStatusExpiry(){
+    const minutes=Number(state.settings.friendStatusMinutes)||0;
+    state.settings.friendStatusExpiresAt=state.settings.shareFriendStatus&&minutes>0?Date.now()+minutes*60000:0;
   }
   function publishFriendStatus(announce=false) {
     if (!me() || state.myId!==me()) return 0;
@@ -751,7 +770,7 @@
     else if (Object.hasOwn(STATUS_MODES,item.mode)) {
       const timestamp=Number(item.at);
       if (p.friendStatus && Number.isFinite(timestamp) && timestamp>0 && timestamp<p.friendStatus.at) return;
-      p.friendStatus={mode:item.mode,text:trim(item.text||'',100),at:Number.isFinite(timestamp)?timestamp:Date.now()};
+      p.friendStatus={mode:item.mode,text:trim(item.text||'',100),at:Number.isFinite(timestamp)?timestamp:Date.now(),expiresAt:Number.isFinite(Number(item.expiresAt))?Number(item.expiresAt):0};
     } else return;
     p.kitty=true;
     state.profiles[member]=p;
@@ -1020,6 +1039,9 @@
     const member=numeric(account);
     const group=kind==='group';
     const conv=String(conversation);
+    // Never archive a private whisper/beep whose author is neither the signed-in
+    // account nor the intended conversation partner. The key is account-scoped.
+    if(!group&&(!numeric(conversation)||![member,numeric(conversation)].includes(numeric(message?.from))))return null;
     if (!member || !['chat','group'].includes(kind) || !conv || !message || typeof message.text!=='string') return null;
     const time=Number(message.time)||Date.now();
     const msgId=trim(message.id,90) || uniqueMessageId();
@@ -1098,7 +1120,10 @@
       request.onsuccess=() => {
         const cursor=request.result;
         if (!cursor || result.length>limit) return;
-        result.push(pawDecodeHistoryRow(cursor.value));
+        const row=cursor.value;
+        if(row?.account===account && row.kind===kind && row.conversation===String(conversation) &&
+           (kind==='group'||[account,numeric(conversation)].includes(numeric(row.from))))
+          result.push(pawDecodeHistoryRow(row));
         if (result.length<=limit) cursor.continue();
       };
       request.onerror=()=>reject(request.error);
@@ -1238,7 +1263,7 @@
       download(`Kittychat-FULL-backup-${account}-${new Date().toISOString().slice(0,10)}.json`,
         'application/json',JSON.stringify(backup,null,2));
       notice(`🐾 Full archive exported (${rows.length} saved messages).`);
-    } catch(err) { historyArchive.error=String(err?.message||err); notice('Archive export failed. Check KittyChat.historyDiagnostics().'); }
+    } catch(err) { historyArchive.error=String(err?.message||err); notice('Could not export your chat archive. Please try again.'); }
   }
   async function eraseArchivedHistory(account,kind=null,conversation=null) {
     try {
@@ -1260,7 +1285,7 @@
         state.historyEpoch++;
       }
       historyArchive.error='';
-    } catch(err){historyArchive.error=String(err?.message||err);notice('Archive deletion failed. Check console.');}
+    } catch(err){historyArchive.error=String(err?.message||err);notice('Could not delete your chat archive. Please try again.');}
   }
 
   const saveSoon = () => {
@@ -1277,10 +1302,12 @@
     for (const g of Object.values(state.groups)) g.messages = (g.messages || []).slice(-MAX_MESSAGES);
     for (const old of Object.values(state.groups).sort((a,b) => (b.updated||0) - (a.updated||0)).slice(MAX_GROUPS)) delete state.groups[old.id];
     if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();
-    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: pawViewportScale.mobile&&pawViewportScale.lastDesktopRect?pawViewportScale.lastDesktopRect:state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
+    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: pawViewportScale.mobile&&pawViewportScale.lastDesktopRect?pawViewportScale.lastDesktopRect:state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), roomMemories:state.roomMemories.slice(-60), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
   }
   function loadForAccount(id) {
     if (state.myId === id) return;
+    if(typeof marvelousRoomImages!=='undefined'){for(const url of marvelousRoomImages.values())URL.revokeObjectURL(url);marvelousRoomImages.clear();}
+    marvelousFocusRuntime.enabled=false;applyMarvelousFocus();
     if (statusWire.dispatchTimer) clearTimeout(statusWire.dispatchTimer);
     statusWire.dispatchTimer=null;statusWire.pending=[];statusWire.queued.clear();
     statusWire.requested.clear();statusWire.responded.clear();statusWire.bootAccount=0;
@@ -1288,7 +1315,7 @@
     bookVaultPrepareAccount(id);
     integrity.bursts.clear();integrity.recovery.clear();integrity.quorums.clear();integrity.keys.clear();
     state.integritySeen=[];
-    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.catchUpWhispersSince=0;state.catchUpGroupsSince=0;state.sharedAlbums=[];state.privateBookPages={};state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.deliveryOutbox=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
+    state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.roomMemories=[];state.roomMemoryDraft={name:'',notes:'',tags:''};state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.catchUpWhispersSince=0;state.catchUpGroupsSince=0;state.sharedAlbums=[];state.privateBookPages={};state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.deliveryOutbox=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
     const loaded = safeRead(dataKey(), {});
     state.integritySeen=(Array.isArray(loaded.integritySeen)?loaded.integritySeen:[]).slice(-INTEGRITY_LOG_LIMIT)
       .filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&x[0].length<180&&Number.isFinite(Number(x[1]))&&Number(x[1])>Date.now()-14*86400000);
@@ -1323,6 +1350,10 @@
     state.roomFavorites=(Array.isArray(loaded.roomFavorites)?loaded.roomFavorites:[]).slice(-70).filter(r=>r && typeof r.Name==='string' && r.Name.length<110 && ['X','M','F'].includes(r.Space));
     state.roomRecent=(Array.isArray(loaded.roomRecent)?loaded.roomRecent:[]).slice(-25).filter(r=>r && typeof r.Name==='string' && ['X','M','F'].includes(r.Space));
     state.roomSort=['most','least','name','favorite'].includes(loaded.roomSort)?loaded.roomSort:'most';
+    state.roomMemories=(Array.isArray(loaded.roomMemories)?loaded.roomMemories:[]).slice(-60).map(m=>{
+      const id=trim(m?.id,50);if(!/^rm_[a-zA-Z0-9_-]{6,48}$/.test(id))return null;
+      return {id,room:trim(m.room,110),notes:trim(m.notes,2000),tags:trim(m.tags,100),created:Number(m.created)||Date.now(),favorite:m.favorite===true,hasImage:m.hasImage===true};
+    }).filter(Boolean);
 
     // Migrate every message that STILL exists in the old local save, before
     // the 90-message UI cache trims it. Missing historical BC server messages
@@ -1369,6 +1400,12 @@
     if (!Object.hasOwn(STATUS_MODES,state.settings.friendStatusMode)) state.settings.friendStatusMode='Available';
     state.settings.friendStatusText=trim(state.settings.friendStatusText || '',100);
     state.settings.shareFriendStatus=state.settings.shareFriendStatus!==false;
+    state.settings.friendStatusMinutes=[0,30,60,240,1440].includes(Number(state.settings.friendStatusMinutes))?Number(state.settings.friendStatusMinutes):0;
+    state.settings.friendStatusExpiresAt=Math.max(0,Number(state.settings.friendStatusExpiresAt)||0);
+    if(!Object.hasOwn(PET_PERSONAS,state.settings.petPersona))state.settings.petPersona='curious-kitten';
+    state.settings.petPersonaShare=state.settings.petPersonaShare!==false;
+    state.settings.petPersonaDescription=trim(state.settings.petPersonaDescription||'',300);
+    delete state.settings.focusPreset; // Retired focus presets: Conversation Focus is the only mode.
     if(!validHour(state.settings.quietStart))state.settings.quietStart='22:00';
     if(!validHour(state.settings.quietEnd))state.settings.quietEnd='08:00';
     if(!['rounded','square','cloud'].includes(state.settings.bubbleShape))state.settings.bubbleShape='rounded';
@@ -1403,7 +1440,7 @@
     // Validate persisted data before ever putting it into the UI.
     for (const [key, chat] of Object.entries(state.chats)) {
       if (!numeric(key) || !chat || !Array.isArray(chat.messages)) { delete state.chats[key]; continue; }
-      chat.id = numeric(key); chat.displayName = trim(chat.displayName || '', 80);chat.replyLater=!!chat.replyLater;chat.requestPending=!!chat.requestPending;chat.requestAccepted=!!chat.requestAccepted;chat.snoozeUntil=Math.max(0,Number(chat.snoozeUntil)||0); chat.messages = chat.messages.slice(-MAX_MESSAGES).filter(m => m && typeof m.text === 'string').map(m => ({
+      chat.id = numeric(key); chat.displayName = trim(chat.displayName || '', 80);chat.replyLater=!!chat.replyLater;chat.requestPending=!!chat.requestPending;chat.requestAccepted=!!chat.requestAccepted;chat.snoozeUntil=Math.max(0,Number(chat.snoozeUntil)||0); chat.messages = chat.messages.slice(-MAX_MESSAGES).filter(m => m && typeof m.text === 'string' && [id,numeric(key)].includes(numeric(m.from))).map(m => ({
         id: trim(m.id, 80), text: trim(m.mode === 'whisper' ? m.text : stripNativeBeepMetadata(m.text), 2000), from: numeric(m.from), time: Number(m.time) || Date.now(),
         mode: m.mode === 'whisper' ? 'whisper' : 'beep', replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions),nativeId:!!m.nativeId,reaction: trim(m.reaction || '', 6) }));
       assignMissingMessageIds(chat.messages);
@@ -2415,6 +2452,68 @@
       .filter(u => /^https:\/\//i.test(u))
       .slice(0, 4);
   }
+
+  // Marvelous Bridge v1: event-driven, local-only, and backward-compatible.
+  // It never authenticates users or exposes private messages to other addons.
+  const marvelousBridge = {api:null,unsubscribe:[],events:[],lastHeld:'',lowCpu:false,safeMode:false,attached:false,lastStatusAt:0};
+  function marvelousBridgeConnect(){
+    const api=window.SubbysPlushies;
+    if(!api||api.apiVersion!==2||!api.ready){
+      if(marvelousBridge.api){
+        for(const off of marvelousBridge.unsubscribe.splice(0))try{off();}catch{}
+        marvelousBridge.api=null;marvelousBridge.attached=false;
+      }
+      return null;
+    }
+    if(marvelousBridge.api===api)return api;
+    for(const off of marvelousBridge.unsubscribe.splice(0))try{off();}catch{}
+    marvelousBridge.api=api;marvelousBridge.attached=true;
+    const capture=(event)=>{
+      if(event?.milestone){
+        marvelousBridge.events.unshift({at:Date.now(),kind:'plushie',message:
+          String(event.plushName||'Plushie').slice(0,80)+' reached '+String(event.milestone).slice(0,40)});
+        marvelousBridge.events.length=Math.min(marvelousBridge.events.length,20);
+        if(state.open&&state.tab==='marvelous'&&marvelousHub.tab==='security')renderMarvelousHub();
+      }
+      if(state.open&&state.profileModal?.useOwn)renderProfileModal();
+    };
+    if(typeof api.on==='function'){
+      marvelousBridge.unsubscribe.push(api.on('relationship',capture));
+      marvelousBridge.unsubscribe.push(api.on('mood',()=>{if(state.open&&state.profileModal?.useOwn)renderProfileModal();}));
+      marvelousBridge.unsubscribe.push(api.on('performance',marvelousBridgeUpdatePerformance));
+      marvelousBridge.unsubscribe.push(api.on('essentials',marvelousBridgeUpdatePerformance));
+    }
+    marvelousBridgeUpdatePerformance();
+    try{api.setExternalFocus?.(marvelousFocusRuntime.enabled&&window.CurrentScreen==='ChatRoom');}catch{}
+    return api;
+  }
+  function marvelousBridgeHeld(){
+    const api=marvelousBridgeConnect();
+    if(!api)return null;
+    try{
+      const held=api.getHeld?.();if(!held?.name)return null;
+      return {name:trim(held.name,80),mood:trim(held.mood?.label||'',40),
+        level:trim(held.relationship?.level||'',40),favorite:held.favorite===true};
+    }catch{return null;}
+  }
+  function marvelousBridgeUpdatePerformance(){
+    const api=marvelousBridge.api;
+    if(!api){marvelousBridge.lowCpu=false;marvelousBridge.safeMode=false;return;}
+    try{
+      const essentials=api.getEssentialsStatus?.()||{};
+      marvelousBridge.safeMode=essentials.safeMode===true;
+      marvelousBridge.lowCpu=marvelousBridge.safeMode||essentials.lowCpu===true||api.getPerformanceMode?.()==='low';
+    }catch{marvelousBridge.lowCpu=false;marvelousBridge.safeMode=false;}
+  }
+  function marvelousBridgeTick(){
+    if(!me())return;
+    marvelousBridgeConnect();
+    // Style class may be cleared by a game screen transition; no setting changes.
+    if(marvelousBridge.api&&marvelousFocusRuntime.enabled&&window.CurrentScreen==='ChatRoom'){
+      if(!document.body?.classList.contains('subbys-marvelous-focus'))try{marvelousBridge.api.setExternalFocus?.(true);}catch{}
+    }
+  }
+
   function ownPawProfilePayload() {
     const p = state.settings;
     return {
@@ -2424,7 +2523,9 @@
       cover: /^https:\/\//i.test(trim(p.pawHero, 500)) ? trim(p.pawHero, 500) : '',
       signature: trim(p.signature || 'Purrs and pawprints ♡', 140),
       friendStatus: p.shareFriendStatus ? statusLabel(me()) : '',
-      plushie:trim(p.pawPlushie,80),badges:trim(p.pawBadges,150).split(',').map(s=>trim(s,24)).filter(Boolean).slice(0,5),profileTheme:['velvet','rose','midnight','lavender'].includes(p.pawProfileTheme)?p.pawProfileTheme:'velvet',guestbookOpen:p.pawGuestbookOpen!==false,
+      petPersona:p.petPersonaShare&&PET_PERSONAS[p.petPersona]?p.petPersona:'',
+      petPersonaDescription:p.petPersonaShare?trim(p.petPersonaDescription||'',300):'',
+      plushie:trim(p.pawPlushie,80),livePlushie:p.shareLivePlushie?marvelousBridgeHeld():null,badges:trim(p.pawBadges,150).split(',').map(s=>trim(s,24)).filter(Boolean).slice(0,5),profileTheme:['velvet','rose','midnight','lavender'].includes(p.pawProfileTheme)?p.pawProfileTheme:'velvet',guestbookOpen:p.pawGuestbookOpen!==false,
       about: trim(p.pawAbout || '', 240),
       likes: trim(p.pawLikes || '', 240),
       dislikes: trim(p.pawDislikes || '', 240),
@@ -2443,12 +2544,13 @@
       name: trim(profile.name || bcName(member), 90),
       avatar: /^https:\/\//i.test(avatar) ? avatar : '',
       cover: /^https:\/\//i.test(cover) ? cover : '',
-      signature: trim(profile.signature || '', 140),
+      signature: trim(profile.signature || '', 140), petPersona:typeof profile.petPersona==='string'&&PET_PERSONAS[profile.petPersona]?profile.petPersona:'',
+      petPersonaDescription:typeof profile.petPersona==='string'&&PET_PERSONAS[profile.petPersona]?trim(profile.petPersonaDescription||'',300):'',
       about: trim(profile.about || '', 240),
       likes: trim(profile.likes || '', 240),
       dislikes: trim(profile.dislikes || '', 240),
       lookingFor: trim(profile.lookingFor || '', 240),
-      plushie:trim(profile.plushie||'',80),badges:Array.isArray(profile.badges)?profile.badges.map(s=>trim(s,24)).filter(Boolean).slice(0,5):[],profileTheme:['velvet','rose','midnight','lavender'].includes(profile.profileTheme)?profile.profileTheme:'velvet',guestbookOpen:profile.guestbookOpen===true,
+      plushie:trim(profile.plushie||'',80),livePlushie:profile.livePlushie&&typeof profile.livePlushie==='object'?{name:trim(profile.livePlushie.name||'',80),mood:trim(profile.livePlushie.mood||'',40),level:trim(profile.livePlushie.level||'',40),favorite:profile.livePlushie.favorite===true}:null,badges:Array.isArray(profile.badges)?profile.badges.map(s=>trim(s,24)).filter(Boolean).slice(0,5):[],profileTheme:['velvet','rose','midnight','lavender'].includes(profile.profileTheme)?profile.profileTheme:'velvet',guestbookOpen:profile.guestbookOpen===true,
       timezone: trim(profile.timezone || '', 60),
       pronouns: trim(profile.pronouns || '', 60),
       gallery: gallery.map(x => trim(x, 500)).filter(x => /^https:\/\//i.test(x)).slice(0, 4),
@@ -2513,7 +2615,9 @@
         <div class="kc-pawhero">${hero ? `<img src="${escapeText(hero)}" alt=""/>` : '<div class="kc-pawhero-fallback"></div>'}<div class="kc-pawhero-overlay">${avatar(modal.member,'hero')}<div class="kc-pawhero-meta"><div class="kc-pawhero-name">${escapeText(p.name || bcName(modal.member))} ♡</div><div class="kc-pawhero-sub"><span class="kc-statusdot ${inRoom(modal.member) ? 'on' : ''}"></span>${inRoom(modal.member) ? ' In your room' : ' Cozy connection'}<span class="kc-memberno">Member #${numeric(modal.member) || me()}</span></div></div></div></div>
         <div class="kc-pawquote">❝ ${escapeText(p.about || p.signature || 'Purrs and pawprints ♡')} ❞</div>
         ${statusMarkup(modal.member,'kc-pawstatus')}
+        ${p.petPersona&&PET_PERSONAS[p.petPersona]?`<div class="paw-profile-detail">${PET_PERSONAS[p.petPersona].icon} Pet personality: <b>${escapeText(PET_PERSONAS[p.petPersona].name)}</b>${p.petPersonaDescription?`<p style="margin:6px 0 0;white-space:pre-wrap">${escapeText(p.petPersonaDescription)}</p>`:''}</div>`:''}
         ${p.plushie?`<div class="paw-profile-detail">🧸 Favorite plushie: <strong>${escapeText(p.plushie)}</strong></div>`:''}
+        ${p.livePlushie?.name?`<div class="paw-profile-detail">🧸 ${modal.useOwn?'Currently holding':'Last shared'}: <b>${escapeText(p.livePlushie.name)}</b> · ${escapeText(p.livePlushie.mood||'')} · ${escapeText(p.livePlushie.level||'')}${p.livePlushie.favorite?' ★':''}</div>`:''}
         ${p.badges?.length?`<div class="paw-profile-badges">${p.badges.map(b=>`<span>✦ ${escapeText(b)}</span>`).join('')}</div>`:''}
         ${!modal.useOwn&&p.guestbookOpen&&myFriends().includes(modal.member)?`<button class="secondary" data-action="leaveguestbook">🐾 Leave a guestbook pawprint</button>`:''}
         ${modal.useOwn&&state.pawGuestbook.length?`<section class="kc-pawsection"><div class="kc-pawsection-title">✉ Guestbook received</div>${state.pawGuestbook.slice(-8).reverse().map(e=>`<p><b>${escapeText(bcName(e.from))}</b>: ${escapeText(e.text)}</p>`).join('')}</section>`:''}
@@ -5699,6 +5803,17 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     host.style.setProperty('pointer-events','none','important');
     const shadow = host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = stylesheet(); shadow.appendChild(style);
+    style.textContent += `
+      .kc-marv-page{padding:clamp(14px,3vw,28px);max-width:850px;margin:auto;overflow:auto;height:100%;box-sizing:border-box;color:inherit}
+      .kc-marv-page h2{margin-top:0}.kc-marv-page h2 small{font-size:.58em;opacity:.75}
+      .kc-marv-page h3{margin:12px 0}.kc-marv-page label{display:block;margin:10px 0;font-size:.95em}
+      .kc-marv-page .field{box-sizing:border-box;display:block;width:100%;max-width:100%;margin-top:5px;color:inherit}
+      .kc-marv-page .kc-marv-compose,.kc-marv-page .kc-marv-item{border:1px solid rgba(242,166,204,.42);border-radius:16px;padding:12px;margin:14px 0;background:rgba(91,32,74,.13)}
+      .kc-marv-actions{display:flex;flex-wrap:wrap;gap:7px}.kc-marv-page button{margin:4px 3px}
+      .kc-marv-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
+      .kc-marv-meta small{opacity:.72}.kc-marv-body{white-space:pre-wrap;overflow-wrap:anywhere}
+      .kc-marv-error{padding:10px;border:1px solid #e78f9c;border-radius:9px;color:#fbe5ec;background:#502b3e}
+    `;
     const wrap = document.createElement('div'); wrap.innerHTML = `
       <button id="kc-fab" aria-label="Open PawLounge" title="Drag me or click to open PawLounge">${asset('kitty-launcher-mailcat.png','','✉️')}<span class="counter hidden" id="kc-counter"></span></button>
       <div id="kc-panel" role="dialog" aria-label="PawLounge messenger">
@@ -5725,6 +5840,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
           <button class="railtab" data-tab="groups" title="Group Dens and invitations" aria-label="Groups"><span class="ic" aria-hidden="true">👥</span><span class="tx">Groups</span></button>
           <button class="railtab" data-tab="pawbooks" title="Collaborative Scrapbooks and memory books" aria-label="PawBooks"><span class="ic" aria-hidden="true">📚</span><span class="tx">PawBooks</span></button>
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
+          <button class="railtab" data-tab="notes" title="Private Paw Notes · send and receive messages"><span class="ic">✉️</span><span class="tx">Paw Notes</span></button>
+          <button class="railtab" data-tab="marvelous" title="Marvelous encrypted cloud and shared features"><span class="ic">☁️</span><span class="tx">Marvelous</span></button>
+          <button class="railtab" data-tab="memories" title="Private room memories"><span class="ic">📔</span><span class="tx">Memories</span></button>
+          <button class="railtab" data-tab="personality" title="Pet personality studio"><span class="ic">🐾</span><span class="tx">Pet Self</span></button>
+          <button class="railtab" data-tab="focus" title="Room focus mode"><span class="ic">🎬</span><span class="tx">Focus</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
           <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
           <button class="railtab" data-tab="moments" title="Paw Moments" aria-label="Paw Moments"><span class="ic"><img class="kc-moments-icon" src="${KC_MOMENTS_ICON_SRC}" alt="" width="32" height="32" draggable="false" decoding="async"/></span><span class="tx">Moments</span></button>
@@ -5735,6 +5855,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         <main class="main" id="kc-body"></main>
       </div><div class="group-create-backdrop hidden" id="kc-group-modal"></div><div class="kc-profile-backdrop hidden" id="kc-profile-modal"></div><button class="kc-resize" id="kc-resize" aria-label="Drag to resize Kittychat" title="Drag to resize Kittychat">${asset('ui-resize.svg','','↘')}</button></div>
       <div id="kc-toast" role="status" aria-live="polite"></div>`;
+    const marvelousFiveStyle=document.createElement('style');marvelousFiveStyle.textContent='\n/* Marvelous Five Features: compact kitten UI cards; parent theme variables stay intact. */\n#kc-panel .rail{overflow-y:auto;min-height:0;scrollbar-width:thin;overscroll-behavior:contain}\n#kc-panel .railtab{flex-shrink:0}\n#kc-panel .marv-feature-page{padding:20px;max-width:960px;margin:0 auto;overflow:auto;height:100%;box-sizing:border-box}\n#kc-panel .marv-feature-page h2{margin:0 0 12px;color:#ffe1f2;font-size:22px}\n#kc-panel .marv-feature-card{border:1px solid #9e6388;border-radius:16px;background:linear-gradient(135deg,#50304a9c,#342238cf);padding:14px;margin:12px 0;max-width:100%;overflow-wrap:anywhere}\n#kc-panel .marv-feature-card label{display:block;margin:8px 0}\n#kc-panel .marv-feature-card .field{width:100%;box-sizing:border-box;max-width:100%}\n#kc-panel .marv-feature-top,#kc-panel .marv-feature-actions,#kc-panel .marv-prompt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}\n#kc-panel .marv-feature-actions{justify-content:flex-start}\n#kc-panel .marv-feature-card p{white-space:pre-wrap}\n#kc-panel .marv-room-thumb{display:block;object-fit:contain;max-width:min(100%,420px);max-height:240px;border-radius:10px;margin:10px 0}\n#kc-panel .marv-image-label{display:inline-block!important;padding:8px 12px;background:#754061;border:1px solid #c67fad;border-radius:9px;cursor:pointer}\n#kc-panel .marv-image-label input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}\n#kc-panel .marv-pet-icon{font-size:48px;text-align:center;margin:16px auto}\n#kc-panel .marv-feature-page .settingrow{display:flex;justify-content:space-between;gap:15px;align-items:center}\n';shadow.appendChild(marvelousFiveStyle);
     shadow.appendChild(wrap);
     document.body.appendChild(host);
     Object.assign(ui, { host, shadow, fab:shadow.getElementById('kc-fab'),
@@ -6564,14 +6685,746 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if (arrow) arrow.textContent = shown ? '›' : '‹';
     }
   }
+  // Marvelous private mailbox v2: verified Bondage Club MemberNumbers, never aliases.
+  // Anonymous Supabase login is a transport credential, NOT proof of BC identity.
+  // Only a trusted BC verifier account can approve an identity; the game ID is not trusted on its own.
+  // Private keys are encrypted with the player's passphrase before localStorage storage.
+  // Crypto: ECDH P-256 + HKDF-SHA256 + AES-256-GCM, authenticated with ECDSA P-256.
+  const MARVELOUS_URL='https://hxarpryfbcxknwmdyoil.supabase.co';
+  const MARVELOUS_PUBLIC_KEY='sb_publishable_ZTj3T89Koj5wO5Rw4E-l6Q_k8gmenVT';
+  // Set to the BC MemberNumber of your private Marvelous verifier account.
+  // This is NOT the player's own MemberNumber. No verifier = fail closed.
+  const MARVELOUS_VERIFIER_BC_MEMBER=264370;
+  let marvelousVerificationPoll=null;
+  const MARVELOUS_SCHEDULE_DISPATCHER_READY=false; // set true ONLY after cron migration 07 was successfully installed
+  const marvelousNotes={owner:0,client:null,user:null,claim:null,keys:null,privateKeys:null,inbox:[],outbox:[],decrypted:new Map(),decrypting:new Set(),view:'inbox',busy:false,error:'',initialized:false,epoch:0,draftTo:'',draftBody:'',ttl:'30d',sendAt:'',unlocked:false};
+  let marvelousSdkLoader=null;
+  let marvelousNextBackgroundSync=0;
+  let marvelousLastUnread=-1;
+  const marvelousTextEncoder=new TextEncoder();
+  const marvelousTextDecoder=new TextDecoder('utf-8',{fatal:true});
+  const marvelousU8=x=>new Uint8Array(x);
+  const marvelousB64=x=>pawBytesToBase64Url(marvelousU8(x));
+  const marvelousUnb64=x=>pawBase64UrlToBytes(x);
+  const marvelousUtf8=x=>marvelousTextEncoder.encode(String(x));
+  function marvelousNotesReset(){
+    marvelousNotes.epoch++;marvelousLastUnread=-1;marvelousNextBackgroundSync=0;
+    Object.assign(marvelousNotes,{owner:0,client:null,user:null,claim:null,keys:null,privateKeys:null,inbox:[],outbox:[],decrypted:new Map(),decrypting:new Set(),view:'inbox',busy:false,error:'',initialized:false,draftTo:'',draftBody:'',ttl:'30d',sendAt:'',unlocked:false});
+  }
+  async function marvelousLoadSdk(){
+    if(window.supabase?.createClient)return window.supabase;
+    if(marvelousSdkLoader)return marvelousSdkLoader;
+    marvelousSdkLoader=(async()=>{
+      let lastError='';
+      for(const url of [
+        'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js',
+        'https://unpkg.com/@supabase/supabase-js@2.118.0/dist/umd/supabase.js'
+      ]){
+        try{
+          await new Promise((resolve,reject)=>{
+            const script=document.createElement('script');script.src=url;script.async=true;
+            script.onload=()=>window.supabase?.createClient?resolve():reject(Error('Supabase SDK unavailable'));
+            script.onerror=()=>reject(Error('Network or CSP prevented Supabase SDK loading'));
+            document.head.appendChild(script);
+          });
+          return window.supabase;
+        }catch(e){lastError=String(e?.message||e);}
+      }
+      throw Error('Cannot load Supabase SDK: '+lastError);
+    })().catch(e=>{marvelousSdkLoader=null;throw e;});
+    return marvelousSdkLoader;
+  }
+  async function marvelousClient(){
+    const id=me();if(!numeric(id))throw Error('Sign into Bondage Club first.');
+    if(marvelousNotes.owner!==id){marvelousNotesReset();marvelousNotes.owner=id;}
+    if(marvelousNotes.client)return marvelousNotes.client;
+    const sdk=await marvelousLoadSdk();
+    if(id!==me())throw Error('BC account changed during mailbox initialization.');
+    marvelousNotes.client=sdk.createClient(MARVELOUS_URL,MARVELOUS_PUBLIC_KEY,{
+      auth:{storageKey:'marvelous-mailbox-local-bc-'+id,persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}
+    });
+    return marvelousNotes.client;
+  }
+  function marvelousCheck(result){if(result.error)throw result.error;return result.data;}
+  function marvelousAssertIdentity(){
+    if(!marvelousNotes.user||!marvelousNotes.claim||!marvelousNotes.claim.verified_at ||
+      numeric(marvelousNotes.claim.claimed_member_number)!==me() || marvelousNotes.owner!==me())
+      throw Error('This BC MemberNumber is not verified for this mailbox. Sending is disabled.');
+  }
+  function marvelousVaultKey(){
+    if(!marvelousNotes.user)throw Error('Please sign into your mailbox first.');
+    return 'marvelous-e2ee-v1-'+me()+'-'+marvelousNotes.user.id;
+  }
+  function marvelousPub(jwk){
+    if(!jwk||jwk.kty!=='EC'||jwk.crv!=='P-256'||!jwk.x||!jwk.y ||
+      !/^[A-Za-z0-9_-]{43}$/.test(jwk.x)||!/^[A-Za-z0-9_-]{43}$/.test(jwk.y))
+      throw Error('Invalid P-256 public key.');
+    return {kty:'EC',crv:'P-256',x:jwk.x,y:jwk.y};
+  }
+  async function marvelousFingerprint(keys){
+    const bytes=await crypto.subtle.digest('SHA-256',marvelousUtf8(JSON.stringify({e:marvelousPub(keys.ecdh_public_jwk),s:marvelousPub(keys.ecdsa_public_jwk)})));
+    return marvelousB64(bytes);
+  }
+  function marvelousTrustKey(id){return 'marvelous-key-pin-v1-'+me()+'-'+numeric(id);}
+  async function marvelousPinKeys(id,keys){
+    const path=marvelousTrustKey(id),fp=await marvelousFingerprint(keys);
+    const previous=localStorage.getItem(path);
+    if(previous&&previous!==fp)throw Error('SECURITY ALERT: Member #'+id+' has changed cryptographic keys. Message blocked. Verify this person through BC before contacting support.');
+    if(!previous)localStorage.setItem(path,fp); // TOFU: first-contact keys require out-of-band confirmation for stronger trust.
+    return fp;
+  }
+  async function marvelousStoreVault(password,ecdh,sign){
+    if(password.length<12)throw Error('Use a passphrase of at least 12 characters.');
+    const secret=JSON.stringify({v:1,ecdh:marvelousB64(await crypto.subtle.exportKey('pkcs8',ecdh.privateKey)),sign:marvelousB64(await crypto.subtle.exportKey('pkcs8',sign.privateKey)),ecdhPublic:marvelousPub(await crypto.subtle.exportKey('jwk',ecdh.publicKey)),signPublic:marvelousPub(await crypto.subtle.exportKey('jwk',sign.publicKey))});
+    const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt']);
+    const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:marvelousUtf8('marvelous-vault:'+marvelousNotes.user.id)},key,marvelousUtf8(secret));
+    localStorage.setItem(marvelousVaultKey(),JSON.stringify({v:1,salt:marvelousB64(salt),iv:marvelousB64(iv),ct:marvelousB64(ct)}));
+    marvelousNotes.privateKeys={ecdh:ecdh.privateKey,sign:sign.privateKey,ecdhPublic:marvelousPub(await crypto.subtle.exportKey('jwk',ecdh.publicKey)),signPublic:marvelousPub(await crypto.subtle.exportKey('jwk',sign.publicKey))};marvelousNotes.unlocked=true;
+  }
+  async function marvelousUnlockVault(password){
+    const record=localStorage.getItem(marvelousVaultKey());
+    if(!record)throw Error('Encrypted keys not found on this device. This mailbox needs the original keys; never silently replace them.');
+    const obj=JSON.parse(record);
+    if(obj?.v!==1)throw Error('Unsupported mailbox key backup.');
+    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:marvelousUnb64(obj.salt),iterations:310000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
+    let vault;
+    try{
+      const raw=await crypto.subtle.decrypt({name:'AES-GCM',iv:marvelousUnb64(obj.iv),additionalData:marvelousUtf8('marvelous-vault:'+marvelousNotes.user.id)},key,marvelousUnb64(obj.ct));
+      vault=JSON.parse(marvelousTextDecoder.decode(raw));
+    }catch{throw Error('Incorrect passphrase or damaged encrypted keys.');}
+    if(vault?.v!==1)throw Error('Unsupported key vault.');
+    const ecdh=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.ecdh),{name:'ECDH',namedCurve:'P-256'},false,['deriveBits']);
+    const sign=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.sign),{name:'ECDSA',namedCurve:'P-256'},false,['sign']);
+    marvelousNotes.privateKeys={ecdh,sign,ecdhPublic:marvelousPub(vault.ecdhPublic),signPublic:marvelousPub(vault.signPublic)};marvelousNotes.unlocked=true;
+  }
+  async function marvelousEnsureCrypto(){
+    if(!window.isSecureContext||!crypto?.subtle)throw Error('Browser Web Crypto is unavailable; secure Paw Notes cannot be used.');
+  }
+  async function marvelousFetch(){
+    const c=await marvelousClient(),bc=me(),epoch=marvelousNotes.epoch;
+    const session=marvelousCheck(await c.auth.getSession());
+    const user=session.session?marvelousCheck(await c.auth.getUser()).user:null;
+    if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account changed during mailbox sync.');
+    if(marvelousNotes.user?.id && user?.id!==marvelousNotes.user.id){marvelousNotes.privateKeys=null;marvelousNotes.unlocked=false;marvelousNotes.decrypted.clear();}
+    marvelousNotes.user=user||null;marvelousNotes.claim=null;marvelousNotes.keys=null;marvelousNotes.inbox=[];marvelousNotes.outbox=[];
+    if(!user)return;
+    marvelousNotes.claim=marvelousCheck(await c.from('marvelous_bc_claims').select('auth_user_id,claimed_member_number,challenge_code,created_at,verified_at').eq('auth_user_id',user.id).maybeSingle());
+    marvelousNotes.keys=marvelousCheck(await c.from('marvelous_secure_keys').select('auth_user_id,bc_member_number,ecdh_public_jwk,ecdsa_public_jwk,accept_notes').eq('auth_user_id',user.id).maybeSingle());
+    if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account switched.');
+    if(marvelousNotes.claim && numeric(marvelousNotes.claim.claimed_member_number)!==bc)
+      throw Error('Mailbox identity mismatch; no messages loaded.');
+    if(!marvelousNotes.claim?.verified_at||!marvelousNotes.keys)return;
+    marvelousNotes.inbox=marvelousCheck(await c.from('marvelous_secure_notes').select('id,sender_uid,recipient_uid,sender_bc_member,recipient_bc_member,envelope,sent_at,read_at').eq('recipient_uid',user.id).order('sent_at',{ascending:false}).limit(50))||[];
+    marvelousNotes.outbox=marvelousCheck(await c.from('marvelous_secure_notes').select('id,sender_uid,recipient_uid,sender_bc_member,recipient_bc_member,envelope,sent_at,read_at').eq('sender_uid',user.id).order('sent_at',{ascending:false}).limit(50))||[];
+    if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account switched.');
+    marvelousUpdateUnreadIndicator();
+  }
+  async function marvelousDirectory(member){
+    if(!numeric(member))throw Error('Enter a numeric Bondage Club MemberNumber.');
+    const c=await marvelousClient();
+    const k=marvelousCheck(await c.from('marvelous_secure_keys').select('auth_user_id,bc_member_number,ecdh_public_jwk,ecdsa_public_jwk,accept_notes').eq('bc_member_number',member).maybeSingle());
+    if(!k)throw Error('Member #'+member+' has no verified Marvelous mailbox.');
+    await marvelousPinKeys(member,k);
+    return k;
+  }
+  function marvelousUUID(){return crypto.randomUUID();}
+  function marvelousCanonicalEnvelope(w){
+    if(w?.v!==1||!/^[0-9a-f-]{36}$/.test(w.id||'')||!numeric(w.from)||!numeric(w.to))throw Error('Malformed signed message.');
+    for(const k of ['r','s'])if(!w[k]||!/^[A-Za-z0-9_-]{16}$/.test(w[k].iv)||!w[k].ct||w[k].ct.length>9000)throw Error('Malformed encrypted payload.');
+    return {v:1,id:w.id,from:String(w.from),to:String(w.to),epk:marvelousPub(w.epk),r:{iv:w.r.iv,ct:w.r.ct},s:{iv:w.s.iv,ct:w.s.ct}};
+  }
+  async function marvelousSharedKey(privateKey,otherPublic,id,label){
+    const other=await crypto.subtle.importKey('jwk',marvelousPub(otherPublic),{name:'ECDH',namedCurve:'P-256'},false,[]);
+    const bits=await crypto.subtle.deriveBits({name:'ECDH',public:other},privateKey,256);
+    const root=await crypto.subtle.importKey('raw',bits,'HKDF',false,['deriveKey']);
+    return crypto.subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt:marvelousUtf8('Marvelous-PawNotes:'+id),info:marvelousUtf8('AES-GCM:'+label)},root,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+  }
+  async function marvelousSeal(key,text,header){
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:marvelousUtf8(header)},key,marvelousUtf8(text));
+    return {iv:marvelousB64(iv),ct:marvelousB64(ciphertext)};
+  }
+  async function marvelousEncrypt(text,to,k){
+    marvelousAssertIdentity();
+    if(!marvelousNotes.privateKeys)throw Error('Unlock the key vault first.');
+    const id=marvelousUUID(),from=me();
+    const ephemeral=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
+    const epk=marvelousPub(await crypto.subtle.exportKey('jwk',ephemeral.publicKey));
+    const ours=marvelousNotes.keys;
+    const rk=await marvelousSharedKey(ephemeral.privateKey,k.ecdh_public_jwk,id,'recipient');
+    const sk=await marvelousSharedKey(ephemeral.privateKey,ours.ecdh_public_jwk,id,'sender');
+    const r=await marvelousSeal(rk,text,'marvelous:'+id+':'+from+':'+to+':recipient');
+    const s=await marvelousSeal(sk,text,'marvelous:'+id+':'+from+':'+to+':sender');
+    const w=marvelousCanonicalEnvelope({v:1,id,from:String(from),to:String(to),epk,r,s});
+    const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},marvelousNotes.privateKeys.sign,marvelousUtf8(JSON.stringify(w)));
+    return {...w,sig:marvelousB64(signature)};
+  }
+  async function marvelousDecrypt(row,inbox){
+    if(!marvelousNotes.privateKeys)return '[Encrypted — unlock your keys to read]';
+    const w=marvelousCanonicalEnvelope(row.envelope),own=me();
+    if(w.id!==row.id || numeric(w.from)!==numeric(row.sender_bc_member)||numeric(w.to)!==numeric(row.recipient_bc_member))
+      throw Error('Signed routing data does not match the database row.');
+    if((inbox ? numeric(w.to) : numeric(w.from))!==own)throw Error('Wrong account.');
+    const otherMember=inbox?numeric(w.from):numeric(w.to);
+    const keyRecord=inbox?await marvelousDirectory(otherMember):marvelousNotes.keys;
+    if(inbox && keyRecord.auth_user_id!==row.sender_uid)throw Error('Sender identity and signature key mismatch.');
+    const pub=await crypto.subtle.importKey('jwk',marvelousPub(keyRecord.ecdsa_public_jwk),{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+    const signatureOK=await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},pub,marvelousUnb64(row.envelope.sig),marvelousUtf8(JSON.stringify(w)));
+    if(!signatureOK)throw Error('Invalid sender signature.');
+    const label=inbox?'recipient':'sender',piece=inbox?w.r:w.s;
+    const aes=await marvelousSharedKey(marvelousNotes.privateKeys.ecdh,w.epk,w.id,label);
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:marvelousUnb64(piece.iv),additionalData:marvelousUtf8('marvelous:'+w.id+':'+w.from+':'+w.to+':'+label)},aes,marvelousUnb64(piece.ct));
+    return marvelousTextDecoder.decode(plain);
+  }
+  function marvelousUpdateUnreadIndicator(){
+    const count=marvelousNotes.inbox.filter(m=>!m.read_at).length;
+    const button=ui.shadow?.querySelector('[data-tab="notes"]');
+    if(button){const label=button.querySelector('.tx');if(label)label.textContent=count?'Paw Notes ('+Math.min(count,99)+')':'Paw Notes';button.title=count?count+' unread encrypted Paw Notes':'Offline Marvelous Paw Notes';}
+    if(marvelousLastUnread>=0&&count>marvelousLastUnread&&state.tab!=='notes'&&state.settings.notifications&&!inPawQuietHours())notice('💌 You have '+count+' unread Paw Note'+(count===1?'':'s')+'.');
+    marvelousLastUnread=count;
+  }
+  function marvelousBackgroundTick(){
+    if(!state.open||!marvelousNotes.initialized||!marvelousNotes.user||!marvelousNotes.claim?.verified_at||marvelousNotes.busy||state.tab==='notes'||me()!==marvelousNotes.owner)return;
+    if(Date.now()<marvelousNextBackgroundSync)return;
+    if(document.hidden)return;
+    marvelousNextBackgroundSync=Date.now()+(marvelousBridge.lowCpu?360000:120000);void marvelousRun(marvelousFetch);
+  }
+  function marvelousUpdate(){if(state.open&&state.tab==='notes')renderMarvelousNotes();marvelousUpdateUnreadIndicator();}
+  async function marvelousRun(task){
+    if(marvelousNotes.busy)return;
+    marvelousNotes.busy=true;marvelousNotes.error='';marvelousUpdate();
+    try{await task();}catch(e){marvelousNotes.error=String(e?.message||e).slice(0,450);console.warn('[Marvelous Secure Paw Notes]',e);}
+    finally{marvelousNotes.busy=false;marvelousUpdate();}
+  }
+  function marvelousEnterTab(){
+    if(marvelousNotes.initialized)return;
+    marvelousNotes.initialized=true;
+    void marvelousRun(async()=>{await marvelousEnsureCrypto();await marvelousFetch();});
+  }
+  function marvelousSafeDate(value){const d=new Date(value);return isNaN(d.valueOf())?'':d.toLocaleString();}
+  function marvelousNoteList(items,inbox){
+    if(!items.length)return '<p class="muted">No secure Paw Notes yet.</p>';
+    return items.map(m=>{
+      const sender=numeric(m.sender_bc_member),recipient=numeric(m.recipient_bc_member);
+      const other=inbox?sender:recipient;
+      const when=escapeText(marvelousSafeDate(m.sent_at));
+      const status=inbox&&!m.read_at?`<button class="secondary" data-action="marv-read" data-note-id="${escapeText(m.id)}">Mark read</button>`:
+        `<span class="muted">${inbox?'Read':m.read_at?'Read by recipient':'Not yet read'}</span>`;
+      const cached=marvelousNotes.decrypted.get(m.id);
+      return `<article class="kc-marv-item"><div class="kc-marv-meta"><b>${inbox?'From':'To'}: BC #${other}</b> <small>${when}</small></div><p class="kc-marv-body" data-marv-plain="${escapeText(m.id)}">${typeof cached==='string'?escapeText(cached):marvelousNotes.privateKeys?'Decrypting…':'🔒 Encrypted — unlock to read'}</p>${status}${inbox?`<button class="secondary" data-action="marv-block" data-bc-id="${sender}">Block #${sender}</button>`:''}</article>`;
+    }).join('');
+  }
+  async function marvelousDecryptVisible(){
+    if(!marvelousNotes.privateKeys||state.tab!=='notes'||!state.open)return;
+    const epoch=marvelousNotes.epoch,notes=marvelousNotes.view==='inbox'?marvelousNotes.inbox:marvelousNotes.outbox,inbox=marvelousNotes.view==='inbox';
+    for(const row of notes){
+      if(epoch!==marvelousNotes.epoch||state.tab!=='notes'||!state.open)return;
+      const el=ui.body?.querySelector('[data-marv-plain="'+row.id+'"]');
+      if(!el||marvelousNotes.decrypted.has(row.id)||marvelousNotes.decrypting.has(row.id))continue;
+      marvelousNotes.decrypting.add(row.id);
+      try{
+        const plaintext=await marvelousDecrypt(row,inbox);
+        if(epoch!==marvelousNotes.epoch)return;
+        marvelousNotes.decrypted.set(row.id,plaintext);
+        if(el.isConnected)el.textContent=plaintext;
+      }catch(e){if(el.isConnected)el.textContent='⛔ Cannot authenticate/decrypt this message: '+String(e?.message||e).slice(0,130);}
+      finally{marvelousNotes.decrypting.delete(row.id);}
+    }
+  }
+  function renderMarvelousNotes(){
+    if(!ui.body)return;
+    if(marvelousNotes.owner&&marvelousNotes.owner!==me())marvelousNotesReset();
+    const x=marvelousNotes,message=x.error?`<p class="kc-marv-error" role="alert">${escapeText(x.error)}</p>`:'';
+    let inside='';
+    if(!x.initialized||x.busy&&!x.user)inside='<p class="muted">Opening Marvelous mailbox…</p>';
+    else if(!x.user)inside='<p>No email needed. Your private mailbox sign-in is saved on this browser.</p><button class="primary" data-action="marv-start">Create my mailbox</button>';
+    else if(!x.claim){
+      inside=`<p>Set up your private mailbox for BC <b>#${me()}</b>. You will confirm ownership with a one-time BC beep.</p>${localStorage.getItem(marvelousVaultKey())?'<p>An encrypted key vault already exists; enter its original passphrase to resume registration safely.</p>':''}
+        <label>Create encryption-key passphrase (12+ characters)<input type="password" class="field" id="kc-marv-pass" autocomplete="new-password" minlength="12"></label>
+        <button class="primary" data-action="marv-register">Set up my private mailbox</button>`;
+    }else if(numeric(x.claim.claimed_member_number)!==me()){
+      inside='<p class="kc-marv-error">Account mismatch. Mailbox locked; do not use this BC account with these credentials.</p>';
+    }else if(!x.keys){
+      inside=`<p>Finish setting up your private mailbox. Saved encryption keys: ${localStorage.getItem(marvelousVaultKey())?'found':'not found'}.</p><label>Passphrase<input class="field" id="kc-marv-pass" type="password" autocomplete="off"></label><button class="primary" data-action="marv-resume">Continue mailbox setup</button>`;
+    }else if(!x.claim.verified_at){
+      inside=`<h3>🔐 BC #${me()} — one-time automatic verification</h3><p>Confirm your account with a one-time beep to PawID. Once verified, you can send and receive private notes without repeating this step each time you sign in.</p>${MARVELOUS_VERIFIER_BC_MEMBER>0?`<p>PawID <b>#${MARVELOUS_VERIFIER_BC_MEMBER}</b> must be online to receive your verification beep.</p><button class="primary" data-action="marv-auto-verify">Send verification beep</button>`:'<p class="kc-marv-error">Verification is not available right now. Please try again later.</p>'}<p class="muted">Your confirmation code: <code>Marvelous verify: ${escapeText(x.claim.challenge_code)}</code></p><button class="secondary" data-action="marv-refresh">Check verification</button><button class="secondary" data-action="marv-backup">Save encrypted key backup</button>`;
+    }else{
+      const inboxUnread=x.inbox.filter(m=>!m.read_at).length;
+      inside=`<p class="muted">✓ Verified BC #${me()} · ${inboxUnread} unread · ciphertext stored for 30 days.</p>
+        ${x.privateKeys?'<p class="muted">🔓 Vault unlocked for this session.</p>':`<label>Unlock encrypted messages with your passphrase<input class="field" type="password" id="kc-marv-pass" autocomplete="off"></label><button class="primary" data-action="marv-unlock">Unlock</button>`}
+        <div class="kc-marv-actions"><button class="secondary" data-action="marv-backup">Save encrypted key backup</button><button class="secondary" data-action="marv-refresh">↻ Refresh</button><button class="secondary" data-action="marv-switch" ${x.view==='inbox'?'disabled':''}>📥 Inbox</button><button class="secondary" data-action="marv-outbox" ${x.view==='outbox'?'disabled':''}>📤 Sent</button></div>
+        ${x.privateKeys?`<section class="kc-marv-compose"><h3>✉️ Leave encrypted Paw Note</h3><label>Recipient's BC member number<input id="kc-marv-to" class="field" inputmode="numeric" placeholder="123456" value="${escapeText(x.draftTo)}"></label><label>Your private message<textarea id="kc-marv-body" class="field" rows="4" maxlength="2000">${escapeText(x.draftBody)}</textarea></label><label>Message expiration<select class="field" id="marv-message-ttl"><option value="30d" ${x.ttl==='30d'?'selected':''}>30 days</option><option value="7d" ${x.ttl==='7d'?'selected':''}>7 days</option><option value="1d" ${x.ttl==='1d'?'selected':''}>1 day</option></select></label><label>Schedule for later (optional; requires trusted scheduler)<input type="datetime-local" class="field" id="marv-send-at" value="${escapeText(x.sendAt||'')}"></label><button class="primary" data-action="marv-send">Encrypt & send</button></section>`:''}
+        <h3>${x.view==='inbox'?'📥 Secure inbox':'📤 Secure sent notes'}</h3>${marvelousNoteList(x.view==='inbox'?x.inbox:x.outbox,x.view==='inbox')}`;
+    }
+    const guide=!x.claim?.verified_at?`<section class="marv-feature-card" aria-label="How PawID verification works">
+      <h3>🐾 How to verify with PawID</h3>
+      <ol><li>Log into the BC character you want to register and create your mailbox here.</li>
+      <li>Find <b>PawID (#264370)</b> in the <b>Subbycat's place</b> chatroom. PawID must be online.</li>
+      <li>Choose <b>Send verification beep</b> in Paw Notes. PawLounge sends your one-time code to PawID automatically.</li>
+      <li>Come back here and use <b>Check verification</b> if needed. When PawID confirms the BC MemberNumber, your mailbox unlocks.</li></ol>
+      <p class="muted">No email or password for PawID is needed. You normally verify just once per mailbox. If PawID is offline, try again when the verifier returns. Never give another player your encryption passphrase.</p>
+    </section>`:'';
+    ui.body.innerHTML=`<div class="kc-marv-page"><h2>💌 Marvelous Paw Notes</h2><p class="muted">Private notes are addressed to verified BC member numbers and encrypted before they leave your browser.</p>${guide}${message}${inside}${x.busy?'<p class="muted">Working…</p>':''}<p class="muted">Keep an encrypted key backup before clearing browser data or switching devices. If you lose your saved keys, old notes may become unreadable. Paw Notes and regular BC whispers are separate. For extra security, compare encryption fingerprints with your friends.</p></div>`;
+    if(x.privateKeys)void marvelousDecryptVisible();
+  }
+  async function marvelousAction(act,element){
+    if(act==='marv-switch'||act==='marv-outbox'){marvelousNotes.view=act==='marv-switch'?'inbox':'outbox';marvelousUpdate();return;}
+    if(act==='marv-start')return marvelousRun(async()=>{
+      await marvelousEnsureCrypto();const c=await marvelousClient(),res=await c.auth.getSession();if(res.error)throw res.error;
+      if(!res.data.session)marvelousCheck(await c.auth.signInAnonymously());
+      await marvelousFetch();
+    });
+    if(act==='marv-refresh')return marvelousRun(marvelousFetch);
+    if(act==='marv-auto-verify')return marvelousRun(async()=>{
+      const target=Number(MARVELOUS_VERIFIER_BC_MEMBER);
+      if(!Number.isSafeInteger(target)||target<=0||target===me())throw Error('Marvelous verifier account is not configured.');
+      if(!marvelousNotes.claim||marvelousNotes.claim.verified_at||numeric(marvelousNotes.claim.claimed_member_number)!==me())
+        throw Error('Register the correct BC character first.');
+      if(typeof window.ServerSend!=='function')throw Error('BC native messaging is not ready.');
+      let claim=marvelousNotes.claim;
+      const created=Date.parse(String(claim.created_at||''));
+      if(!Number.isFinite(created)||Date.now()-created>12*60*1000){
+        const client=await marvelousClient();
+        marvelousCheck(await client.rpc('marvelous_rotate_challenge'));
+        await marvelousFetch();
+        claim=marvelousNotes.claim;
+      }
+      if(!claim||claim.verified_at||numeric(claim.claimed_member_number)!==me()||!/^[0-9a-f]{32}$/.test(claim.challenge_code))
+        throw Error('Invalid or already verified BC challenge.');
+      // BC server supplies the sender MemberNumber to the verifier's native event.
+      // No Supabase privilege is granted just because this send was attempted.
+      window.ServerSend('AccountBeep',{MemberNumber:target,BeepType:'',IsSecret:true,
+        Message:'Marvelous verify: '+claim.challenge_code});
+      notice('Verification beep submitted to BC verifier #'+target+'.');
+      if(marvelousVerificationPoll)clearInterval(marvelousVerificationPoll);
+      const myMember=me();let attempts=0;
+      marvelousVerificationPoll=setInterval(async()=>{
+        if(++attempts>30||me()!==myMember||marvelousNotes.claim?.verified_at){clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;return;}
+        try{await marvelousFetch();if(marvelousNotes.claim?.verified_at){notice('✓ Marvelous BC #'+myMember+' verified automatically!');marvelousUpdate();clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;}}
+        catch(e){console.warn('[Marvelous auto-verification]',e);}
+      },10000);
+    });
+    if(act==='marv-register'){
+      const pass=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
+      if(pass.length<12){marvelousNotes.error='Choose a passphrase at least 12 characters long.';marvelousUpdate();return;}
+      return marvelousRun(async()=>{
+        await marvelousEnsureCrypto();const c=await marvelousClient(),uid=marvelousNotes.user?.id;
+        if(!uid)throw Error('Sign into a mailbox session first.');
+        if(marvelousNotes.claim)throw Error('MemberNumber already claimed; cannot create a second identity here.');
+        if(localStorage.getItem(marvelousVaultKey())){
+          await marvelousUnlockVault(pass);
+        }else{
+          const ecdh=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
+          const sign=await crypto.subtle.generateKey({name:'ECDSA',namedCurve:'P-256'},true,['sign','verify']);
+          await marvelousStoreVault(pass,ecdh,sign);
+        }
+        const ek=marvelousNotes.privateKeys.ecdhPublic;
+        const sk=marvelousNotes.privateKeys.signPublic;
+        marvelousCheck(await c.from('marvelous_bc_claims').insert({auth_user_id:uid,claimed_member_number:me()}));
+        marvelousCheck(await c.from('marvelous_secure_keys').insert({auth_user_id:uid,bc_member_number:me(),ecdh_public_jwk:ek,ecdsa_public_jwk:sk}));
+        await marvelousFetch();
+      });
+    }
+    if(act==='marv-resume'){
+      const pass=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
+      return marvelousRun(async()=>{
+        await marvelousUnlockVault(pass);
+        const c=await marvelousClient();
+        marvelousCheck(await c.from('marvelous_secure_keys').insert({auth_user_id:marvelousNotes.user.id,bc_member_number:me(),ecdh_public_jwk:marvelousNotes.privateKeys.ecdhPublic,ecdsa_public_jwk:marvelousNotes.privateKeys.signPublic}));
+        await marvelousFetch();
+      });
+    }
+    if(act==='marv-backup')return marvelousRun(async()=>{
+      if(!marvelousNotes.user)throw Error('No mailbox session.');
+      const vault=localStorage.getItem(marvelousVaultKey());if(!vault)throw Error('No encrypted vault on this browser.');
+      download('Marvelous-Encrypted-Keys-BC-'+me()+'.json','application/json',JSON.stringify({format:'MarvelousKeyBackup-v1',bc_member:me(),auth_user_id:marvelousNotes.user.id,vault:JSON.parse(vault)},null,2));
+      notice('Encrypted key backup saved. Store it privately; never share your passphrase.');
+    });
+    if(act==='marv-unlock'){
+      const pass=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
+      return marvelousRun(async()=>{await marvelousUnlockVault(pass);marvelousUpdate();});
+    }
+    if(act==='marv-send'){
+      const to=numeric(String(ui.shadow?.getElementById('kc-marv-to')?.value||'').trim());
+      const message=String(ui.shadow?.getElementById('kc-marv-body')?.value||'').trim();
+      marvelousNotes.draftTo=String(to||'');marvelousNotes.draftBody=message;
+      if(!to||to===me()||!message||message.length>2000){marvelousNotes.error='Enter a different BC MemberNumber and a message of 1–2000 characters.';marvelousUpdate();return;}
+      return marvelousRun(async()=>{
+        marvelousAssertIdentity();const c=await marvelousClient(),k=await marvelousDirectory(to);
+        if(!k.accept_notes)throw Error('This member is not accepting Paw Notes.');
+        const w=await marvelousEncrypt(message,to,k);
+        const ttl=marvelousNotes.ttl==='1d'?86400000:marvelousNotes.ttl==='7d'?604800000:2592000000;
+        const when=marvelousNotes.sendAt?Date.parse(marvelousNotes.sendAt):0;
+        if(marvelousNotes.sendAt&&(!Number.isFinite(when)||when<=Date.now()+60000))throw Error('Schedule at least 1 minute in the future.');
+        if(when){
+          if(!MARVELOUS_SCHEDULE_DISPATCHER_READY)throw Error('Scheduled sending is not available right now. You can still send notes immediately.');
+          marvelousCheck(await c.from('marvelous_scheduled_notes').insert({id:w.id,sender_uid:marvelousNotes.user.id,recipient_uid:k.auth_user_id,sender_member:me(),recipient_member:to,envelope:w,deliver_after:new Date(when).toISOString(),expires_at:new Date(when+ttl).toISOString()}));
+        }else{
+          marvelousCheck(await c.from('marvelous_secure_notes').insert({id:w.id,sender_uid:marvelousNotes.user.id,recipient_uid:k.auth_user_id,sender_bc_member:me(),recipient_bc_member:to,envelope:w,expires_at:new Date(Date.now()+ttl).toISOString()}));
+        }
+        marvelousNotes.draftBody='';marvelousNotes.draftTo='';marvelousNotes.sendAt='';marvelousNotes.view='outbox';await marvelousFetch();
+        notice('🔐 Encrypted Paw Note saved for BC #'+to+'.');
+      });
+    }
+    if(act==='marv-read'){
+      const id=String(element?.dataset?.noteId||'');if(!/^[0-9a-f-]{36}$/.test(id))return;
+      return marvelousRun(async()=>{
+        marvelousAssertIdentity();const c=await marvelousClient();
+        marvelousCheck(await c.from('marvelous_secure_notes').update({read_at:new Date().toISOString()}).eq('id',id).eq('recipient_uid',marvelousNotes.user.id));
+        await marvelousFetch();
+      });
+    }
+    if(act==='marv-block'){
+      const bc=numeric(element?.dataset?.bcId);if(!bc)return;
+      return marvelousRun(async()=>{
+        marvelousAssertIdentity();const c=await marvelousClient(),other=await marvelousDirectory(bc);
+        marvelousCheck(await c.from('marvelous_secure_blocks').upsert({blocker_uid:marvelousNotes.user.id,blocked_uid:other.auth_user_id},{onConflict:'blocker_uid,blocked_uid'}));
+        notice('Blocked encrypted notes from BC #'+bc+'.');
+      });
+    }
+  }
+  // Diagnostic excludes keys, passphrases, plaintext, identities' proof codes and tokens.
+  window.MarvelousNotesDiag=()=>({addon:VERSION,bcMember:me(),connected:!!marvelousNotes.client,hasSession:!!marvelousNotes.user,claim:!!marvelousNotes.claim,verified:!!marvelousNotes.claim?.verified_at,unlocked:!!marvelousNotes.privateKeys,inboxCount:marvelousNotes.inbox.length,error:marvelousNotes.error});
+
+  // Marvelous Hub v1: cloud encryption is strictly opt-in and tied to verified BC ID.
+  // NEVER put secret/service role keys here. The account's anonymous Supabase session
+  // is NOT independent proof of the BC MemberNumber.
+  const marvelousHub={busy:false,error:'',rows:[],notifs:[],devices:[],connections:[],groups:[],members:[],cards:[],shared:[],
+    initialized:false,options:{chats:false,memories:false,plushies:false},tab:'cloud',target:'',note:'',signal:'',publicSignal:false,availability:false,guestbook:false,
+    selectedNamespace:'settings',status:'',lookupCard:null,lastSynced:'',password:'',notificationCategory:'all',notificationUnreadOnly:false};
+  const marvelousHubNamespaces={
+    settings:'PawLounge settings',memories:'Room Memories',plushies:'Subby’s Plushies & Essentials (full backup)',
+    chats:'Private chat snapshot (explicit consent)',profiles:'Paw profile',favorites:'Favorites & circles',
+    achievements:'Achievements',keys:'Encrypted key-vault backup'
+  };
+  function marvelousHubReady(){marvelousAssertIdentity();if(!marvelousNotes.user)throw Error('Open Paw Notes and verify your BC account first.');}
+  function marvelousHubRefresh(){if(state.open&&state.tab==='marvelous')renderMarvelousHub();}
+  async function marvelousHubRun(work){if(marvelousHub.busy)return;marvelousHub.busy=true;marvelousHub.error='';marvelousHubRefresh();
+    try{await work();}catch(e){marvelousHub.error=String(e?.message||e).slice(0,350);console.warn('[Marvelous Hub]',e);}
+    finally{marvelousHub.busy=false;marvelousHubRefresh();}}
+  async function marvelousHubOpen(){if(marvelousHub.initialized)return;marvelousHub.initialized=true;
+    await marvelousHubRun(async()=>{await marvelousEnsureCrypto();await marvelousFetch();
+      if(marvelousNotes.claim?.verified_at)await marvelousHubFetch();});}
+  async function marvelousHubFetch(){marvelousHubReady();const c=await marvelousClient(),uid=marvelousNotes.user.id;
+    const queries=[
+      c.from('marvelous_cloud_records').select('namespace,record_key,updated_at').eq('user_id',uid).order('updated_at',{ascending:false}).limit(60),
+      c.from('marvelous_notifications').select('id,category,created_at,read_at').eq('user_id',uid).order('created_at',{ascending:false}).limit(30),
+      c.from('marvelous_devices').select('device_id,label,last_seen').eq('user_id',uid),
+      c.from('marvelous_connections').select('*').or('requester_uid.eq.'+uid+',requested_uid.eq.'+uid).order('created_at',{ascending:false}).limit(25),
+      c.from('marvelous_mail_groups').select('id,title,owner_uid,owner_member').limit(25),
+      c.from('marvelous_mail_group_members').select('group_id,user_id,member_number,accepted_at').limit(60),
+      c.from('marvelous_shared_envelopes').select('id,sender_uid,recipient_uid,sender_member,recipient_member,item_type,collection_id,envelope,created_at').order('created_at',{ascending:false}).limit(30),
+      c.from('marvelous_social_cards').select('*').eq('user_id',uid).maybeSingle(),
+      c.from('marvelous_account_options').select('options').eq('user_id',uid).maybeSingle()
+    ];
+    const results=await Promise.all(queries);results.forEach(marvelousCheck);
+    [marvelousHub.rows,marvelousHub.notifs,marvelousHub.devices,marvelousHub.connections,marvelousHub.groups,marvelousHub.members,marvelousHub.shared]=results.slice(0,7).map(x=>x.data||[]);
+    const options=results[8].data?.options;if(options&&typeof options==='object')marvelousHub.options={chats:!!options.chats,memories:!!options.memories,plushies:!!options.plushies};
+    const card=results[7].data;if(card){marvelousHub.signal=card.signal||'';marvelousHub.publicSignal=!!card.visible;marvelousHub.availability=!!card.available;marvelousHub.guestbook=!!card.allow_guestbook;}
+    marvelousHub.lastSynced=new Date().toLocaleTimeString();}
+  async function marvelousHubPayload(namespace){
+    switch(namespace){
+      case 'settings':return {settings:state.settings};
+      case 'memories':return {memories:state.roomMemories.map(({id,room,notes,tags,created,favorite})=>({id,room,notes,tags,created,favorite}))};
+      case 'profiles':return {profile:state.profiles?.[me()]||{},petPersona:state.settings.petPersona};
+      case 'favorites':return {circles:state.circles,roomFavorites:state.roomFavorites};
+      case 'chats':return {chats:state.chats,groups:state.groups}; // explicit opt-in only
+      case 'plushies':{
+        const api=marvelousBridgeConnect();
+        if(!api||typeof api.getBackupPayload!=='function')throw Error('Update Subby’s Plushies to v3.5.104 before backing up Plushies & Essentials.');
+        const backup=await api.getBackupPayload();
+        const preview=api.previewBackupPayload?.(backup);
+        if(!preview||preview.memberNumber!==me())throw Error('Plushies backup does not match this BC account.');
+        return {format:'SubbysPlushies-Structured-v1',member:me(),backup};
+      }
+      case 'achievements':return {plushieStats:localStorage.getItem('SubbysPlushies:stats:v1')};
+      case 'keys':return {vault:localStorage.getItem(marvelousVaultKey()),fromUid:marvelousNotes.user.id};
+      default:throw Error('Unknown cloud record type');
+    }
+  }
+  async function marvelousHubCipher(namespace,recordKey,payload,password){
+    if(password.length<12)throw Error('Enter a cloud passphrase of at least 12 characters.');
+    const plain=JSON.stringify({v:1,member:me(),namespace,data:payload});
+    if(plain.length>950000)throw Error('This backup exceeds the 950 KB local limit. Export a local file from Plushies instead.');
+    let bytes=marvelousUtf8(plain),compressed=false;
+    if(typeof CompressionStream==='function'&&bytes.length>5000){
+      const stream=new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+      const zipped=new Uint8Array(await new Response(stream).arrayBuffer());
+      if(zipped.length<bytes.length){bytes=zipped;compressed=true;}
+    }
+    const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+    const root=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},root,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+    const aad=marvelousUtf8('Marvelous-Cloud-v1:'+me()+':'+namespace+':'+recordKey);
+    const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:aad},key,bytes);
+    const result={v:'1',salt:marvelousB64(salt),iv:marvelousB64(iv),ct:marvelousB64(ct)};
+    if(compressed)result.zip='gzip';
+    if(JSON.stringify(result).length>252000)throw Error('Encrypted snapshot is larger than the Supabase 256 KB record limit. Please export a local backup instead.');
+    return result;
+  }
+  async function marvelousHubUncipher(namespace,recordKey,vault,password){
+    if(!vault||vault.v!=='1')throw Error('Unrecognized encrypted cloud format.');
+    if(password.length<12)throw Error('Enter your original cloud passphrase.');
+    const root=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:marvelousUnb64(vault.salt),iterations:310000,hash:'SHA-256'},root,{name:'AES-GCM',length:256},false,['decrypt']);
+    const bytes=await crypto.subtle.decrypt({name:'AES-GCM',iv:marvelousUnb64(vault.iv),additionalData:marvelousUtf8('Marvelous-Cloud-v1:'+me()+':'+namespace+':'+recordKey)},key,marvelousUnb64(vault.ct));
+    let decoded=new Uint8Array(bytes);
+    if(vault.zip){
+      if(vault.zip!=='gzip'||typeof DecompressionStream!=='function')throw Error('This compressed backup needs a browser with gzip support.');
+      decoded=new Uint8Array(await new Response(new Blob([decoded]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    }
+    if(decoded.length>1050000)throw Error('Decompressed backup exceeds the 1 MB safety limit.');
+    const result=JSON.parse(marvelousTextDecoder.decode(decoded));
+    if(result.member!==me()||result.namespace!==namespace)throw Error('This encrypted backup belongs to a different account or category.');
+    return result.data;
+  }
+  async function marvelousHubCloudSave(namespace,password,recordKey='current'){marvelousHubReady();
+    if(!/^(current|snapshot-[0-9]{13})$/.test(recordKey))throw Error('Invalid cloud restore point.');
+    if(['chats','memories','plushies'].includes(namespace)&&!marvelousHub.options[namespace])throw Error('Enable this data category under Security > Plugin permissions first.');
+    if(namespace==='chats'&&!window.confirm('Upload a passphrase-encrypted snapshot of your PRIVATE conversation cache? This is optional and does not include all archived history.'))return;
+    const c=await marvelousClient(),encrypted_payload=await marvelousHubCipher(namespace,recordKey,(await marvelousHubPayload(namespace)),password);
+    marvelousCheck(await c.from('marvelous_cloud_records').upsert({user_id:marvelousNotes.user.id,member_number:me(),namespace,record_key:recordKey,encrypted_payload,updated_at:new Date().toISOString()},{onConflict:'user_id,namespace,record_key'}));
+    marvelousHub.status='Encrypted '+namespace+(recordKey==='current'?' backup updated.':' restore point saved.')+' Plushies & Essentials use native export when available; screenshots/IndexedDB archives are not included.';
+    await marvelousHubFetch();
+  }
+  async function marvelousHubCloudRestore(namespace,password,recordKey='current',apply=false){marvelousHubReady();
+    if(!/^(current|snapshot-[0-9]{13})$/.test(recordKey))throw Error('Invalid cloud restore point.');
+    const c=await marvelousClient(),uid=marvelousNotes.user.id;
+    const row=marvelousCheck(await c.from('marvelous_cloud_records').select('encrypted_payload').eq('user_id',uid).eq('namespace',namespace).eq('record_key',recordKey).single());
+    const data=await marvelousHubUncipher(namespace,recordKey,row.encrypted_payload,password);
+    if(apply){
+      if(namespace!=='plushies')throw Error('In-place restore is supported only for Plushies & Essentials.');
+      const api=marvelousBridgeConnect();
+      if(!api||typeof api.restoreBackupPayload!=='function')throw Error('Update Plushies to v3.5.104 to restore from cloud.');
+      if(data?.format!=='SubbysPlushies-Structured-v1'||data.member!==me())throw Error('Not a matching structured Plushies backup.');
+      const preview=api.previewBackupPayload(data.backup);
+      if(preview.memberNumber!==me())throw Error('This snapshot belongs to a different BC account.');
+      const restored=await api.restoreBackupPayload(data.backup);
+      marvelousHub.status=restored.cancelled?'Restore cancelled.':'Plushies & Essentials restored. Progress integrity check: '+(restored.progressVerified?'valid':'invalid (progress not replaced)')+'.';
+      return;
+    }
+    // Restore is SAFE by default: download data, do not silently overwrite running game/plugin state.
+    download('Marvelous-'+namespace+'-'+recordKey+'-BC-'+me()+'-RESTORE.json','application/json',JSON.stringify({format:'MarvelousSnapshot-v1',member:me(),namespace,data},null,2));
+    marvelousHub.status='Decrypted restore exported. No live plugin data was overwritten.';
+  }
+  async function marvelousHubSavePermissions(){marvelousHubReady();const c=await marvelousClient();
+    const uid=marvelousNotes.user.id,member=me();
+    marvelousCheck(await c.from('marvelous_account_options').upsert({user_id:uid,member_number:member,options:marvelousHub.options,updated_at:new Date().toISOString()},{onConflict:'user_id'}));
+    marvelousHub.status='Plugin cloud permissions saved. Each upload still requires an explicit click and passphrase.';await marvelousHubFetch();}
+  async function marvelousHubCardSave(){marvelousHubReady();const c=await marvelousClient();
+    const signal=marvelousHub.signal.slice(0,120),visible=!!marvelousHub.publicSignal;
+    const existing=marvelousCheck(await c.from('marvelous_social_cards').select('user_id').eq('user_id',marvelousNotes.user.id).maybeSingle());
+    const change={signal,available:visible&&!!marvelousHub.availability,visible,allow_guestbook:visible&&!!marvelousHub.guestbook,updated_at:new Date().toISOString()};
+    if(existing)marvelousCheck(await c.from('marvelous_social_cards').update(change).eq('user_id',marvelousNotes.user.id));
+    else marvelousCheck(await c.from('marvelous_social_cards').insert({user_id:marvelousNotes.user.id,member_number:me(),...change}));
+    marvelousHub.status=visible?'Opt-in public status published. Anyone signed into Marvelous can query it.':'Public status hidden.';
+    await marvelousHubFetch();
+  }
+  async function marvelousHubConnect(member){marvelousHubReady();const contact=await marvelousDirectory(member),c=await marvelousClient();
+    marvelousCheck(await c.from('marvelous_connections').insert({requester_uid:marvelousNotes.user.id,requested_uid:contact.auth_user_id,requester_member:me(),requested_member:member}));
+    marvelousHub.status='Private connection invitation sent to BC #'+member+'.';await marvelousHubFetch();
+  }
+  async function marvelousHubShare(member,kind,message,groupId=null){marvelousHubReady();if(!marvelousNotes.privateKeys)throw Error('Unlock your encryption keys in Paw Notes first.');
+    if(!message||message.length>2000)throw Error('Enter a message of 1–2000 characters.');
+    const recipient=await marvelousDirectory(member),c=await marvelousClient();
+    const envelope=await marvelousEncrypt(message,member,recipient);
+    marvelousCheck(await c.from('marvelous_shared_envelopes').insert({id:envelope.id,sender_uid:marvelousNotes.user.id,recipient_uid:recipient.auth_user_id,
+      sender_member:me(),recipient_member:member,item_type:kind,collection_id:groupId,envelope}));
+    marvelousHub.status='Encrypted '+kind+' entry sent to BC #'+member+'.';await marvelousHubFetch();
+  }
+  async function marvelousHubCreateGroup(title){marvelousHubReady();if(!title||title.length>80)throw Error('Give your group a name of up to 80 characters.');
+    const c=await marvelousClient();marvelousCheck(await c.from('marvelous_mail_groups').insert({owner_uid:marvelousNotes.user.id,owner_member:me(),title}));
+    marvelousHub.status='Private group mailbox created.';await marvelousHubFetch();}
+  async function marvelousHubInviteGroup(id,member){marvelousHubReady();const recipient=await marvelousDirectory(member),c=await marvelousClient();
+    marvelousCheck(await c.from('marvelous_mail_group_members').insert({group_id:id,user_id:recipient.auth_user_id,member_number:member,invited_by:marvelousNotes.user.id}));
+    marvelousHub.status='Group invite sent to BC #'+member;await marvelousHubFetch();}
+  async function marvelousHubSendGroup(id,body){marvelousHubReady();const c=await marvelousClient(),uid=marvelousNotes.user.id;
+    const group=marvelousHub.groups.find(g=>g.id===id);if(!group)throw Error('Group was not found.');
+    const peers=marvelousHub.members.filter(m=>m.group_id===id&&m.accepted_at&&m.user_id!==uid);
+    if(group.owner_uid!==uid){if(!marvelousHub.members.some(m=>m.group_id===id&&m.user_id===uid&&m.accepted_at))throw Error('You have not accepted the group invitation.');
+      peers.push({user_id:group.owner_uid,member_number:Number(group.owner_member)});}
+    if(peers.length>12)throw Error('Group mailbox limit: 12 accepted recipients.');
+    if(!peers.length)throw Error('Invite another verified member and wait for acceptance.');
+    for(const peer of peers)await marvelousHubShare(Number(peer.member_number),'group',body,id);
+    marvelousHub.status='Group message encrypted independently for '+peers.length+' recipients.';await marvelousHubFetch();}
+  async function marvelousHubInboxRead(item){
+    const plain=await marvelousDecrypt({id:item.id,sender_uid:item.sender_uid,recipient_uid:item.recipient_uid,
+      sender_bc_member:item.sender_member,recipient_bc_member:item.recipient_member,envelope:item.envelope},item.recipient_uid===marvelousNotes.user.id);
+    window.alert('Marvelous '+item.item_type+' from BC #'+item.sender_member+'\n\n'+plain);
+  }
+  const marvelousHubShortDate=x=>escapeText(marvelousSafeDate(x));
+  function marvelousHubVisibleNotifications(){
+    return marvelousHub.notifs.filter(n=>(marvelousHub.notificationCategory==='all'||n.category===marvelousHub.notificationCategory)&&(!marvelousHub.notificationUnreadOnly||!n.read_at));
+  }
+  function renderMarvelousHub(){if(!ui.body)return;
+    const h=marvelousHub,verified=!!marvelousNotes.user&&!!marvelousNotes.claim?.verified_at&&marvelousNotes.owner===me();
+    const opts=Object.entries(marvelousHubNamespaces).map(([k,n])=>`<option value="${k}" ${h.selectedNamespace===k?'selected':''}>${escapeText(n)}</option>`).join('');
+    const desc='<p class="muted">Cloud sharing is optional. You choose what to save, and private backups are encrypted with your passphrase before uploading. Keep that passphrase somewhere safe.</p>';
+    const nav=`<div class="flex">${[['cloud','☁️ Cloud'],['social','💗 Social'],['shared','📚 Shared'],['security','🔐 Security']].map(([v,n])=>`<button class="${h.tab===v?'primary':'secondary'}" data-action="marvhub-tab" data-value="${v}">${n}</button>`).join('')}</div>`;
+    let inner='';
+    if(!verified)inner=`<p class="kc-marv-error">Verify your BC account in Paw Notes to unlock cloud features. Everything saved on this browser remains available.</p><button class="secondary" data-tab="notes">Open Paw Notes</button>
+      <div class="marv-feature-card"><b>🧸 Local plushie milestones</b>${marvelousBridge.events.length?marvelousBridge.events.slice(0,12).map(e=>`<p>${escapeText(e.message)} · ${marvelousHubShortDate(e.at)}</p>`).join(''):'<p class="muted">No milestones this session.</p>'}</div>`;
+    else if(h.tab==='cloud')inner=`<div class="marv-feature-card"><b>Encrypted cloud snapshots</b>
+      <label>Choose category<select class="field" id="marvhub-ns">${opts}</select></label>
+      <label>Cloud encryption passphrase (12+ characters)<input type="password" class="field" id="marvhub-pass" autocomplete="off" placeholder="Never stored on the server"></label>
+      <div class="flex"><button class="primary" data-action="marvhub-backup">Update latest backup</button><button class="secondary" data-action="marvhub-restore">Export latest</button><button class="secondary" data-action="marvhub-create-point">Create restore point</button></div>
+      <p class="muted">Each restore point is encrypted separately. Your passphrase is needed to export it, and restoring your data always requires your confirmation. Photos and older full chat archives are not included.</p></div>
+      <div class="marv-feature-card"><b>Encrypted restore history (showing up to 60)</b>
+      ${h.rows.length?h.rows.map(r=>`<div class="flex"><span>${escapeText(r.namespace)} · ${escapeText(r.record_key==='current'?'Latest':r.record_key)} · ${marvelousHubShortDate(r.updated_at)}</span><button class="secondary" data-action="marvhub-restore-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Export</button>${r.namespace==='plushies'?`<button class="secondary" data-action="marvhub-apply-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Restore Plushies</button>`:''}${r.record_key!=='current'?`<button class="secondary" data-action="marvhub-delete-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Delete</button>`:''}</div>`).join(''):'<p class="muted">No encrypted backups yet.</p>'}</div>`;
+    else if(h.tab==='social')inner=`<div class="marv-feature-card"><b>Opt-in public Paw Signal & availability</b>
+      <p class="muted">Public means any logged-in Marvelous user can query the status. For private friend-only statuses, continue using PawLounge’s native Paw Signals.</p>
+      <label>Signal<input class="field" id="marvhub-signal" maxlength="120" value="${escapeText(h.signal)}"></label>
+      <label><input type="checkbox" id="marvhub-public" ${h.publicSignal?'checked':''}> Publish this card</label>
+      <label><input type="checkbox" id="marvhub-available" ${h.availability?'checked':''}> Available for company</label>
+      <label><input type="checkbox" id="marvhub-guestbook" ${h.guestbook?'checked':''}> Accept encrypted guestbook entries</label>
+      <button class="primary" data-action="marvhub-card">Save public profile choices</button></div>
+      <div class="marv-feature-card"><b>Verified friend connection</b><p>Connections must be accepted by both people before sharing a scrapbook or plushie bond.</p>
+      <label>BC MemberNumber<input id="marvhub-to" class="field" type="number" min="1" value="${escapeText(h.target)}" placeholder="Member #"></label>
+      <div class="flex"><button class="secondary" data-action="marvhub-lookup">Look up opt-in status</button><button class="secondary" data-action="marvhub-invite">Invite member</button></div>
+      ${h.lookupCard?`<p class="muted">BC #${h.lookupCard.member_number}: ${escapeText(h.lookupCard.signal||'No signal')} · ${h.lookupCard.available?'Available':'Not available'} ${h.lookupCard.signal_expires_at&&Date.parse(h.lookupCard.signal_expires_at)<Date.now()?'(expired)':''}</p>`:''}
+      ${h.connections.map(p=>`<div class="flex"><span>BC #${p.requester_uid===marvelousNotes.user.id?p.requested_member:p.requester_member} · ${p.accepted_at?'Connected':'Pending'}</span>${!p.accepted_at&&p.requested_uid===marvelousNotes.user.id?`<button data-action="marvhub-accept" data-value="${escapeText(p.id)}">Accept</button>`:''}</div>`).join('')}</div>`;
+    else if(h.tab==='shared')inner=`<div class="marv-feature-card"><b>Encrypted guestbook, scrapbook & plushie bond</b>
+      <p class="muted">Guestbooks require the recipient to opt in. Scrapbooks and plushie bonds require a mutual connection. All entries are signed and encrypted for the recipient.</p>
+      <label>Recipient BC #<input class="field" id="marvhub-to" type="number" min="1" value="${escapeText(h.target)}"></label>
+      <label>Entry<textarea class="field" rows="3" maxlength="2000" id="marvhub-text">${escapeText(h.note)}</textarea></label>
+      <div class="flex"><button class="secondary" data-action="marvhub-send" data-value="guestbook">Guestbook</button><button class="secondary" data-action="marvhub-send" data-value="scrapbook">Scrapbook</button><button class="secondary" data-action="marvhub-send" data-value="plushie_bond">Plushie friendship</button></div>
+      <p class="muted">Messages may be visible as ciphertext to the writer and recipient. No auto-recording of room conversations.</p></div>
+      <div class="marv-feature-card"><b>Private encrypted group mailboxes</b><p class="muted">Each recipient gets a separately encrypted copy. Recipients must accept an invitation.</p>
+      <button class="secondary" data-action="marvhub-group-create">Create group</button>
+      ${h.groups.map(g=>`<div class="marv-feature-card"><b>${escapeText(g.title)}</b> · ${escapeText(g.id.slice(0,8))}
+      ${g.owner_uid===marvelousNotes.user.id?`<button class="secondary" data-action="marvhub-group-invite" data-value="${escapeText(g.id)}">Invite member</button>`:''}
+      ${h.members.some(m=>m.group_id===g.id&&m.user_id===marvelousNotes.user.id&&!m.accepted_at)?`<button class="secondary" data-action="marvhub-group-accept" data-value="${escapeText(g.id)}">Accept invitation</button>`:''}
+      <button class="secondary" data-action="marvhub-group-send" data-value="${escapeText(g.id)}">Send group message</button></div>`).join('')}</div>
+      <div class="marv-feature-card"><b>Shared entries (${h.shared.length})</b>
+      ${h.shared.map(x=>`<div class="flex"><span>${escapeText(x.item_type)} · BC #${x.sender_uid===marvelousNotes.user.id?x.recipient_member:x.sender_member} · ${marvelousHubShortDate(x.created_at)}</span><button data-action="marvhub-open" data-value="${escapeText(x.id)}">Read</button></div>`).join('')||'<p class="muted">Nothing shared yet.</p>'}</div>`;
+    else inner=`<div class="marv-feature-card"><b>Device & session security</b><p class="muted">This list shows browsers you have registered. Removing one from the list does not sign it out; use Sign out on that browser when possible.</p>
+      <button class="secondary" data-action="marvhub-device">Register this browser</button><button class="secondary" data-action="marvhub-signout">Sign out this Marvelous session</button>
+      ${h.devices.map(d=>`<p>${escapeText(d.label)} · ${marvelousHubShortDate(d.last_seen)}</p>`).join('')}</div>
+      <div class="marv-feature-card"><b>Unified notifications (${h.notifs.filter(n=>!n.read_at).length} unread in loaded history)</b>
+      <p class="muted">Showing the latest 30 notifications. Filters are private to this browser and do not change delivery.</p>
+      <label>Category<select class="field" id="marvhub-notification-category">${['all','note','invitation','guestbook','scrapbook','plushie','group'].map(c=>`<option value="${c}" ${h.notificationCategory===c?'selected':''}>${c==='all'?'All categories':c}</option>`).join('')}</select></label>
+      <label><input type="checkbox" id="marvhub-notification-unread" ${h.notificationUnreadOnly?'checked':''}> Unread only</label>
+      <button class="secondary" data-action="marvhub-read-visible">Mark displayed unread notifications as read</button>
+      ${marvelousHubVisibleNotifications().map(n=>`<div class="flex"><span>${escapeText(n.category)} · ${marvelousHubShortDate(n.created_at)} ${n.read_at?'✓':''}</span>${!n.read_at?`<button data-action="marvhub-read" data-value="${escapeText(n.id)}">Read</button>`:''}</div>`).join('')||'<p class="muted">No notifications match these filters.</p>'}</div>
+      <div class="marv-feature-card"><b>🧸 Local plushie milestones</b><p class="muted">Plushie milestones appear here while PawLounge is open. They stay on this device.</p>
+        ${marvelousBridge.events.length?marvelousBridge.events.slice(0,12).map(e=>`<p>${escapeText(e.message)} · ${marvelousHubShortDate(e.at)}</p>`).join(''):'<p class="muted">No plushie milestones this session.</p>'}</div>
+      <div class="marv-feature-card"><b>Cloud permissions — all off by default</b><p class="muted">Enable categories before uploading. No continuous background history collection.</p>
+      ${[['memories','Room Memories'],['plushies','Plushie stats'],['chats','Native chat snapshot']].map(([k,v])=>`<label><input type="checkbox" data-marvhub-perm="${k}" ${h.options[k]?'checked':''}> Allow encrypted ${v} backups</label>`).join('')}
+      <button class="secondary" data-action="marvhub-save-perms">Save permissions</button></div>
+      <div class="marv-feature-card"><b>Your data & privacy</b><p class="muted">You can export your encrypted cloud records or remove your saved cloud snapshots here. Full account deletion and lost-key recovery are not available yet.</p>
+      <button class="secondary" data-action="marvhub-export">Export cloud data</button><button class="secondary" data-action="marvhub-clear">Clear my cloud snapshots</button></div>`;
+    ui.body.innerHTML=`<div class="marv-feature-page"><h2>☁️ Marvelous Hub</h2>${desc}${nav}${h.busy?'<p class="muted">Syncing…</p>':''}${h.error?`<p class="kc-marv-error">${escapeText(h.error)}</p>`:''}${h.status?`<p class="muted">${escapeText(h.status)}</p>`:''}<div class="flex"><button class="secondary" data-action="marvhub-refresh">Refresh</button><span class="muted">${escapeText(h.lastSynced)}</span></div>${inner}</div>`;
+  }
+  function marvelousHubAction(act,element){
+    if(act==='marvhub-tab'){marvelousHub.tab=element.dataset.value;renderMarvelousHub();return;}
+    const ns=marvelousHub.selectedNamespace,to=Number(marvelousHub.target),password=ui.shadow?.getElementById('marvhub-pass')?.value||'';
+    const uid=marvelousNotes.user?.id;
+    void marvelousHubRun(async()=>{
+      if(act==='marvhub-refresh'){await marvelousFetch();await marvelousHubFetch();}
+      else if(act==='marvhub-backup')await marvelousHubCloudSave(ns,password);
+      else if(act==='marvhub-create-point')await marvelousHubCloudSave(ns,password,'snapshot-'+Date.now());
+      else if(act==='marvhub-apply-point'){
+        const row=marvelousHub.rows.find(r=>r.namespace==='plushies'&&r.record_key===element.dataset.key);
+        if(!row)throw Error('No Plushies restore point found.');
+        await marvelousHubCloudRestore('plushies',password,row.record_key,true);
+      }
+      else if(act==='marvhub-restore-point'){
+        const row=marvelousHub.rows.find(r=>r.namespace===element.dataset.ns&&r.record_key===element.dataset.key);
+        if(!row)throw Error('Unknown restore point. Refresh your cloud list.');
+        await marvelousHubCloudRestore(row.namespace,password,row.record_key);
+      }
+      else if(act==='marvhub-delete-point'){
+        const row=marvelousHub.rows.find(r=>r.namespace===element.dataset.ns&&r.record_key===element.dataset.key);
+        if(!row||row.record_key==='current'||!/^snapshot-[0-9]{13}$/.test(row.record_key))throw Error('Only optional restore points may be deleted here.');
+        if(!window.confirm('Permanently delete this encrypted restore point? Other backups will remain.'))return;
+        marvelousHubReady();const c=await marvelousClient();
+        marvelousCheck(await c.from('marvelous_cloud_records').delete().eq('user_id',uid).eq('namespace',row.namespace).eq('record_key',row.record_key));
+        marvelousHub.status='Restore point deleted.';await marvelousHubFetch();
+      }
+      else if(act==='marvhub-restore')await marvelousHubCloudRestore(ns,password);
+      else if(act==='marvhub-card')await marvelousHubCardSave();
+      else if(act==='marvhub-save-perms')await marvelousHubSavePermissions();
+      else if(act==='marvhub-lookup'){
+        marvelousHubReady();if(!to)throw Error('Enter a BC MemberNumber.');
+        const c=await marvelousClient();marvelousHub.lookupCard=marvelousCheck(await c.from('marvelous_social_cards').select('member_number,signal,available,signal_expires_at').eq('member_number',to).eq('visible',true).maybeSingle());
+        if(!marvelousHub.lookupCard)marvelousHub.status='No public status shared by that BC member.';
+      }
+      else if(act==='marvhub-invite'){if(!to||to===me())throw Error('Enter a different valid BC MemberNumber.');await marvelousHubConnect(to);}
+      else if(act==='marvhub-accept'){
+        marvelousHubReady();const c=await marvelousClient();marvelousCheck(await c.from('marvelous_connections').update({accepted_at:new Date().toISOString()}).eq('id',element.dataset.value).eq('requested_uid',uid));await marvelousHubFetch();
+      }
+      else if(act==='marvhub-send'){
+        if(!to||to===me())throw Error('Enter the recipient’s BC MemberNumber.');
+        await marvelousHubShare(to,element.dataset.value,marvelousHub.note);marvelousHub.note='';
+      }
+      else if(act==='marvhub-open'){
+        marvelousHubReady();const item=marvelousHub.shared.find(x=>x.id===element.dataset.value);if(item)await marvelousHubInboxRead(item);
+      }
+      else if(act==='marvhub-group-create'){
+        const title=window.prompt('Group mailbox name (1–80 characters):','Paw friends');if(title!==null)await marvelousHubCreateGroup(title.trim());
+      }
+      else if(act==='marvhub-group-invite'){
+        const member=Number(window.prompt('Invite which BC MemberNumber?',''));
+        if(Number.isSafeInteger(member)&&member>0&&member!==me())await marvelousHubInviteGroup(element.dataset.value,member);
+      }
+      else if(act==='marvhub-group-accept'){
+        marvelousHubReady();const c=await marvelousClient();
+        marvelousCheck(await c.from('marvelous_mail_group_members').update({accepted_at:new Date().toISOString()}).eq('group_id',element.dataset.value).eq('user_id',uid));await marvelousHubFetch();
+      }
+      else if(act==='marvhub-group-send'){
+        const body=window.prompt('Encrypted group message (max 2,000 characters):','');
+        if(body!==null&&body.trim())await marvelousHubSendGroup(element.dataset.value,body.slice(0,2000));
+      }
+      else if(act==='marvhub-device'){
+        marvelousHubReady();const c=await marvelousClient(),key='MarvelousDevice:'+me()+':'+uid;
+        let device_id=localStorage.getItem(key);if(!device_id){device_id=crypto.randomUUID();localStorage.setItem(key,device_id);}
+        const label=(navigator.userAgentData?.platform||navigator.platform||'Browser').slice(0,64);
+        if(marvelousHub.devices.some(d=>d.device_id===device_id))marvelousCheck(await c.from('marvelous_devices').update({label,last_seen:new Date().toISOString()}).eq('user_id',uid).eq('device_id',device_id));
+        else marvelousCheck(await c.from('marvelous_devices').insert({user_id:uid,member_number:me(),device_id,label}));
+        await marvelousHubFetch();
+      }
+      else if(act==='marvhub-signout'){
+        if(!window.confirm('Sign out of Marvelous on this browser? A BC verification challenge may be required to regain access.'))return;
+        const c=await marvelousClient();marvelousCheck(await c.auth.signOut({scope:'local'}));marvelousNotesReset();marvelousHub.initialized=false;marvelousHub.status='Signed out of this device. Your encryption vault remains local.';
+      }
+      else if(act==='marvhub-read-visible'){
+        marvelousHubReady();const ids=marvelousHubVisibleNotifications().filter(n=>!n.read_at).map(n=>n.id).slice(0,30);
+        if(!ids.length){marvelousHub.status='No displayed unread notifications.';return;}
+        const c=await marvelousClient();marvelousCheck(await c.from('marvelous_notifications').update({read_at:new Date().toISOString()}).eq('user_id',uid).in('id',ids).is('read_at',null));
+        marvelousHub.status='Marked '+ids.length+' loaded notification(s) as read.';await marvelousHubFetch();
+      }
+      else if(act==='marvhub-read'){
+        marvelousHubReady();const c=await marvelousClient();marvelousCheck(await c.from('marvelous_notifications').update({read_at:new Date().toISOString()}).eq('id',element.dataset.value).eq('user_id',uid));await marvelousHubFetch();
+      }
+      else if(act==='marvhub-export'){
+        marvelousHubReady();const c=await marvelousClient();
+        const [cloud,options,devices,notifs,shared]=await Promise.all([
+          c.from('marvelous_cloud_records').select('*').eq('user_id',uid),c.from('marvelous_account_options').select('*').eq('user_id',uid),
+          c.from('marvelous_devices').select('*').eq('user_id',uid),c.from('marvelous_notifications').select('*').eq('user_id',uid),
+          c.from('marvelous_shared_envelopes').select('*').or('sender_uid.eq.'+uid+',recipient_uid.eq.'+uid)]);
+        [cloud,options,devices,notifs,shared].forEach(marvelousCheck);
+        download('Marvelous-Cloud-BC-'+me()+'-export.json','application/json',JSON.stringify({format:'MarvelousCloudExport-v1',member:me(),cloud:cloud.data,options:options.data,devices:devices.data,notifications:notifs.data,shared:shared.data},null,2));
+      }
+      else if(act==='marvhub-clear'){
+        if(!window.confirm('Delete ONLY your encrypted cloud snapshots? This will NOT delete Paw Notes, Supabase Auth identity, other players’ copies, or local files.'))return;
+        marvelousHubReady();const c=await marvelousClient();marvelousCheck(await c.from('marvelous_cloud_records').delete().eq('user_id',uid));await marvelousHubFetch();
+      }
+    });
+  }
+  window.MarvelousHubDiag=()=>({version:VERSION,owner:me(),verified:!!marvelousNotes.claim?.verified_at,restorePoints:marvelousHub.rows.filter(r=>r.record_key!=='current').length,loaded:marvelousHub.initialized,
+    cloudRecords:marvelousHub.rows.length,notifications:marvelousHub.notifs.length,error:marvelousHub.error});
+
   function render() {
     if (!ui.body) return;
     if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
-    setTheme();
+    setTheme();marvelousUpdateUnreadIndicator();
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
     ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='groups'));
-    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles');
+    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles' || state.tab==='notes' || state.tab==='marvelous' || state.tab==='memories' || state.tab==='personality' || state.tab==='focus');
     if (state.tab === 'chats' || state.tab === 'groups') {
       if (state.tab==='chats') {
         ensureDefaultSelection();
@@ -6596,6 +7449,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (state.tab === 'moments') renderMoments();
     else if (state.tab === 'pawbooks') renderPawBooks();
     else if (state.tab === 'catchup') renderCatchUp();
+    else if (state.tab === 'notes') {renderMarvelousNotes();marvelousEnterTab();}
+    else if (state.tab === 'marvelous') {renderMarvelousHub();void marvelousHubOpen();}
+    else if (state.tab === 'memories') renderRoomMemories();
+    else if (state.tab === 'personality') renderPetPersonality();
+    else if (state.tab === 'focus') renderFocusMode();
     else if (state.tab === 'circles') renderCircles();
     else renderSettings();
     ui.panel?.classList.toggle('left-collapsed', !!state.leftCollapsed);
@@ -8126,7 +8984,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       // Only overwrite settings after explicit choice: preserve current config by default.
       if(data.settings&&window.confirm('Also restore saved appearance, status and profile settings?'))state.settings={...DEFAULT_SETTINGS,...data.settings};
       saveNow(true);state.historySelection='';state.historyEpoch++;render();notice(`✓ Imported ${rows.length} archive records. Existing messages preserved.`);
-    }catch(e){console.warn('[PawLounge] Import failed',e);notice('Import failed. Check the password, archive format, and console.');}
+    }catch(e){console.warn('[PawLounge] Import failed',e);notice('Import failed. Check your password and backup file, then try again.');}
   }
 
   function renderMoments() {
@@ -8244,7 +9102,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const favored=new Set(state.roomFavorites.map(r=>`${r.Space}:${r.Name.toUpperCase()}`));
     const rooms=roomSorted(state.rooms);
     const note = state.roomLoading ? '🐾 Searching X, M and F spaces...' :
-      state.roomError || (state.roomSearched ? `${total} public room${total === 1 ? '' : 's'} found across X, M and F.` : 'Press Search to explore rooms across all spaces.');
+      state.roomError || (state.roomSearched ? `${total} public room${total === 1 ? '' : 's'}` : 'Press Search to explore rooms across all spaces.');
     ui.body.innerHTML = `<div class="screen"><div class="sectiontitle">🏡 Kitty Room Explorer</div><p class="muted">Search public BC rooms across X, M and F automatically. Entering a room requires confirmation.</p>
       <div class="flex"><input class="field" style="flex:1;min-width:120px" id="kc-roomquery" placeholder="Room name..." value="${escapeText(state.roomSearch)}"/><select class="mode" id="kc-roomsort" aria-label="Sort rooms"><option value="most" ${state.roomSort==='most'?'selected':''}>Most users ↓</option><option value="least" ${state.roomSort==='least'?'selected':''}>Least users ↑</option><option value="name" ${state.roomSort==='name'?'selected':''}>Name A–Z</option><option value="favorite" ${state.roomSort==='favorite'?'selected':''}>Favorites first</option></select><button class="primary" data-action="searchrooms" ${state.roomLoading ? 'disabled' : ''}>${state.roomLoading ? 'Searching...' : 'Search'}</button></div>
       <p class="muted" role="status" style="margin:12px 0 0">${escapeText(note)}</p>
@@ -8317,6 +9175,158 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       }
     }
   }
+  // Marvelous Five Features: room journals are local, never auto-uploaded or scraped.
+  // Screenshots are saved ONLY when a player explicitly attaches one.
+  const marvelousRoomImages=new Map();
+  let marvelousRoomDbPromise=null;
+  const marvelousRoomDb=()=>{
+    if(marvelousRoomDbPromise)return marvelousRoomDbPromise;
+    marvelousRoomDbPromise=new Promise((resolve,reject)=>{
+      if(!window.indexedDB){reject(Error('Browser has no IndexedDB'));return;}
+      const req=indexedDB.open('MarvelousRoomMemoriesV1',1);
+      req.onupgradeneeded=()=>req.result.createObjectStore('captures');
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>reject(req.error||Error('Room images unavailable'));
+    }).catch(e=>{marvelousRoomDbPromise=null;throw e;});
+    return marvelousRoomDbPromise;
+  };
+  async function marvelousImageStore(action,key,blob){
+    const db=await marvelousRoomDb();return new Promise((resolve,reject)=>{
+      const tx=db.transaction('captures',action==='read'?'readonly':'readwrite');
+      const s=tx.objectStore('captures');const req=action==='write'?s.put(blob,key):action==='delete'?s.delete(key):s.get(key);
+      req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+    });
+  }
+  const marvelousRoomImageKey=(id)=>`${state.myId}:${id}`;
+  async function marvelousShowImage(id){
+    try{
+      if(!marvelousRoomImages.has(id)){
+        const blob=await marvelousImageStore('read',marvelousRoomImageKey(id));
+        if(!blob||!blob.type?.startsWith('image/'))return;
+        marvelousRoomImages.set(id,URL.createObjectURL(blob));
+      }
+      const img=ui.shadow?.querySelector(`[data-marv-memory-img="${id}"]`);
+      if(img)img.src=marvelousRoomImages.get(id);
+    }catch(e){console.warn('[Marvelous Room Memories] Could not read screenshot',e);}
+  }
+  async function marvelousAttachRoomImage(id,file){
+    if(!file)return;
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024){notice('Select a PNG, JPEG or WebP image smaller than 2 MB.');return;}
+    const memory=state.roomMemories.find(m=>m.id===id);
+    if(!memory)return;
+    try{
+      await marvelousImageStore('write',marvelousRoomImageKey(id),file);
+      if(marvelousRoomImages.has(id)){URL.revokeObjectURL(marvelousRoomImages.get(id));marvelousRoomImages.delete(id);}
+      memory.hasImage=true;saveSoon();renderRoomMemories();notice('Screenshot kept privately in this browser.');
+    }catch(e){notice('Screenshot could not be saved: '+String(e?.message||e).slice(0,80));}
+  }
+  const marvelousRoomMemoryFilters={query:'',favoritesOnly:false};
+  function renderRoomMemories(){
+    if(!ui.body)return;
+    const d=state.roomMemoryDraft||{name:'',notes:'',tags:''};
+    const current=trim(window.ChatRoomData?.Name||'',110);
+    const q=String(marvelousRoomMemoryFilters.query||'').trim().toLocaleLowerCase();
+    const ordered=state.roomMemories.filter(m=>(!marvelousRoomMemoryFilters.favoritesOnly||m.favorite)&&(!q||[m.room,m.notes,m.tags].some(v=>String(v||'').toLocaleLowerCase().includes(q)))).sort((a,b)=>Number(b.favorite)-Number(a.favorite)||b.created-a.created);
+    ui.body.innerHTML=`<div class="marv-feature-page">
+      <h2>📔 Room Memories <small>Private journal · local</small></h2>
+      <p class="muted">Save moments yourself. No room messages, member names or screenshots are automatically collected or uploaded to Marvelous.</p>
+      <div class="marv-feature-card">
+       <label>Room name<input class="field" id="marv-memory-room" maxlength="110" placeholder="${escapeText(current||'Room name')}" value="${escapeText(d.name)}"></label>
+       <label>Your private memory<textarea class="field" id="marv-memory-note" maxlength="2000" rows="3" placeholder="What made this moment memorable?">${escapeText(d.notes)}</textarea></label>
+       <label>Optional tags<input class="field" id="marv-memory-tags" maxlength="100" placeholder="cuddles, friends" value="${escapeText(d.tags)}"></label>
+       <button class="primary" data-action="marv-feature-add-memory">♡ Keep this memory</button>
+      </div><div class="marv-feature-card"><b>Find a memory</b>
+      <label>Search room, note or tag<input class="field" id="marv-memory-search" maxlength="120" placeholder="Search private memories" value="${escapeText(marvelousRoomMemoryFilters.query)}"></label>
+      <label><input type="checkbox" id="marv-memory-favorites" ${marvelousRoomMemoryFilters.favoritesOnly?'checked':''}> Favorites only</label>
+      <p class="muted">${ordered.length} match(es) from ${state.roomMemories.length} local memories.</p></div>
+      <div class="smalltitle">Saved memories (${state.roomMemories.length}/60)</div>
+      ${!ordered.length?'<p class="muted">Your journal is empty. Add the first memory above.</p>':ordered.map(m=>`<div class="marv-feature-card" data-mem-id="${m.id}"><div class="marv-feature-top"><b>${m.favorite?'⭐ ':''}${escapeText(m.room||'Unnamed room')}</b><span class="muted">${new Date(m.created).toLocaleDateString()}</span></div><p>${escapeText(m.notes)}</p>${m.tags?`<p class="muted">🏷 ${escapeText(m.tags)}</p>`:''}${m.hasImage?`<img class="marv-room-thumb" data-marv-memory-img="${m.id}" alt="Room memory screenshot" />`:''}
+       <div class="marv-feature-actions"><button class="secondary" data-action="marv-feature-favorite-memory" data-id="${m.id}">${m.favorite?'★ Unfavorite':'☆ Favorite'}</button><label class="marv-image-label">📷 Attach screenshot<input type="file" data-memory-file="${m.id}" accept="image/png,image/jpeg,image/webp"></label><button class="secondary" data-action="marv-feature-delete-memory" data-id="${m.id}">Delete</button></div></div>`).join('')}</div>`;
+    for(const m of ordered)if(m.hasImage)void marvelousShowImage(m.id);
+  }
+  const marvelousPetPrompt=(id,index)=>PET_PERSONAS[id]?.lines?.[index]||'';
+  function renderPetPersonality(){
+    if(!ui.body)return;
+    const p=state.settings;
+    const persona=PET_PERSONAS[p.petPersona]||PET_PERSONAS['curious-kitten'];
+    ui.body.innerHTML=`<div class="marv-feature-page"><h2>🐾 Pet Personality Studio</h2><p class="muted">A roleplay identity, not a restraint or BC pose override. Only sharing your Paw Profile shows this badge to friends.</p>
+      <div class="marv-feature-card"><label>Choose your personality<select class="field" id="marv-persona-choice">${Object.entries(PET_PERSONAS).map(([id,v])=>`<option value="${id}" ${id===p.petPersona?'selected':''}>${v.icon} ${v.name}</option>`).join('')}</select></label>
+        <div class="marv-pet-icon">${persona.icon}</div><h3>${persona.name}</h3><p class="muted">${persona.trait}</p>
+        <label>My custom pet description<textarea class="field" data-setting="petPersonaDescription" maxlength="300" rows="4" placeholder="Describe your pet personality in your own words…">${escapeText(p.petPersonaDescription||'')}</textarea></label>
+        <p class="muted">Up to 300 characters. Saved on this device, and included when you choose to share your Paw Profile.</p>
+        <label class="settingrow"><span>Include my pet badge and description when I share a Paw Profile</span><input type="checkbox" id="marv-persona-share" ${p.petPersonaShare?'checked':''}/></label>
+      </div><div class="smalltitle">Themed roleplay expressions</div><p class="muted">Choose a line to copy. Nothing is sent to the chatroom automatically.</p>
+      ${persona.lines.map((line,i)=>`<div class="marv-feature-card marv-prompt"><span>${escapeText(line)}</span><button class="secondary" data-action="marv-feature-copy-pet" data-index="${i}">Copy</button></div>`).join('')}</div>`;
+  }
+  // Focus Mode is intentionally opt-in and scoped to DOM overlays.
+  // It never hides MainCanvas or overrides BC rendering functions.
+  const marvelousFocusRuntime={enabled:false,style:null};
+  function marvelousFocusCss(){
+    if(marvelousFocusRuntime.style?.isConnected)return;
+    const style=document.createElement('style');style.id='marvelous-pawlounge-focus-style';
+    style.textContent=`
+      body.marv-focus-conversation #ChatRoomMenu {opacity:0!important;pointer-events:none!important}
+    `;document.head?.appendChild(style);marvelousFocusRuntime.style=style;
+  }
+  function applyMarvelousFocus(){
+    marvelousFocusCss();
+    const active=marvelousFocusRuntime.enabled&&window.CurrentScreen==='ChatRoom';
+    document.body?.classList.remove('marv-focus-characters','marv-focus-conversation','marv-focus-cinematic');
+    if(active)document.body?.classList.add('marv-focus-conversation');
+    try{marvelousBridgeConnect()?.setExternalFocus?.(active);}catch{}
+  }
+  function toggleMarvelousFocus(enable){
+    marvelousFocusRuntime.enabled=enable===undefined?!marvelousFocusRuntime.enabled:!!enable;
+    applyMarvelousFocus();
+    if(state.open&&state.tab==='focus')renderFocusMode();
+    return marvelousFocusRuntime.enabled;
+  }
+  function renderFocusMode(){
+    if(!ui.body)return;applyMarvelousFocus();
+    const enabled=marvelousFocusRuntime.enabled;
+    ui.body.innerHTML=`<div class="marv-feature-page"><h2>🎬 Conversation Focus</h2>
+      <p class="muted">Keep the conversation in view by hiding compatible chatroom menu controls. Your character, clothing, and chat messages stay unchanged.</p>
+      <div class="marv-feature-card">
+        <button class="${enabled?'secondary':'primary'}" data-action="marv-feature-toggle-focus">${enabled?'Disable Focus Mode':'Enable Focus Mode'}</button>
+        <p class="muted">Shortcut: <b>Alt + Shift + F</b>. Focus applies only in chatrooms; some BC canvas controls may remain visible.</p>
+      </div></div>`;
+  }
+  function marvelousFeatureAction(action,el){
+    if(action==='marv-feature-add-memory'){
+      const d=state.roomMemoryDraft;
+      const room=trim(d.name||window.ChatRoomData?.Name||'',110),notes=trim(d.notes,2000),tags=trim(d.tags,100);
+      if(!room||!notes){notice('Enter a room name and a memory first.');return;}
+      const id='rm_'+(crypto.randomUUID?.().replaceAll('-','')||Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
+      state.roomMemories.push({id,room,notes,tags,created:Date.now(),favorite:false,hasImage:false});
+      state.roomMemories=state.roomMemories.slice(-60);state.roomMemoryDraft={name:'',notes:'',tags:''};saveSoon();renderRoomMemories();notice('Saved privately to your local journal.');
+    }else if(action==='marv-feature-favorite-memory'){
+      const m=state.roomMemories.find(x=>x.id===el.dataset.id);if(m){m.favorite=!m.favorite;saveSoon();renderRoomMemories();}
+    }else if(action==='marv-feature-delete-memory'){
+      const id=el.dataset.id;if(!window.confirm('Delete this private room memory and its screenshot?'))return;
+      state.roomMemories=state.roomMemories.filter(x=>x.id!==id);saveSoon();
+      if(marvelousRoomImages.has(id)){URL.revokeObjectURL(marvelousRoomImages.get(id));marvelousRoomImages.delete(id);}
+      void marvelousImageStore('delete',marvelousRoomImageKey(id)).catch(()=>{});renderRoomMemories();
+    }else if(action==='marv-feature-copy-pet'){
+      const line=marvelousPetPrompt(state.settings.petPersona,Number(el.dataset.index));
+      if(!line)return;
+      if(window.navigator.clipboard?.writeText){void window.navigator.clipboard.writeText(line).then(()=>notice('Copied roleplay expression.'),()=>window.prompt('Copy this expression:',line));}
+      else window.prompt('Copy this expression:',line);
+    }else if(action==='marv-feature-toggle-focus'){
+      toggleMarvelousFocus();notice(marvelousFocusRuntime.enabled?'Focus Mode enabled (Alt+Shift+F to exit).':'Focus Mode disabled.');
+    }
+  }
+  document.addEventListener('keydown',e=>{
+    if(e.altKey&&e.shiftKey&&!e.ctrlKey&&!e.metaKey&&e.code==='KeyF'&&!e.repeat&&!e.target?.matches?.('input,textarea,select,[contenteditable]')){
+      e.preventDefault();toggleMarvelousFocus();
+    }
+  },true);
+  // Reapply only on screen transitions. No frequent DOM mutation observer.
+  let marvelousLastFocusScreen='';
+  function marvelousFocusTick(){
+    if(!marvelousFocusRuntime.enabled)return;
+    const screen=String(window.CurrentScreen||'');
+    if(screen!==marvelousLastFocusScreen){marvelousLastFocusScreen=screen;applyMarvelousFocus();}
+  }
   function renderSettings() {
     const p = state.settings;
     const control = (name, label) => `<div class="settingrow"><label for="kc-${name}">${label}</label><input type="checkbox" id="kc-${name}" data-setting="${name}" ${p[name] ? 'checked':''}/></div>`;
@@ -8338,14 +9348,16 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <p class="muted">Show a short status to your BC friends who use PawLounge. Your full Paw Profile stays separate.</p>
       <label>Status preset<select class="field" data-setting="friendStatusMode">${Object.keys(STATUS_MODES).map(mode=>`<option value="${escapeText(mode)}" ${p.friendStatusMode===mode?'selected':''}>${STATUS_MODES[mode]} ${escapeText(mode)}</option>`).join('')}</select></label>
       <label>Custom status message<input class="field" data-setting="friendStatusText" value="${escapeText(p.friendStatusText)}" placeholder="Cuddles welcome ♡" maxlength="100"/></label>
+      <label>Status expires<select class="field" id="kc-status-duration" data-setting="friendStatusMinutes">${[[0,'Never'],[30,'After 30 minutes'],[60,'After 1 hour'],[240,'After 4 hours'],[1440,'After 24 hours']].map(([n,label])=>`<option value="${n}" ${Number(p.friendStatusMinutes)===n?'selected':''}>${label}</option>`).join('')}</select></label>
       <div class="settingrow"><label for="kc-shareFriendStatus">Automatically share status with PawLounge friends</label><input type="checkbox" id="kc-shareFriendStatus" data-setting="shareFriendStatus" ${p.shareFriendStatus?'checked':''}/></div>
       <button class="primary kc-publish-status" data-action="sharefriendstatus">🐾 Save &amp; Share Status</button>
       <div class="kc-status-example" role="status">Your status: ${p.shareFriendStatus?escapeText(statusLabel(me())):'Hidden from friends'}</div>
     </section>
-    <div class="smalltitle">🐾 Paw Profile</div><label>Avatar HTTPS image URL<input class="field" data-setting="avatar" value="${escapeText(p.avatar)}" placeholder="https://.../avatar.png" maxlength="500"/></label><label>Banner / hero HTTPS image URL<input class="field" data-setting="pawHero" value="${escapeText(p.pawHero)}" placeholder="https://.../hero.png" maxlength="500"/></label><label>Status / signature<input class="field" data-setting="signature" value="${escapeText(p.signature)}" maxlength="140"/></label><label>About me<input class="field" data-setting="pawAbout" value="${escapeText(p.pawAbout)}" maxlength="240"/></label><label>Likes<input class="field" data-setting="pawLikes" value="${escapeText(p.pawLikes)}" maxlength="240"/></label><label>Dislikes<input class="field" data-setting="pawDislikes" value="${escapeText(p.pawDislikes)}" maxlength="240"/></label><label>Looking for<input class="field" data-setting="pawLookingFor" value="${escapeText(p.pawLookingFor)}" maxlength="240"/></label><div class="flex" style="gap:10px"><label style="flex:1">Timezone<input class="field" data-setting="pawTimezone" value="${escapeText(p.pawTimezone)}" maxlength="60"/></label><label style="flex:1">Pronouns<input class="field" data-setting="pawPronouns" value="${escapeText(p.pawPronouns)}" maxlength="60"/></label></div><div class="smalltitle" style="margin-top:12px">🖼 Gallery (up to 4 HTTPS image URLs)</div><label>Gallery image 1<input class="field" data-setting="pawGallery1" value="${escapeText(p.pawGallery1)}" maxlength="500"/></label><label>Gallery image 2<input class="field" data-setting="pawGallery2" value="${escapeText(p.pawGallery2)}" maxlength="500"/></label><label>Gallery image 3<input class="field" data-setting="pawGallery3" value="${escapeText(p.pawGallery3)}" maxlength="500"/></label><label>Gallery image 4<input class="field" data-setting="pawGallery4" value="${escapeText(p.pawGallery4)}" maxlength="500"/></label>
+    <div class="flex"><button class="secondary" data-tab="personality">🐾 Open Pet Personality Studio</button><button class="secondary" data-tab="memories">📔 Room Memories</button><button class="secondary" data-tab="focus">🎬 Room Focus</button></div><div class="smalltitle">🐾 Paw Profile</div><label>Avatar HTTPS image URL<input class="field" data-setting="avatar" value="${escapeText(p.avatar)}" placeholder="https://.../avatar.png" maxlength="500"/></label><label>Banner / hero HTTPS image URL<input class="field" data-setting="pawHero" value="${escapeText(p.pawHero)}" placeholder="https://.../hero.png" maxlength="500"/></label><label>Status / signature<input class="field" data-setting="signature" value="${escapeText(p.signature)}" maxlength="140"/></label><label>About me<input class="field" data-setting="pawAbout" value="${escapeText(p.pawAbout)}" maxlength="240"/></label><label>Likes<input class="field" data-setting="pawLikes" value="${escapeText(p.pawLikes)}" maxlength="240"/></label><label>Dislikes<input class="field" data-setting="pawDislikes" value="${escapeText(p.pawDislikes)}" maxlength="240"/></label><label>Looking for<input class="field" data-setting="pawLookingFor" value="${escapeText(p.pawLookingFor)}" maxlength="240"/></label><div class="flex" style="gap:10px"><label style="flex:1">Timezone<input class="field" data-setting="pawTimezone" value="${escapeText(p.pawTimezone)}" maxlength="60"/></label><label style="flex:1">Pronouns<input class="field" data-setting="pawPronouns" value="${escapeText(p.pawPronouns)}" maxlength="60"/></label></div><div class="smalltitle" style="margin-top:12px">🖼 Gallery (up to 4 HTTPS image URLs)</div><label>Gallery image 1<input class="field" data-setting="pawGallery1" value="${escapeText(p.pawGallery1)}" maxlength="500"/></label><label>Gallery image 2<input class="field" data-setting="pawGallery2" value="${escapeText(p.pawGallery2)}" maxlength="500"/></label><label>Gallery image 3<input class="field" data-setting="pawGallery3" value="${escapeText(p.pawGallery3)}" maxlength="500"/></label><label>Gallery image 4<input class="field" data-setting="pawGallery4" value="${escapeText(p.pawGallery4)}" maxlength="500"/></label>
     <div class="flex" style="margin-top:10px;gap:10px"><button class="secondary" data-action="previewmypawprofile">Preview my Paw Profile</button></div><p class="muted">Open a conversation and choose “Share Profile” to send this Paw Profile. No automatic profile sharing.</p>
     <section class="paw-settings-section"><div class="smalltitle">✨ Interactive Paw Profile 2.0</div>
       <label>Favorite plushie<input class="field" data-setting="pawPlushie" maxlength="80" value="${escapeText(p.pawPlushie)}" placeholder="My Subbycat plushie"/></label>
+      ${control('shareLivePlushie','Include held plushie mood and relationship when sharing my Paw Profile')}<p class="muted">Only your own live preview updates automatically. Friends see the latest card you explicitly share; no automatic activity broadcasting.</p>
       <label>Profile badges (comma separated, up to 5)<input class="field" data-setting="pawBadges" maxlength="150" value="${escapeText(p.pawBadges)}" placeholder="Cuddle bug, Night owl"/></label>
       <label>Profile theme<select class="field" data-setting="pawProfileTheme">${[['velvet','Velvet'],['rose','Rose'],['midnight','Midnight'],['lavender','Lavender']].map(([id,label])=>`<option value="${id}" ${p.pawProfileTheme===id?'selected':''}>${label}</option>`).join('')}</select></label>
       ${control('pawGuestbookOpen','Allow BC friends to leave guestbook pawprints')}
@@ -8379,6 +9391,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function clickUI(e) {
     const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-kick-group-member],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
     if (!target) return;
+    if(String(target.dataset.action||'').startsWith('marvhub-')){marvelousHubAction(target.dataset.action,target);return;}
+    if(String(target.dataset.action||'').startsWith('marv-feature-')){void marvelousFeatureAction(target.dataset.action,target);return;}
+    if(String(target.dataset.action||'').startsWith('marv-')){void marvelousAction(target.dataset.action,target);return;}
     if(target.dataset.outboxRetry!==undefined){retryFailedOutbox(target.dataset.outboxRetry);return;}
     if(target.dataset.outboxCancel!==undefined){cancelQueuedOutbox(target.dataset.outboxCancel);return;}
     if(target.dataset.pawCircleToggle!==undefined){const [id,field]=target.dataset.pawCircleToggle.split(':');togglePawCircleFlag(id,field);return;}
@@ -8532,7 +9547,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       }
       const toggle=ui.shadow.getElementById('kc-shareFriendStatus');
       if (toggle) state.settings.shareFriendStatus=toggle.checked;
-      saveSoon();publishFriendStatus(true);renderSettings();
+      const minutes=ui.shadow.getElementById('kc-status-duration');
+      if(minutes)state.settings.friendStatusMinutes=[0,30,60,240,1440].includes(Number(minutes.value))?Number(minutes.value):0;
+      scheduleStatusExpiry();saveSoon();publishFriendStatus(true);renderSettings();
     }
     else if (act === 'confirmshareprofile') { sendProfileNow(state.profileModal?.member || state.selected); closeProfileModal(); }
     else if (act === 'cancelshareprofile' || act === 'closeprofilemodal') closeProfileModal();
@@ -8559,6 +9576,21 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function inputUI(e) {
     const t = e.target;
+    if(t.id==='marvhub-to'){marvelousHub.target=t.value;return;}
+    if(t.id==='marvhub-text'){marvelousHub.note=t.value;return;}
+    if(t.id==='marvhub-signal'){marvelousHub.signal=t.value;return;}
+    if(t.id==='marv-memory-search'){
+      marvelousRoomMemoryFilters.query=t.value;
+      const pos=t.selectionStart;renderRoomMemories();const field=ui.shadow.getElementById('marv-memory-search');
+      field?.focus();field?.setSelectionRange(pos,pos);return;
+    }
+    if(t.id==='marv-memory-room'){state.roomMemoryDraft.name=t.value;return;}
+    if(t.id==='marv-memory-note'){state.roomMemoryDraft.notes=t.value;return;}
+    if(t.id==='marv-memory-tags'){state.roomMemoryDraft.tags=t.value;return;}
+    if(t.id==='marv-send-at'){marvelousNotes.sendAt=t.value;return;}
+    if(t.id==='kc-marv-to'){marvelousNotes.draftTo=t.value;return;}
+    if(t.id==='kc-marv-body'){marvelousNotes.draftBody=t.value;return;}
+    if(t.id==='kc-marv-handle'){marvelousNotes.draftAlias=t.value;return;}
     if(t.id==='pawbook-search'){pawBookUI.query=t.value;const pos=t.selectionStart;renderPawBooks();const field=ui.shadow.getElementById('pawbook-search');field?.focus();field?.setSelectionRange(pos,pos);return;}
     if (t.id === 'kc-search') { state.search = t.value; // Preserve focus and cursor after sidebar repaint.
       const pos = t.selectionStart; renderSidebar(); const s = ui.shadow.getElementById('kc-search'); s?.focus(); s?.setSelectionRange(pos,pos); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; }
@@ -8568,6 +9600,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   function changeUI(e) {
     const t = e.target;
+    if(t.id==='marv-memory-favorites'){marvelousRoomMemoryFilters.favoritesOnly=!!t.checked;renderRoomMemories();return;}
+    if(t.id==='marv-message-ttl'){marvelousNotes.ttl=t.value;return;}
+    if(t.id==='marvhub-ns'){marvelousHub.selectedNamespace=t.value;return;}
+    if(t.id==='marvhub-notification-category'){marvelousHub.notificationCategory=['all','note','invitation','guestbook','scrapbook','plushie','group'].includes(t.value)?t.value:'all';renderMarvelousHub();return;}
+    if(t.id==='marvhub-notification-unread'){marvelousHub.notificationUnreadOnly=!!t.checked;renderMarvelousHub();return;}
+    if(t.dataset.marvhubPerm){marvelousHub.options[t.dataset.marvhubPerm]=!!t.checked;return;}
+    if(t.id==='marvhub-public'){marvelousHub.publicSignal=t.checked;return;}
+    if(t.id==='marvhub-available'){marvelousHub.availability=t.checked;return;}
+    if(t.id==='marvhub-guestbook'){marvelousHub.guestbook=t.checked;return;}
+    if(t.dataset.memoryFile){void marvelousAttachRoomImage(t.dataset.memoryFile,t.files?.[0]);t.value='';return;}
+    if(t.id==='marv-persona-choice'){state.settings.petPersona=Object.hasOwn(PET_PERSONAS,t.value)?t.value:'curious-kitten';saveSoon();renderPetPersonality();return;}
+    if(t.id==='marv-persona-share'){state.settings.petPersonaShare=t.checked;saveSoon();renderPetPersonality();return;}
     if(t.id==='paw-circle-filter'){state.circleFilter=t.value;renderSidebar();return;}
     if(t.id==='paw-theme-current'){const c=state.chats[state.selected];if(c&&Object.hasOwn(PAW_CHAT_THEMES,t.value)){c.pawTheme=t.value;saveSoon();renderChat();}return;}
     if(t.id==='paw-import-file'){const file=t.files?.[0];if(file)void importPawBackup(file);t.value='';return;}
@@ -8578,9 +9622,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (k === 'assetBase') { if (!/^https:\/\/[^\s]+\/$/.test(value)) { notice('Asset base must be an HTTPS URL ending with /.'); return; } }
     if ((k === 'avatar' || k === 'pawHero' || /^pawGallery[1-4]$/.test(k)) && value && !/^https:\/\//i.test(value)) { notice('Profile images must use HTTPS URLs.'); return; }
     if (k==='friendStatusText' && String(value).length>100) { notice('Status is limited to 100 characters.'); return; }
+    if (k==='petPersonaDescription' && String(value).length>300) { notice('Pet description is limited to 300 characters.'); return; }
     if (k==='friendStatusMode' && !Object.hasOwn(STATUS_MODES,value)) return;
-    state.settings[k] = value; saveSoon();
-    if (['friendStatusText','friendStatusMode','shareFriendStatus'].includes(k)) {
+    if(k==='friendStatusMinutes' && ![0,30,60,240,1440].includes(Number(value))) return;
+    state.settings[k] = k==='friendStatusMinutes'?Number(value):value;
+    if(['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k))scheduleStatusExpiry();
+    saveSoon();
+    if (['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k)) {
       publishFriendStatus(false);
       if (k!=='friendStatusText') renderSettings();
       else { const view=ui.shadow?.querySelector('.kc-status-example'); if(view) view.textContent=`Your status: ${statusLabel(me()) || 'Hidden from friends'}`; }
@@ -8736,6 +9784,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     },
     diagnostics: () => ({ version:VERSION, account:state.myId, mugshotMode:'BC live canvas / WCE bce-past-profiles readonly snapshot / kitten; only temporary in-memory rendering, no persistent mugshot storage', hooked:!!state.mod,
       conversations:Object.keys(state.chats).length, nativeMessages:true, groups:Object.keys(state.groups).length, windowRect:state.windowRect, theme:state.settings.theme, hasUI:!!ui.host, bootError:state.bootError, bootAttempts:state.bootAttempts }) });
+  window.MarvelousBridgeDiag=()=>({version:VERSION,connected:marvelousBridge.attached,plushiesVersion:marvelousBridge.api?.version||null,lowCpu:marvelousBridge.lowCpu,safeMode:marvelousBridge.safeMode,localNotifications:marvelousBridge.events.length,focusEnabled:marvelousFocusRuntime.enabled});
   window.PawLounge = window.KittyChat;
   window.PawLoungeBootDiag = () => window.KittyChatBootDiag();
   // A failure during BC startup or DOM construction must never abort all future retries.
@@ -8743,7 +9792,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     try {
       state.bootAttempts++;
       tick();
-      pawPresenceTick();
+      marvelousBridgeTick();pawPresenceTick();expireFriendStatusIfNeeded();marvelousFocusTick();marvelousBackgroundTick();
       BOOT.attempts = state.bootAttempts;
       markBoot(ui.fab?.isConnected ? (me() ? 'ready' : 'waiting-for-login') : 'waiting-for-dom');
       state.bootError = '';
@@ -8764,8 +9813,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         badge.id = 'kittychat-startup-error';
         badge.type = 'button';
         badge.style.cssText = 'position:fixed;right:16px;bottom:95px;z-index:2147483646;background:#401a35;color:#ffe5f2;border:2px solid #f18dbf;padding:9px 13px;border-radius:16px;font:12px system-ui;box-shadow:0 6px 25px #0008;cursor:pointer';
-        badge.textContent = '🐾 PawLounge startup error — retry';
-        badge.title = `${VERSION}: ${state.bootError}. For details run KittyChatBootDiag() in the console.`;
+        badge.textContent = '🐾 PawLounge could not open · Retry';
+        badge.title = "PawLounge could not open. Try again, or reload Bondage Club.";
         badge.addEventListener('click',()=> { try { ui.host?.remove(); } catch {} Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null}); safeTick(); });
         document.body.appendChild(badge);
       }
