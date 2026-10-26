@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.1
+// @version      1.1.1
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.1';
+  const VERSION = '1.1.1';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6942,7 +6942,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!x.initialized||x.busy&&!x.user)inside='<p class="muted">Opening Marvelous mailbox…</p>';
     else if(!x.user)inside='<p>No email needed. Your private mailbox sign-in is saved on this browser.</p><button class="primary" data-action="marv-start">Create my mailbox</button>';
     else if(!x.claim){
-      inside=`<p>Set up your private mailbox for BC <b>#${me()}</b>. You will confirm ownership with a one-time BC beep.</p>${localStorage.getItem(marvelousVaultKey())?'<p>An encrypted key vault already exists; enter its original passphrase to resume registration safely.</p>':''}
+      inside=`<p>Set up your private mailbox for BC <b>#${me()}</b>. You will confirm ownership with a one-time private whisper to PawID.</p>${localStorage.getItem(marvelousVaultKey())?'<p>An encrypted key vault already exists; enter its original passphrase to resume registration safely.</p>':''}
         <label>Create encryption-key passphrase (12+ characters)<input type="password" class="field" id="kc-marv-pass" autocomplete="new-password" minlength="12"></label>
         <button class="primary" data-action="marv-register">Set up my private mailbox</button>`;
     }else if(numeric(x.claim.claimed_member_number)!==me()){
@@ -6950,7 +6950,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }else if(!x.keys){
       inside=`<p>Finish setting up your private mailbox. Saved encryption keys: ${localStorage.getItem(marvelousVaultKey())?'found':'not found'}.</p><label>Passphrase<input class="field" id="kc-marv-pass" type="password" autocomplete="off"></label><button class="primary" data-action="marv-resume">Continue mailbox setup</button>`;
     }else if(!x.claim.verified_at){
-      inside=`<h3>🔐 BC #${me()} — one-time automatic verification</h3><p>Confirm your account with a one-time beep to PawID. Once verified, you can send and receive private notes without repeating this step each time you sign in.</p>${MARVELOUS_VERIFIER_BC_MEMBER>0?`<p>PawID <b>#${MARVELOUS_VERIFIER_BC_MEMBER}</b> must be online to receive your verification beep.</p><button class="primary" data-action="marv-auto-verify">Send verification beep</button>`:'<p class="kc-marv-error">Verification is not available right now. Please try again later.</p>'}<p class="muted">Your confirmation code: <code>Marvelous verify: ${escapeText(x.claim.challenge_code)}</code></p><button class="secondary" data-action="marv-refresh">Check verification</button><button class="secondary" data-action="marv-backup">Save encrypted key backup</button>`;
+      inside=`<h3>🔐 BC #${me()} — one-time automatic verification</h3><p>Confirm your account with a one-time private whisper to PawID. Once verified, you can send and receive private notes without repeating this step each time you sign in.</p>${MARVELOUS_VERIFIER_BC_MEMBER>0?`<p>PawID <b>#${MARVELOUS_VERIFIER_BC_MEMBER}</b> must be online and in your current BC chatroom. Join PawID in <b>Subbycat's place</b> before continuing.</p><button class="primary" data-action="marv-auto-verify">Send verification whisper</button>`:'<p class="kc-marv-error">Verification is not available right now. Please try again later.</p>'}<p class="muted">Your confirmation code: <code>Marvelous verify: ${escapeText(x.claim.challenge_code)}</code></p><button class="secondary" data-action="marv-refresh">Check verification</button><button class="secondary" data-action="marv-backup">Save encrypted key backup</button>`;
     }else{
       const inboxUnread=x.inbox.filter(m=>!m.read_at).length;
       inside=`<p class="muted">✓ Verified BC #${me()} · ${inboxUnread} unread · ciphertext stored for 30 days.</p>
@@ -6963,9 +6963,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <h3>🐾 How to verify with PawID</h3>
       <ol><li>Log into the BC character you want to register and create your mailbox here.</li>
       <li>Find <b>PawID (#264370)</b> in the <b>Subbycat's place</b> chatroom. PawID must be online.</li>
-      <li>Choose <b>Send verification beep</b> in Paw Notes. PawLounge sends your one-time code to PawID automatically.</li>
+      <li>While you and PawID are in the same chatroom, choose <b>Send verification whisper</b>. PawLounge privately sends your one-time code to PawID.</li>
       <li>Come back here and use <b>Check verification</b> if needed. When PawID confirms the BC MemberNumber, your mailbox unlocks.</li></ol>
-      <p class="muted">No email or password for PawID is needed. You normally verify just once per mailbox. If PawID is offline, try again when the verifier returns. Never give another player your encryption passphrase.</p>
+      <p class="muted">No email or password for PawID is needed. You normally verify just once per mailbox. If PawID is offline or not in your room, try again once you are both in the same chatroom. Never give another player your encryption passphrase.</p>
     </section>`:'';
     ui.body.innerHTML=`<div class="kc-marv-page"><h2>💌 Marvelous Paw Notes</h2><p class="muted">Private notes are addressed to verified BC member numbers and encrypted before they leave your browser.</p>${guide}${message}${inside}${x.busy?'<p class="muted">Working…</p>':''}<p class="muted">Keep an encrypted key backup before clearing browser data or switching devices. If you lose your saved keys, old notes may become unreadable. Paw Notes and regular BC whispers are separate. For extra security, compare encryption fingerprints with your friends.</p></div>`;
     if(x.privateKeys)void marvelousDecryptVisible();
@@ -6984,6 +6984,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(!marvelousNotes.claim||marvelousNotes.claim.verified_at||numeric(marvelousNotes.claim.claimed_member_number)!==me())
         throw Error('Register the correct BC character first.');
       if(typeof window.ServerSend!=='function')throw Error('BC native messaging is not ready.');
+      if(!inRoom(target))throw Error("Join PawID (#264370) in Subbycat's place first. Verification whispers only work in the same BC chatroom.");
       let claim=marvelousNotes.claim;
       const created=Date.parse(String(claim.created_at||''));
       if(!Number.isFinite(created)||Date.now()-created>12*60*1000){
@@ -6996,9 +6997,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         throw Error('Invalid or already verified BC challenge.');
       // BC server supplies the sender MemberNumber to the verifier's native event.
       // No Supabase privilege is granted just because this send was attempted.
-      window.ServerSend('AccountBeep',{MemberNumber:target,BeepType:'',IsSecret:true,
-        Message:'Marvelous verify: '+claim.challenge_code});
-      notice('Verification beep submitted to BC verifier #'+target+'.');
+      // BC supplies the actual sender MemberNumber to the receiving room packet.
+      // Whisper delivery is restricted by BC to players in this same chatroom.
+      window.ServerSend('ChatRoomChat',{Type:'Whisper',Target:target,
+        Content:'Marvelous verify: '+claim.challenge_code});
+      notice('Private verification whisper sent to PawID #'+target+'. Check verification shortly.');
       if(marvelousVerificationPoll)clearInterval(marvelousVerificationPoll);
       const myMember=me();let attempts=0;
       marvelousVerificationPoll=setInterval(async()=>{
