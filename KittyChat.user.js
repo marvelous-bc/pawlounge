@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.1.3
+// @version      1.1.4
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.1.3';
+  const VERSION = '1.1.4';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7210,20 +7210,26 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       const pass=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
       return marvelousRun(async()=>{await marvelousUnlockVault(pass);marvelousUpdate();});
     }
-    if(act==='marv-reset-keys')return marvelousRun(async()=>{
+    if(act==='marv-reset-keys'){
+      // The busy-state redraw removes password inputs. Capture before marvelousRun.
       const pass=String(ui.shadow?.getElementById('kc-marv-reset-pass')?.value||'');
+      return marvelousRun(async()=>{
       if(pass.length<12)throw Error('Choose a new passphrase at least 12 characters long.');
       if(window.prompt('Repeat your NEW Paw Notes passphrase to confirm:','')!==pass)
         throw Error('New passphrase confirmation did not match. Nothing changed.');
       if(window.prompt('Old encrypted Paw Notes will be unreadable. Type RESET to continue:','')!=='RESET')return;
       if(!window.confirm('Reset the encryption keys for your VERIFIED BC #'+me()+' mailbox? This cannot recover older messages.'))return;
       await marvelousResetKeys(pass);marvelousUpdate();
-    });
-    if(act==='marv-finish-reset')return marvelousRun(async()=>{
+      });
+    }
+    if(act==='marv-finish-reset'){
+      // Keep the supplied passphrase through the busy-state redraw.
       const pass=String(ui.shadow?.getElementById('kc-marv-reset-pass')?.value||'');
+      return marvelousRun(async()=>{
       if(!pass)throw Error('Enter the new passphrase chosen for the interrupted reset.');
       await marvelousFetch();await marvelousFinishKeyReset(pass);marvelousUpdate();
-    });
+      });
+    }
     if(act==='marv-discard-reset')return marvelousRun(async()=>{
       marvelousAssertIdentity();
       const raw=localStorage.getItem(marvelousStagedVaultKey());if(!raw)return;
@@ -7234,9 +7240,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(!window.confirm('Discard only the unfinished reset attempt? Your existing encrypted key vault remains unchanged.'))return;
       localStorage.removeItem(marvelousStagedVaultKey());marvelousUpdate();
     });
-    if(act==='marv-review-contact-key')return marvelousRun(async()=>{
-      marvelousAssertIdentity();
+    if(act==='marv-review-contact-key'){
       const bc=numeric(String(ui.shadow?.getElementById('kc-marv-key-member')?.value||'').trim());
+      return marvelousRun(async()=>{
+      marvelousAssertIdentity();
       if(!bc||bc===me())throw Error('Enter the BC MemberNumber of the contact whose keys changed.');
       const client=await marvelousClient();
       const keys=marvelousCheck(await client.from('marvelous_secure_keys')
@@ -7251,7 +7258,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         throw Error('Fingerprint confirmation did not match. The old trusted key is retained.');
       localStorage.setItem(path,fresh);
       notice('Trusted fingerprint updated for BC #'+bc+'.');
-    });
+      });
+    }
     if(act==='marv-send'){
       const to=numeric(String(ui.shadow?.getElementById('kc-marv-to')?.value||'').trim());
       const message=String(ui.shadow?.getElementById('kc-marv-body')?.value||'').trim();
