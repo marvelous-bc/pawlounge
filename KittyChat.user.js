@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.1.4
+// @version      1.1.7
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.1.4';
+  const VERSION = '1.1.7';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -659,6 +659,24 @@
       pawOnlinePresence.lastQuery=Date.now();
       try{window.ServerSend('AccountQuery',{Query:'OnlineFriends'});}catch{}
     }
+  }
+  // Only a fresh native friend-list response can prove a BC friend is offline.
+  // An unknown status is NOT treated as offline; the player can explicitly
+  // select Offline Note in the composer instead.
+  function pawFriendConfirmedOffline(member){
+    const id=numeric(member);
+    return id!==me() && myFriends().includes(id) && !inRoom(id) &&
+      pawOnlinePresence.seenAt>0 && Date.now()-pawOnlinePresence.seenAt<130000 &&
+      !pawOnlinePresence.ids.has(id);
+  }
+  function pawPresenceIsFresh(){return pawOnlinePresence.seenAt>0&&Date.now()-pawOnlinePresence.seenAt<130000;}
+  // Ask BC before choosing delivery. A response is authoritative for a BC friend;
+  // no room presence or stale friend status is ever interpreted as offline.
+  function pawRequestPresenceForDelivery(){
+    if(!pawOnlinePresence.modSdkHookInstalled||typeof window.ServerSend!=='function')return false;
+    if(Date.now()-pawOnlinePresence.lastQuery<5000)return true;
+    pawOnlinePresence.lastQuery=Date.now();
+    try{window.ServerSend('AccountQuery',{Query:'OnlineFriends'});return true;}catch{return false;}
   }
   function pawFriendConfirmedOnline(member){
     if(numeric(member)===me())return true;
@@ -1328,13 +1346,13 @@
       const kind=raw.kind==='group'?'group':'chat';
       const id=trim(raw.id,80),to=kind==='chat'?numeric(raw.to):trim(raw.to,80);
       const text=trim(raw.text,kind==='group'?MAX_GROUP_TEXT:2000);
-      const mode=kind==='group'?'group':raw.mode==='whisper'?'whisper':'beep';
+      const mode=kind==='group'?'group':['whisper','beep','offline'].includes(raw.mode)?raw.mode:'beep';
       if(!/^out_[\w-]{6,75}$/.test(id)||!to||!text|| (kind==='group'&&!/^g_[a-zA-Z0-9_-]{8,44}$/.test(to)))return null;
       const status=['queued','sending','sent','partial','failed','acknowledged','unconfirmed','cancelled'].includes(raw.status)?raw.status:'failed';
       const ackTokens=kind==='group'&&raw.ackTokens&&typeof raw.ackTokens==='object'?Object.fromEntries(Object.entries(raw.ackTokens).filter(([k,v])=>numeric(k)&&typeof v==='string'&&/^[a-zA-Z0-9_-]{12,72}$/.test(v)).slice(0,MAX_GROUP_MEMBERS)):{};
       const targets=kind==='group' && raw.targets&&typeof raw.targets==='object'?Object.fromEntries(Object.entries(raw.targets).filter(([k,v])=>numeric(k)&&['queued','sending','sent','acknowledged','failed','unconfirmed'].includes(v)).slice(0,MAX_GROUP_MEMBERS)):{};
       for(const k in targets) if(targets[k]==='sending')targets[k]='unconfirmed';
-      return {id,kind,to,text,mode,secure:kind==='chat'&&raw.secure===true,mid:trim(raw.mid||'',75),messageId:trim(raw.messageId||'',90),replyTo:normalizeReply(raw.replyTo),targets,ackTokens,created:Number(raw.created)||Date.now(),updated:Number(raw.updated)||Date.now(),attempts:Math.min(5,Math.max(0,Number(raw.attempts)||0)),nextTry:Date.now()+2000,status:status==='sending'?'unconfirmed':status,reason:trim(raw.reason||'',160)};
+      return {id,kind,to,text,mode,secure:kind==='chat'&&raw.secure===true,transport:raw.transport==='marvelous'?'marvelous':'',mid:trim(raw.mid||'',75),messageId:trim(raw.messageId||'',90),replyTo:normalizeReply(raw.replyTo),targets,ackTokens,created:Number(raw.created)||Date.now(),updated:Number(raw.updated)||Date.now(),attempts:Math.min(5,Math.max(0,Number(raw.attempts)||0)),nextTry:Date.now()+2000,status:status==='sending'?'unconfirmed':status,reason:trim(raw.reason||'',160)};
     }).filter(Boolean);
     state.moments=(Array.isArray(loaded.moments)?loaded.moments:[]).slice(-MOMENT_LIMIT).map(m=>normalizeMoment(m)).filter(Boolean);
     state.circles=(Array.isArray(loaded.circles)?loaded.circles:[]).slice(0,30).map(c=>({id:trim(c.id,40),name:trim(c.name,45),members:[...new Set((Array.isArray(c.members)?c.members:[]).map(numeric).filter(Boolean))].slice(0,150),shareStatus:c.shareStatus!==false,shareProfile:c.shareProfile!==false,quiet:c.quiet===true})).filter(c=>/^circle_[\w-]{4,32}$/.test(c.id)&&c.name);
@@ -1442,7 +1460,7 @@
       if (!numeric(key) || !chat || !Array.isArray(chat.messages)) { delete state.chats[key]; continue; }
       chat.id = numeric(key); chat.displayName = trim(chat.displayName || '', 80);chat.replyLater=!!chat.replyLater;chat.requestPending=!!chat.requestPending;chat.requestAccepted=!!chat.requestAccepted;chat.snoozeUntil=Math.max(0,Number(chat.snoozeUntil)||0); chat.messages = chat.messages.slice(-MAX_MESSAGES).filter(m => m && typeof m.text === 'string' && [id,numeric(key)].includes(numeric(m.from))).map(m => ({
         id: trim(m.id, 80), text: trim(m.mode === 'whisper' ? m.text : stripNativeBeepMetadata(m.text), 2000), from: numeric(m.from), time: Number(m.time) || Date.now(),
-        mode: m.mode === 'whisper' ? 'whisper' : 'beep', replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions),nativeId:!!m.nativeId,reaction: trim(m.reaction || '', 6) }));
+        mode: m.mode === 'whisper' ? 'whisper' : 'beep', offline:m.offline===true, replyTo:normalizeReply(m.replyTo),reactions:normalizeReactions(m.reactions),nativeId:!!m.nativeId,reaction: trim(m.reaction || '', 6) }));
       assignMissingMessageIds(chat.messages);
       chat.unread = Number(chat.unread) || 0;
     }
@@ -1485,7 +1503,7 @@
     }
     const mid=trim(metadata?.messageId || '',90);
     if(mid&&chat.messages.some(m=>m.id===mid))return;
-    const message={ id: mid || uniqueMessageId(), text, from: numeric(from), time: monotonicMessageTime(), mode, replyTo:normalizeReply(metadata?.replyTo),reactions:{},nativeId:!!mid };
+    const message={ id: mid || uniqueMessageId(), text, from: numeric(from), time: monotonicMessageTime(), mode, offline:metadata?.offline===true, replyTo:normalizeReply(metadata?.replyTo),reactions:{},nativeId:!!mid };
     chat.messages.push(message);
     archiveMessages(state.myId,'chat',member,[message]);
     if (chat.messages.length > MAX_MESSAGES) chat.messages.shift();
@@ -1867,7 +1885,7 @@
   function outboxStatusLabel(item){
     if(!item)return '';
     if(item.status==='acknowledged')return '✓ Client-reported ACK';
-    if(item.status==='sent')return item.kind==='group'?'✓ Sent to BC · waiting for ACK':'✓ Sent to BC · unconfirmed';
+    if(item.status==='sent')return item.kind==='group'?'✓ Sent to BC · waiting for ACK':(item.transport==='marvelous'||item.mode==='offline'?'✓ Encrypted offline note saved':'✓ Sent to BC · unconfirmed');
     if(item.status==='partial')return '◔ Partially sent · review outbox';
     if(item.status==='unconfirmed')return '？ Delivery uncertain · do not retry blindly';
     if(item.status==='failed')return '⚠ Failed · retry available';
@@ -1903,12 +1921,12 @@
     const list=state.deliveryOutbox.filter(x=>x.kind===kind&&String(x.to)===String(to)&&x.status!=='cancelled').slice(-10).reverse();
     const flagged=list.filter(x=>liveOutboxStatuses.has(x.status));
     const shown=flagged.length?list.slice(0,5):list.slice(0,1);
-    return `<section id="kc-outbox-popup" class="kc-outbox kc-outbox-popover" data-kind="${escapeText(kind)}" data-to="${escapeText(to)}" role="region" aria-label="Message delivery outbox" ${outboxIsOpen(kind,to)?'':'hidden'}><div class="kc-outbox-title">📤 Outbox${flagged.length?` · ${flagged.length} to review`:''}<button type="button" class="kc-outbox-close" data-action="toggleoutbox" aria-label="Close outbox">×</button></div>${shown.map(x=>`<div class="kc-outbox-row"><span class="kc-outbox-preview" title="${escapeText(x.text)}">${escapeText(x.text.slice(0,42))}</span><span class="kc-outbox-status" data-outbox-status="${escapeText(x.id)}">${escapeText(outboxStatusLabel(x))}</span>${x.status==='failed'||(x.kind==='group'&&Object.values(x.targets||{}).includes('failed'))?`<button class="secondary" data-outbox-retry="${escapeText(x.id)}" title="Retry only failed destinations">Retry failed</button>`:''}${x.status==='queued'?`<button class="secondary" data-outbox-cancel="${escapeText(x.id)}">Cancel</button>`:''}</div>`).join('')||'<div class="kc-outbox-empty">Nothing pending <small>BC delivery is not guaranteed.</small></div>'}</section>`;
+    return `<section id="kc-outbox-popup" class="kc-outbox kc-outbox-popover" data-kind="${escapeText(kind)}" data-to="${escapeText(to)}" role="region" aria-label="Message delivery outbox" ${outboxIsOpen(kind,to)?'':'hidden'}><div class="kc-outbox-title">📤 Outbox${flagged.length?` · ${flagged.length} to review`:''}<button type="button" class="kc-outbox-close" data-action="toggleoutbox" aria-label="Close outbox">×</button></div>${shown.map(x=>`<div class="kc-outbox-row"><span class="kc-outbox-preview" title="${escapeText(x.text)}">${escapeText(x.text.slice(0,42))}</span><span class="kc-outbox-status" data-outbox-status="${escapeText(x.id)}" title="${escapeText(x.reason||'')}">${escapeText(outboxStatusLabel(x))}</span>${x.status==='failed'?`<small class="kc-outbox-error">${escapeText(x.reason||'Not sent')}</small>`:''}${x.status==='failed'||(x.kind==='group'&&Object.values(x.targets||{}).includes('failed'))?`<button class="secondary" data-outbox-retry="${escapeText(x.id)}" title="Retry only failed destinations">Retry failed</button>`:''}${x.status==='queued'?`<button class="secondary" data-outbox-cancel="${escapeText(x.id)}">Cancel</button>`:''}</div>`).join('')||'<div class="kc-outbox-empty">Nothing pending <small>BC delivery is not guaranteed.</small></div>'}</section>`;
   }
   function markOutboxMessage(item,member){
     const arr=state.chats[numeric(member)]?.messages;
     if(!arr)return;
-    const found=[...arr].reverse().find(m=>m.from===me()&&m.mode===item.mode&&m.text===item.text&&Math.abs(m.time-item.created)<20000);
+    const found=[...arr].reverse().find(m=>m.from===me()&&m.mode===(item.mode==='offline'?'beep':item.mode)&&m.text===item.text&&Math.abs(m.time-item.created)<20000);
     if(found){
       found.outboxId=item.id;item.messageId=found.id;
       const visible=state.open&&state.tab==='chats'&&state.selected===numeric(member)?ui.shadow?.getElementById('kc-log'):null;
@@ -1936,7 +1954,7 @@
     const targets=kind==='group'?Object.fromEntries(g.accepted.filter(n=>n!==me()).map(n=>[n,'queued'])):{};
     if(kind==='group'&&!Object.keys(targets).length)return null;
     const item={id:uniquePawId('out'),kind,to,text,mode:kind==='group'?'group':mode,replyTo:normalizeReply(replyTo),targets,ackTokens:{},
-      mid:kind==='group'?uniqueMessageId():'',secure:kind==='chat'&&pawSecureSecrets.has(numeric(to)),messageId:'',created:Date.now(),updated:Date.now(),attempts:0,nextTry:0,status:'queued',reason:''};
+      mid:kind==='group'?uniqueMessageId():'',secure:kind==='chat'&&mode!=='offline'&&pawSecureSecrets.has(numeric(to)),transport:'',messageId:'',created:Date.now(),updated:Date.now(),attempts:0,nextTry:0,status:'queued',reason:''};
     state.deliveryOutbox.push(item);pruneOutbox();saveNow(true);
     if(kind==='group'){
       addGroupMessage(g,me(),text,item.mid,replyTo);
@@ -1951,12 +1969,20 @@
     try {
       for(const item of state.deliveryOutbox){
         if(item.status!=='queued'||Number(item.nextTry)>Date.now())continue;
-        if(typeof window.ServerSend!=='function'){item.nextTry=Date.now()+2000;continue;}
+        if(item.mode!=='offline' && typeof window.ServerSend!=='function'){item.nextTry=Date.now()+2000;continue;}
         if(item.kind==='chat'&&item.mode==='whisper'&&(!inRoom(item.to)||typeof window.ChatRoomSendWhisper!=='function')){
           // Whispers MUST remain room-scoped, never transmit to someone elsewhere.
           item.status='failed';item.reason='Not in the same room';setOutboxChanged(item);continue;
         }
         if(item.kind==='chat'&&item.mode==='beep'&&!myFriends().includes(numeric(item.to))){item.status='failed';item.reason='Not a BC friend';setOutboxChanged(item);continue;}
+        // A just-opened chat may not have a recent native BC OnlineFriends list.
+        // Briefly wait for the authoritative BC response before picking Beep vs Note.
+        // A network timeout never masquerades as proof that someone is offline.
+        if(item.kind==='chat'&&item.mode==='beep'&&!inRoom(item.to)&&!pawPresenceIsFresh()&&
+           Date.now()-item.created<10000&&pawRequestPresenceForDelivery()){
+          item.nextTry=Date.now()+1600;
+          continue;
+        }
         const group=item.kind==='group'?state.groups[item.to]:null;
         if(item.kind==='group'&&!group?.joined){item.status='failed';item.reason='Group no longer joined';setOutboxChanged(item);continue;}
         if(item.kind==='group'){
@@ -1992,7 +2018,14 @@
           item.status='sending';item.attempts++;setOutboxChanged(item);
           let crossed=false;
           try{
-            if(item.mode==='whisper'){
+            // Native BC beeps are not an offline mailbox. Route only if BC
+            // recently confirmed offline, or the sender chose Offline Note.
+            // Never silently reroute an unknown presence state.
+            if(item.mode==='offline'||(item.mode==='beep'&&pawFriendConfirmedOffline(item.to))){
+              const noteId=await marvelousSendOfflineChat(item.to,item.text,()=>{crossed=true;});
+              item.transport='marvelous';item.messageId='marv_'+noteId;
+              appendMessage(item.to,item.text,me(),'beep','local',{messageId:item.messageId,offline:true});
+            }else if(item.mode==='whisper'){
               const before=window.ChatRoomTargetMemberNumber;
               try{
                 const encrypted=item.secure?await pawEncryptPrivate(item.to,item.text,'whisper'):null;
@@ -2021,8 +2054,8 @@
               appendMessage(item.to,item.text,me(),'beep','local',item.secure?{messageId:item.messageId}:{});
             }
             markOutboxMessage(item,item.to);
-            item.status='sent';item.reason='Handed to BC; recipient receipt unavailable';outboxRuntime.sent++;
-          }catch(err){item.status=crossed?'unconfirmed':'failed';item.reason=trim(String(err?.message||err),130);console.warn('[PawLounge] Message handoff:',err);}
+            item.status='sent';item.reason=item.transport==='marvelous'?'Encrypted offline note saved for 7 days; read receipt unavailable until opened':'Handed to BC; recipient receipt unavailable';outboxRuntime.sent++;
+          }catch(err){if(err?.definitive)crossed=false;item.status=crossed?'unconfirmed':'failed';item.reason=trim(String(err?.message||err),130);console.warn('[PawLounge] Message handoff:',err);}
           setOutboxChanged(item);
         }
       }
@@ -2436,7 +2469,7 @@
     text=trim(text,2000);
     if(!member||!chat||!text)return false;
     const reply=state.replyTarget?.kind==='chat'&&Number(state.replyTarget.conversation)===member?normalizeReply(state.replyTarget):null;
-    const mode=state.composerMode==='whisper'?'whisper':'beep';
+    const mode=['beep','whisper','offline'].includes(state.composerMode)?state.composerMode:'beep';
     if(mode==='whisper'&&!inRoom(member)){notice('Whispers require that you are in the same room.');return false;}
     if(mode==='beep'&&!myFriends().includes(member)){notice('Beep messages require a BC friend. Try Whisper in the same room.');return false;}
     const whisperText=mode==='whisper'&&reply?trim(`↪ ${reply.senderName}: ${reply.snippet}\n${text}`,2000):text;
@@ -5813,6 +5846,24 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       .kc-marv-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
       .kc-marv-meta small{opacity:.72}.kc-marv-body{white-space:pre-wrap;overflow-wrap:anywhere}
       .kc-marv-error{padding:10px;border:1px solid #e78f9c;border-radius:9px;color:#fbe5ec;background:#502b3e}
+      .kc-offline-unlock-prompt[hidden],.kc-offline-unlock-prompt [hidden]{display:none!important}
+      .kc-offline-unlock-prompt{position:fixed;right:18px;bottom:18px;z-index:2147483646;
+        width:min(365px,calc(100vw - 30px));pointer-events:auto;box-sizing:border-box;
+        font:14px/1.45 system-ui,sans-serif;color:#ffeaf5}
+      .kc-offline-unlock-card{border:2px solid #f1a2cb;border-radius:19px;padding:16px;
+        background:#321d36;box-shadow:0 12px 42px #0009;max-height:calc(100vh - 26px);overflow:auto}
+      .kc-offline-unlock-card h3{margin:0 0 8px;font-size:18px;color:#ffe1ef}
+      .kc-offline-unlock-card p{margin:7px 0 12px}
+      .kc-offline-unlock-card label{display:block;font-weight:600}
+      .kc-offline-unlock-card input{box-sizing:border-box;width:100%;margin-top:6px;padding:10px;border-radius:9px;
+        background:#24152c;color:#fff;border:1px solid #d49cbb;font:inherit}
+      .kc-offline-unlock-buttons{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+      .kc-offline-unlock-buttons button{padding:9px 11px;border-radius:10px;cursor:pointer;color:#fff;
+        background:#674368;border:1px solid #bf82aa;font:inherit;flex-grow:1}
+      .kc-offline-unlock-buttons .primary{background:#994a79;font-weight:700}
+      .kc-offline-unlock-buttons button:disabled{opacity:.6;cursor:wait}
+      .kc-offline-unlock-hint{font-size:12px;opacity:.82}
+      #kc-offline-unlock-error{color:#ffe2e2;font-size:12px;border-left:3px solid #ed7b87;padding:4px 8px}
     `;
     const wrap = document.createElement('div'); wrap.innerHTML = `
       <button id="kc-fab" aria-label="Open PawLounge" title="Drag me or click to open PawLounge">${asset('kitty-launcher-mailcat.png','','✉️')}<span class="counter hidden" id="kc-counter"></span></button>
@@ -5854,7 +5905,23 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         <aside class="sidebar" id="kc-side"></aside>
         <main class="main" id="kc-body"></main>
       </div><div class="group-create-backdrop hidden" id="kc-group-modal"></div><div class="kc-profile-backdrop hidden" id="kc-profile-modal"></div><button class="kc-resize" id="kc-resize" aria-label="Drag to resize Kittychat" title="Drag to resize Kittychat">${asset('ui-resize.svg','','↘')}</button></div>
-      <div id="kc-toast" role="status" aria-live="polite"></div>`;
+       <div id="kc-toast" role="status" aria-live="polite"></div>
+       <section id="kc-offline-unlock-prompt" class="kc-offline-unlock-prompt" role="dialog" aria-label="Unlock Marvelous offline messaging" aria-modal="false" hidden>
+         <div class="kc-offline-unlock-card">
+           <h3>💌 Unlock offline messaging</h3>
+           <p>Welcome back, BC <b id="kc-offline-unlock-member"></b>. Unlock your Marvelous mailbox to read offline messages and send encrypted notes.</p>
+           <label for="kc-offline-unlock-password">Marvelous mailbox password
+             <input id="kc-offline-unlock-password" type="password" autocomplete="off" placeholder="Paw Notes encryption passphrase">
+           </label>
+           <p class="kc-offline-unlock-hint">Use your Paw Notes passphrase (your Cloud Hub backup password may be different). It is never saved.</p>
+           <p id="kc-offline-unlock-error" role="alert" hidden></p>
+           <div class="kc-offline-unlock-buttons">
+             <button class="primary" data-action="marv-prompt-unlock">Unlock</button>
+             <button class="secondary" data-action="marv-prompt-later">Not now</button>
+             <button class="secondary" data-action="marv-prompt-never">No, never ask again</button>
+           </div>
+         </div>
+       </section>`;
     const marvelousFiveStyle=document.createElement('style');marvelousFiveStyle.textContent='\n/* Marvelous Five Features: compact kitten UI cards; parent theme variables stay intact. */\n#kc-panel .rail{overflow-y:auto;min-height:0;scrollbar-width:thin;overscroll-behavior:contain}\n#kc-panel .railtab{flex-shrink:0}\n#kc-panel .marv-feature-page{padding:20px;max-width:960px;margin:0 auto;overflow:auto;height:100%;box-sizing:border-box}\n#kc-panel .marv-feature-page h2{margin:0 0 12px;color:#ffe1f2;font-size:22px}\n#kc-panel .marv-feature-card{border:1px solid #9e6388;border-radius:16px;background:linear-gradient(135deg,#50304a9c,#342238cf);padding:14px;margin:12px 0;max-width:100%;overflow-wrap:anywhere}\n#kc-panel .marv-feature-card label{display:block;margin:8px 0}\n#kc-panel .marv-feature-card .field{width:100%;box-sizing:border-box;max-width:100%}\n#kc-panel .marv-feature-top,#kc-panel .marv-feature-actions,#kc-panel .marv-prompt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}\n#kc-panel .marv-feature-actions{justify-content:flex-start}\n#kc-panel .marv-feature-card p{white-space:pre-wrap}\n#kc-panel .marv-room-thumb{display:block;object-fit:contain;max-width:min(100%,420px);max-height:240px;border-radius:10px;margin:10px 0}\n#kc-panel .marv-image-label{display:inline-block!important;padding:8px 12px;background:#754061;border:1px solid #c67fad;border-radius:9px;cursor:pointer}\n#kc-panel .marv-image-label input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}\n#kc-panel .marv-pet-icon{font-size:48px;text-align:center;margin:16px auto}\n#kc-panel .marv-feature-page .settingrow{display:flex;justify-content:space-between;gap:15px;align-items:center}\n';shadow.appendChild(marvelousFiveStyle);
     shadow.appendChild(wrap);
     document.body.appendChild(host);
@@ -6634,18 +6701,38 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     syncVisiblePrivateChat(member, expectedId);
     requestAnimationFrame(()=>syncVisiblePrivateChat(member, expectedId));
   }
+  // Make contact changes immediately ready for typing, without entering or sending
+  // anything for the user. If the selected person is in this room, Whisper is
+  // the natural default; otherwise keep native BC delivery restrictions intact.
+  function focusSwitchedChatComposer(member){
+    if(!state.open||state.tab!=='chats'||state.selected!==member)return;
+    const field=ui.shadow?.getElementById('kc-compose');
+    if(!field||!field.isConnected)return;
+    ui.input=field;
+    field.focus({preventScroll:true});
+    if(ui.shadow.activeElement===field){
+      const end=field.value.length;
+      try{field.setSelectionRange(end,end);}catch{}
+    }
+  }
   function selectChat(id) {
+    id=numeric(id);
     const chat = ensure(id); if (!chat) return;
     // Remember the BC-visible name before this player leaves the room, so an
     // otherwise unknown player doesn't turn into 'Kitty #12345' afterward.
     const roomCharacter=currentRoomRoster().find(character=>numeric(character.MemberNumber)===id);
     if(roomCharacter)chat.displayName=trim(roomCharacter.Nickname||roomCharacter.Name||chat.displayName,80);
-    // BC whispers work for room-mates without requiring them to be BC friends.
-    // Do not attempt friend-only beeps when opening a non-friend from In Room.
-    if(state.contactsMode==='inroom'&&inRoom(id)&&!myFriends().includes(id))state.composerMode='whisper';
+    // Each newly selected conversation gets an appropriate composer mode:
+    // Whisper is room-only; confirmed-offline friends use seven-day encrypted
+    // notes; other remote friends keep native Beep. Unknown presence is not
+    // assumed offline, and nonfriends outside the room can use Offline Note.
+    if(inRoom(id))state.composerMode='whisper';
+    else if(pawFriendConfirmedOffline(id)||!myFriends().includes(id))state.composerMode='offline';
+    else state.composerMode='beep';
     state.compactOpen=false;state.selected = id; state.messageSearch = ''; chat.unread = 0;
     state.tab = 'chats'; saveSoon(); updateBadge(); void prepareHistoryView('chat',id); render();
     queueVisiblePrivateChatSync(id);
+    focusSwitchedChatComposer(id);
     requestFriendStatus(id);
   }
   function selectGroup(id) {
@@ -6698,6 +6785,82 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   let marvelousVerificationPoll=null;
   const MARVELOUS_SCHEDULE_DISPATCHER_READY=false; // set true ONLY after cron migration 07 was successfully installed
   const marvelousNotes={owner:0,client:null,user:null,claim:null,keys:null,privateKeys:null,inbox:[],outbox:[],decrypted:new Map(),decrypting:new Set(),view:'inbox',busy:false,error:'',initialized:false,epoch:0,draftTo:'',draftBody:'',ttl:'30d',sendAt:'',unlocked:false};
+  // Session-only, opt-in unlocking. Never persist or log the entered password.
+  // Cloud Hub passwords and Paw Notes key-vault passphrases can be different.
+  const marvelousPrompt={account:0,checked:false,checking:false,shown:false,suppressed:false,
+    busy:false,tryAgainAt:0,attempts:0};
+  const marvelousPromptNeverKey=id=>'pawlounge-offline-unlock-never-v1-'+numeric(id);
+  const marvelousPromptDisabled=id=>{try{return localStorage.getItem(marvelousPromptNeverKey(id))==='1';}catch{return false;}};
+  function marvelousPromptHide(){
+    const modal=ui.shadow?.getElementById('kc-offline-unlock-prompt');
+    if(modal){modal.hidden=true;const field=modal.querySelector('#kc-offline-unlock-password');if(field)field.value='';
+      const err=modal.querySelector('#kc-offline-unlock-error');if(err){err.textContent='';err.hidden=true;}}
+  }
+  function marvelousPromptShow(){
+    if(marvelousPrompt.suppressed||marvelousPromptDisabled(me())||marvelousNotes.privateKeys)return;
+    if(state.open&&state.tab==='notes')return;
+    const modal=ui.shadow?.getElementById('kc-offline-unlock-prompt');
+    if(!modal)return;
+    modal.hidden=false;marvelousPrompt.shown=true;
+    const label=modal.querySelector('#kc-offline-unlock-member');if(label)label.textContent='#'+me();
+  }
+  function marvelousPromptTick(){
+    const id=me();
+    if(marvelousPrompt.account!==id){
+      marvelousPromptHide();
+      Object.assign(marvelousPrompt,{account:id,checked:false,checking:false,shown:false,suppressed:false,busy:false,tryAgainAt:0,attempts:0});
+    }
+    if(!id||!ui.shadow||marvelousPrompt.busy)return;
+    if(marvelousPrompt.suppressed||marvelousPromptDisabled(id)||marvelousNotes.privateKeys){marvelousPromptHide();return;}
+    if(state.open&&state.tab==='notes'){marvelousPrompt.suppressed=true;marvelousPromptHide();return;}
+    if(marvelousPrompt.checked){
+      if(marvelousNotes.user&&marvelousNotes.claim?.verified_at&&marvelousNotes.keys&&marvelousNotes.owner===id)
+        marvelousPromptShow();
+      return;
+    }
+    // A missing locally persisted Supabase session is NOT a reason to create an
+    // anonymous account or ask for a password. A new user sets up in Paw Notes.
+    try{if(!localStorage.getItem('marvelous-mailbox-local-bc-'+id)){marvelousPrompt.checked=true;return;}}catch{return;}
+    if(marvelousPrompt.checking||Date.now()<marvelousPrompt.tryAgainAt)return;
+    marvelousPrompt.checking=true;
+    void (async()=>{
+      await marvelousEnsureCrypto();
+      await marvelousFetch();
+      if(me()!==id)return;
+      marvelousPrompt.checked=true;
+      if(marvelousNotes.user&&marvelousNotes.claim?.verified_at&&marvelousNotes.keys&&
+         marvelousVaultStorageStatus().currentVaultFound)marvelousPromptShow();
+    })().catch(()=>{
+      marvelousPrompt.tryAgainAt=Date.now()+60000; // Transient offline / SDK failure.
+      marvelousPrompt.attempts++;
+      if(marvelousPrompt.attempts>=3)marvelousPrompt.checked=true;
+    }).finally(()=>{marvelousPrompt.checking=false;});
+  }
+  async function marvelousPromptUnlock(){
+    const modal=ui.shadow?.getElementById('kc-offline-unlock-prompt');
+    if(!modal||modal.hidden||marvelousPrompt.busy)return;
+    const field=modal.querySelector('#kc-offline-unlock-password');
+    // Capture first; UI redraws can remove inputs. Drop the DOM copy immediately.
+    const pass=String(field?.value||'');if(field)field.value='';
+    const err=modal.querySelector('#kc-offline-unlock-error');
+    if(!pass){if(err){err.hidden=false;err.textContent='Enter your Paw Notes encryption passphrase.';}return;}
+    const id=me();marvelousPrompt.busy=true;
+    for(const b of modal.querySelectorAll('button'))b.disabled=true;
+    try{
+      await marvelousFetch();
+      if(id!==me()||!marvelousNotes.claim?.verified_at||!marvelousNotes.keys)
+        throw Error('This BC mailbox is not verified yet. Open Paw Notes to finish setup.');
+      await marvelousUnlockVault(pass);
+      await marvelousFetch();
+      marvelousPrompt.suppressed=true;marvelousPromptHide();
+      notice('🔓 Offline messaging unlocked for this session.');
+    }catch(e){
+      if(err){err.hidden=false;err.textContent=String(e?.message||'Could not unlock this mailbox.').slice(0,260);}
+    }finally{
+      marvelousPrompt.busy=false;
+      for(const b of modal.querySelectorAll('button'))b.disabled=false;
+    }
+  }
   let marvelousSdkLoader=null;
   let marvelousNextBackgroundSync=0;
   let marvelousLastUnread=-1;
@@ -6936,6 +7099,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const ecdh=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.ecdh),{name:'ECDH',namedCurve:'P-256'},false,['deriveBits']);
     const sign=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.sign),{name:'ECDSA',namedCurve:'P-256'},false,['sign']);
     marvelousNotes.privateKeys={ecdh,sign,ecdhPublic:marvelousPub(vault.ecdhPublic),signPublic:marvelousPub(vault.signPublic)};marvelousNotes.unlocked=true;
+    void marvelousImportOfflineChats().catch(err=>console.warn('[PawLounge] Offline chat sync:',err));
   }
   async function marvelousEnsureCrypto(){
     if(!window.isSecureContext||!crypto?.subtle)throw Error('Browser Web Crypto is unavailable; secure Paw Notes cannot be used.');
@@ -6967,6 +7131,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     marvelousNotes.outbox=marvelousCheck(await outQuery.order('sent_at',{ascending:false}).limit(50))||[];
     if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account switched.');
     marvelousUpdateUnreadIndicator();
+    if(marvelousNotes.privateKeys)void marvelousImportOfflineChats().catch(err=>console.warn('[PawLounge] Offline chat sync:',err));
   }
   async function marvelousDirectory(member){
     if(!numeric(member))throw Error('Enter a numeric Bondage Club MemberNumber.');
@@ -7007,6 +7172,67 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const w=marvelousCanonicalEnvelope({v:1,id,from:String(from),to:String(to),epk,r,s});
     const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},marvelousNotes.privateKeys.sign,marvelousUtf8(JSON.stringify(w)));
     return {...w,sig:marvelousB64(signature)};
+  }
+  const MARVELOUS_OFFLINE_NOTE_TTL_MS=7*24*60*60*1000;
+  const MARVELOUS_OFFLINE_CHAT_PREFIX='\u001ePawLounge-Offline-Chat-v1\u001e\n';
+  let marvelousOfflineImportBusy=false;
+  // Real offline delivery goes through the existing authenticated, signed,
+  // end-to-end encrypted mailbox. Never transmit private text through BC as a
+  // fake delivery attempt, and never downgrade after an encryption failure.
+  async function marvelousSendOfflineChat(recipient,text,onHandoff){
+    await marvelousEnsureCrypto();
+    const c=await marvelousClient();
+    if(!marvelousNotes.user||!marvelousNotes.claim||!marvelousNotes.keys)
+      await marvelousFetch();
+    marvelousAssertIdentity();
+    if(!marvelousNotes.privateKeys)
+      throw Error('Open Paw Notes and unlock your encryption vault before sending an offline message.');
+    const to=numeric(recipient),member=await marvelousDirectory(to);
+    if(!member.accept_notes)throw Error('BC #'+to+' is not accepting offline Paw Notes.');
+    const envelope=await marvelousEncrypt(MARVELOUS_OFFLINE_CHAT_PREFIX+text,to,member);
+    const row={id:envelope.id,sender_uid:marvelousNotes.user.id,recipient_uid:member.auth_user_id,
+      sender_bc_member:me(),recipient_bc_member:to,envelope,
+      expires_at:new Date(Date.now()+MARVELOUS_OFFLINE_NOTE_TTL_MS).toISOString()};
+    // From here an interrupted request may have been accepted; do not
+    // automatically retry and accidentally send twice.
+    onHandoff();
+    const result=await c.from('marvelous_secure_notes').insert(row);
+    if(result.error){
+      // A definitive SQL rejection was not saved. Network errors remain
+      // unconfirmed and should never be auto-replayed.
+      if(result.status>=400&&result.status<500)throw Object.assign(new Error(result.error.message),{definitive:true});
+      throw result.error;
+    }
+    return envelope.id;
+  }
+  async function marvelousImportOfflineChats(){
+    if(marvelousOfflineImportBusy||!marvelousNotes.privateKeys||!marvelousNotes.claim?.verified_at)return;
+    const owner=me(),uid=marvelousNotes.user?.id;
+    if(!uid)return;
+    marvelousOfflineImportBusy=true;
+    const ledgerKey='pawlounge-offline-import-v1-'+owner;
+    let ledger=[];
+    try{const stored=JSON.parse(localStorage.getItem(ledgerKey)||'[]');if(Array.isArray(stored))ledger=stored.filter(x=>typeof x==='string'&&/^[0-9a-f-]{36}$/.test(x)).slice(-1000);}catch{}
+    const seen=new Set(ledger);
+    try{
+      for(const row of marvelousNotes.inbox){
+        if(owner!==me()||uid!==marvelousNotes.user?.id||!marvelousNotes.privateKeys)break;
+        if(seen.has(row.id)||numeric(row.recipient_bc_member)!==owner)continue;
+        let plain;
+        try{plain=await marvelousDecrypt(row,true);}catch{continue;}
+        if(!plain.startsWith(MARVELOUS_OFFLINE_CHAT_PREFIX))continue;
+        const body=plain.slice(MARVELOUS_OFFLINE_CHAT_PREFIX.length);
+        const from=numeric(row.sender_bc_member);
+        if(!from||from===owner||!body||body.length>2000)continue;
+        // The BC sender and member number are checked by MarvelousDecrypt's
+        // signature verification before the text enters local chat history.
+        appendMessage(from,body,from,'beep','network',{messageId:'marv_'+row.id,offline:true});
+        seen.add(row.id);ledger.push(row.id);
+        try{localStorage.setItem(ledgerKey,JSON.stringify(ledger.slice(-1000)));}catch(e){
+          console.warn('[PawLounge] Could not save offline import marker; browser storage may be full.',e);
+        }
+      }
+    }finally{marvelousOfflineImportBusy=false;}
   }
   async function marvelousDecrypt(row,inbox){
     if(!marvelousNotes.privateKeys)return '[Encrypted — unlock your keys to read]';
@@ -7075,7 +7301,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         const plaintext=await marvelousDecrypt(row,inbox);
         if(epoch!==marvelousNotes.epoch)return;
         marvelousNotes.decrypted.set(row.id,plaintext);
-        if(el.isConnected)el.textContent=plaintext;
+        if(el.isConnected)el.textContent=plaintext.startsWith(MARVELOUS_OFFLINE_CHAT_PREFIX)?plaintext.slice(MARVELOUS_OFFLINE_CHAT_PREFIX.length):plaintext;
       }catch(e){if(el.isConnected)el.textContent='⛔ Cannot authenticate/decrypt this message: '+String(e?.message||e).slice(0,130);}
       finally{marvelousNotes.decrypting.delete(row.id);}
     }
@@ -7100,7 +7326,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       inside=`<h3>🔐 BC #${me()} — one-time automatic verification</h3><p>Confirm your account with a one-time private whisper to PawID. Once verified, you can send and receive private notes without repeating this step each time you sign in.</p>${MARVELOUS_VERIFIER_BC_MEMBER>0?`<p>PawID <b>#${MARVELOUS_VERIFIER_BC_MEMBER}</b> must be online and in your current BC chatroom. Join PawID in <b>Subbycat's place</b> before continuing.</p><button class="primary" data-action="marv-auto-verify">Send verification whisper</button>`:'<p class="kc-marv-error">Verification is not available right now. Please try again later.</p>'}<p class="muted">Your confirmation code: <code>Marvelous verify: ${escapeText(x.claim.challenge_code)}</code></p><button class="secondary" data-action="marv-refresh">Check verification</button><button class="secondary" data-action="marv-backup">Save encrypted key backup</button>`;
     }else{
       const inboxUnread=x.inbox.filter(m=>!m.read_at).length;
-      inside=`<p class="muted">✓ Verified BC #${me()} · ${inboxUnread} unread · ciphertext stored for 30 days.</p>
+      inside=`<p class="muted">✓ Verified BC #${me()} · ${inboxUnread} unread · Paw Notes expire according to their selected lifetime (offline chat notes: 7 days).</p>
+        ${marvelousPromptDisabled(me())?'<p class="muted">Sign-in unlock reminder is disabled. <button class="secondary" data-action="marv-prompt-allow">Ask to unlock on sign-in</button></p>':'<p class="muted">On sign-in, Marvelous can offer to unlock your offline mailbox. You can dismiss or disable the reminder.</p>'}
         ${x.privateKeys?'<p class="muted">🔓 Vault unlocked for this session.</p>':`<p class="muted">Paw Notes needs the passphrase chosen when this mailbox was created. The Cloud Hub backup password may be different.</p><label>Unlock encrypted messages with your Paw Notes passphrase<input class="field" type="password" id="kc-marv-pass" autocomplete="off"></label><button class="primary" data-action="marv-unlock">Unlock</button><p class="muted">Key vault on this browser: <b>${marvelousVaultStorageStatus().currentVaultFound?'found':'not found'}</b>. ${marvelousVaultStorageStatus().otherVaultsForThisBCMember?'Older login vaults also exist here; do not delete browser storage.':''}</p><label>Restore your saved encrypted-key backup (JSON)<input class="field" id="kc-marv-keyfile" type="file" accept=".json,application/json"></label><button class="secondary" data-action="marv-key-info">Check key storage</button>`}
         ${!x.privateKeys?`<section class="kc-marv-compose"><h3>Encryption key recovery</h3>
           ${marvelousVaultStorageStatus().pendingKeyReset?`<p>A previous key reset was interrupted. Enter the passphrase chosen during that reset to finish safely.</p><label>Reset passphrase<input class="field" type="password" id="kc-marv-reset-pass" autocomplete="off"></label><button class="secondary" data-action="marv-finish-reset">Finish pending key reset</button><button class="secondary" data-action="marv-discard-reset">Discard pending attempt (server keys unchanged only)</button>`:
@@ -7300,7 +7527,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }
   }
   // Diagnostic excludes keys, passphrases, plaintext, identities' proof codes and tokens.
+  window.MarvelousOfflineUnlockDiag=()=>({version:VERSION,bcMember:me(),reminderDisabled:marvelousPromptDisabled(me()),
+    promptShown:!!ui.shadow?.getElementById('kc-offline-unlock-prompt')?.hidden===false,
+    mailboxVerified:!!marvelousNotes.claim?.verified_at,keysUnlocked:!!marvelousNotes.privateKeys,
+    presenceFresh:pawPresenceIsFresh(),onlineFriendsObserved:pawOnlinePresence.ids.size,
+    offlineRetentionDays:MARVELOUS_OFFLINE_NOTE_TTL_MS/86400000});
   window.MarvelousNotesDiag=()=>({addon:VERSION,bcMember:me(),connected:!!marvelousNotes.client,hasSession:!!marvelousNotes.user,claim:!!marvelousNotes.claim,verified:!!marvelousNotes.claim?.verified_at,unlocked:!!marvelousNotes.privateKeys,inboxCount:marvelousNotes.inbox.length,error:marvelousNotes.error});
+  window.PawLoungeOfflineDiag=()=>({version:VERSION,bcMember:me(),recipient:numeric(state.selected),
+    nativePresenceFresh:Date.now()-pawOnlinePresence.seenAt<130000,
+    recipientConfirmedOffline:pawFriendConfirmedOffline(numeric(state.selected)),
+    composerMode:state.composerMode,mailboxSignedIn:!!marvelousNotes.user,
+    verified:!!marvelousNotes.claim?.verified_at,vaultUnlocked:!!marvelousNotes.privateKeys,
+    recentDeliveries:state.deliveryOutbox.filter(x=>x.kind==='chat'&&(x.mode==='offline'||x.transport==='marvelous')).slice(-5).map(x=>({status:x.status,reason:x.reason,transport:x.transport||x.mode}))});
 
   // Marvelous Hub v1: cloud encryption is strictly opt-in and tied to verified BC ID.
   // NEVER put secret/service role keys here. The account's anonymous Supabase session
@@ -7967,8 +8205,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.body.innerHTML = `<div class="chatlayout" data-paw-chat-theme="${chatTheme(id)}"><section class="chatcenter"><button class="collapse-handle left" data-action="toggleleftpanel" title="${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? 'Expand left panel' : 'Collapse left panel'}"><span class="arr">${(isCompactCollapseLayout() ? !state.compactOpen : state.leftCollapsed) ? '›' : '‹'}</span></button>${rightArrowButton()}<div class="chathead" id="kc-chathead"></div>${outboxMarkup('chat',id)}<div class="msglog" id="kc-log"></div><div class="chat-float-kitten"><button class="facepop-btn" type="button" data-facepop="float-kitten" title="Pat the kitty">${asset('decor-floating-kitten.png','','🐱')}</button></div>
       ${scheduleMarkup('chat',id)}<div class="quick" aria-label="Quick Paws and scheduling">${state.settings.shortcuts.slice(0,6).map((q,i) => `<button class="pill" data-quick="${i}" title="Send this message">🐾 ${escapeText(q)}</button>`).join('')}<button class="pill paw-quick-schedule" type="button" data-action="schedulepaw" title="Schedule a message for later">📅 Schedule</button></div>
       <div class="stickerpicker hidden" id="kc-stickers">${STICKERS.map(s => `<button class="stickerbtn" data-sticker="${s.id}" title="Send ${s.name}">${asset(`sticker-${s.id}.png`,'',s.emoji)}<small>${s.name}</small></button>`).join('')}</div>
-      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option></select>
-      <textarea class="field" id="kc-compose" maxlength="2000" rows="1" placeholder="Write a little meow...">${escapeText(c.draft || '')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div></section>
+      <div class="kc-reply-banner hidden" id="kc-reply-banner"></div><div class="composer chat-composer"><button class="iconbutton sticker-toggle kc-add" data-action="stickers" title="Open sticker tray">＋</button><select class="mode" id="kc-mode" title="Message type"><option value="beep" ${state.composerMode === 'beep' ? 'selected' : ''}>🐱 Beep</option><option value="whisper" ${state.composerMode === 'whisper' ? 'selected' : ''}>🤫 Whisper</option><option value="offline" ${state.composerMode === 'offline' ? 'selected' : ''}>📮 Offline Note</option></select>
+      <textarea class="field" id="kc-compose" maxlength="2000" rows="1" placeholder="${state.composerMode==='offline'?'Write an encrypted offline note...':'Write a little meow...'}">${escapeText(c.draft || '')}</textarea><button class="primary" data-action="send">${asset('ui-send.svg','','➤')}<span class="send-caption">Send</span></button></div></section>
       <aside class="companion" tabindex="0" aria-label="Scrollable profile, stickers, room and actions">${rightDrawerCloseButton()}
         <section class="compcard profilehero"><button class="kitty-profile-avatar facepop-btn" type="button" data-facepop="profile-face" title="Pat the kitty face">${avatar(id)}<span class="kitty-heartbadge">${c.favorite ? '♥' : '♡'}</span></button>
           <div class="profilename">${escapeText(name(id))} ♡ <button class="secondary paw-nickname" data-action="nickname" title="Private nickname">✎</button></div>
@@ -8049,7 +8287,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // preserves the native reply/reaction UI in both paths without divergence.
   function privateMessageMarkup(m,c) {
     const mine=m.from===me(), st=sticker(m.text);
-    return `<div class="msgrow ${mine ? 'mine' : 'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : c.id)}</div><div class="msgcol"><div class="msgbubble">${replyPreview(m.replyTo)}${st ? `<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div><div class="muted">${escapeText(st.name)} sticker</div>` : escapeText(m.text)}</div>${reactionMarkup(m,'chat',c.id)}<div class="msgmeta">${m.mode === 'whisper' ? '🤫 Whisper' : '💌 Beep'} · ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${m.outboxId?` <span class="kc-delivery" data-outbox-status="${escapeText(m.outboxId)}">${escapeText(outboxStatusLabel(outboxById(m.outboxId)))}</span>`:''} ${messageActions(m,'chat')}</div></div></div>`;
+    return `<div class="msgrow ${mine ? 'mine' : 'other'}" data-message-id="${escapeText(m.id)}"><div class="msgavatar">${avatar(mine ? me() : c.id)}</div><div class="msgcol"><div class="msgbubble">${replyPreview(m.replyTo)}${st ? `<div class="msgsticker">${asset(`sticker-${st.id}.png`,'',st.emoji)}</div><div class="muted">${escapeText(st.name)} sticker</div>` : escapeText(m.text)}</div>${reactionMarkup(m,'chat',c.id)}<div class="msgmeta">${m.offline ? '📮 Offline Note' : m.mode === 'whisper' ? '🤫 Whisper' : '💌 Beep'} · ${new Date(m.time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}${m.outboxId?` <span class="kc-delivery" data-outbox-status="${escapeText(m.outboxId)}">${escapeText(outboxStatusLabel(outboxById(m.outboxId)))}</span>`:''} ${messageActions(m,'chat')}</div></div></div>`;
   }
   function privateDateLabel(time) {
     const d=new Date(time);
@@ -8391,6 +8629,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function schedulePawMessage() {
     const g=currentGroup(),recipient=g?g.id:state.selected;
     if(!recipient)return notice('Choose a conversation first.');
+    if(!g && state.composerMode==='offline')return notice('To schedule an encrypted offline note, use Paw Notes → Schedule for later.');
     const text=window.prompt('Message to send later (only while logged in and connected):',ui.input?.value||'');
     if(text===null)return;
     const content=trim(text,g?MAX_GROUP_TEXT:2000);
@@ -9604,6 +9843,17 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function clickUI(e) {
     const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-kick-group-member],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
     if (!target) return;
+    if(target.dataset.action==='marv-prompt-unlock'){void marvelousPromptUnlock();return;}
+    if(target.dataset.action==='marv-prompt-later'){marvelousPrompt.suppressed=true;marvelousPromptHide();return;}
+    if(target.dataset.action==='marv-prompt-never'){
+      try{localStorage.setItem(marvelousPromptNeverKey(me()),'1');}catch{}
+      marvelousPrompt.suppressed=true;marvelousPromptHide();return;
+    }
+    if(target.dataset.action==='marv-prompt-allow'){
+      try{localStorage.removeItem(marvelousPromptNeverKey(me()));}catch{}
+      marvelousPrompt.suppressed=true;notice('Offline messaging unlock prompt enabled for next sign-in.');
+      marvelousUpdate();return;
+    }
     if(String(target.dataset.action||'').startsWith('marvhub-')){marvelousHubAction(target.dataset.action,target);return;}
     if(String(target.dataset.action||'').startsWith('marv-feature-')){void marvelousFeatureAction(target.dataset.action,target);return;}
     if(String(target.dataset.action||'').startsWith('marv-')){void marvelousAction(target.dataset.action,target);return;}
@@ -9833,7 +10083,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(t.id==='paw-circle-filter'){state.circleFilter=t.value;renderSidebar();return;}
     if(t.id==='paw-theme-current'){const c=state.chats[state.selected];if(c&&Object.hasOwn(PAW_CHAT_THEMES,t.value)){c.pawTheme=t.value;saveSoon();renderChat();}return;}
     if(t.id==='paw-import-file'){const file=t.files?.[0];if(file)void importPawBackup(file);t.value='';return;}
-    if (t.id === 'kc-mode') { state.composerMode = t.value; return; }
+    if (t.id === 'kc-mode') { state.composerMode = ['beep','whisper','offline'].includes(t.value)?t.value:'beep'; if(state.composerMode==='offline')notice('📮 Offline Notes are encrypted, saved for 7 days, and require both members to have verified mailboxes. Unlock Paw Notes first.'); return; }
     if (t.id === 'kc-roomsort') {state.roomSort=t.value;saveSoon();renderRooms();return;}
     const k = t.dataset.setting; if (!k || !Object.hasOwn(DEFAULT_SETTINGS,k)) return;
     const value = t.type === 'checkbox' ? t.checked : t.value;
@@ -9857,6 +10107,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (k === 'theme' || k === 'fontSize' || k === 'assetBase' || k==='minimalist' || k==='bubbleShape' || k==='bubbleOpacity') render();
   }
   function keyUI(e) {
+    if(e.target?.id==='kc-offline-unlock-password'&&e.key==='Enter'){
+      e.preventDefault();e.stopPropagation();void marvelousPromptUnlock();return;
+    }
     if (e.target?.classList?.contains('kc-filter-scroll-track')) {
       const viewport = ui.menu?.querySelector('.kc-inbox-filters');
       if (viewport && ['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) {
@@ -9893,7 +10146,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   let lastVisibleRosterSignature='';
   function tick() {
     const id = me();
-    if (!id) { if (!ui.host && document.body) buildUI(); return; }
+    if (!id) { marvelousPromptHide();marvelousPrompt.account=0; if (!ui.host && document.body) buildUI(); return; }
     if (state.myId !== id) { if (state.myId) saveNow(true); pawSecureResetSession(); motionRuntime.active=0; typingSendTimes.clear();state.typingUntil={}; wceSnapshotRuntime.temporaryPortraits.clear(); steadyRemotePortraits.clear(); recentRoomPortraits.clear(); wceSnapshotRuntime.attempts.clear(); wceSnapshotRuntime.reports.clear(); wceSnapshotRuntime.dbMissingUntil=0; state.recentFingerprints.clear(); if (ui.host) { ui.host.remove(); Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null,input:null}); state.open = false; fabCoexistence.temporary=null; } loadForAccount(id); }
     if (ui.host && (!ui.host.isConnected || !ui.panel || !ui.shadow || !ui.fab || !ui.body || !ui.fab.isConnected)) { motionRuntime.active=0; try { ui.host.remove(); } catch {} Object.assign(ui,{host:null,shadow:null,fab:null,panel:null,badge:null,body:null,menu:null,status:null}); }
     if (!ui.host) buildUI();
@@ -9909,6 +10162,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       buildUI();
     }
     hookBC();
+    marvelousPromptTick();
     // A small once-per-login refresh for friends known to have Kittychat.
     if (statusWire.bootAccount!==id && typeof window.ServerSend==='function') {
       statusWire.bootAccount=id;
