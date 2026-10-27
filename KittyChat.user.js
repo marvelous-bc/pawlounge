@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.1.1
+// @version      1.1.2
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.1.1';
+  const VERSION = '1.1.2';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6773,6 +6773,75 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!previous)localStorage.setItem(path,fp); // TOFU: first-contact keys require out-of-band confirmation for stronger trust.
     return fp;
   }
+  function marvelousVaultStorageStatus(){
+    const bc=me(),prefix='marvelous-e2ee-v1-'+bc+'-';
+    const current=marvelousNotes.user?'marvelous-e2ee-v1-'+bc+'-'+marvelousNotes.user.id:'';
+    let found=0,other=0;
+    try{for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k?.startsWith(prefix)){found++;if(k!==current)other++;}
+    }}catch{}
+    return {bcMember:bc,mailboxSignedIn:!!marvelousNotes.user,verified:!!marvelousNotes.claim?.verified_at,
+      registeredKeys:!!marvelousNotes.keys,unlocked:!!marvelousNotes.privateKeys,
+      currentVaultFound:!!current&&!!localStorage.getItem(current),
+      otherVaultsForThisBCMember:other,totalVaultsForThisBCMember:found,
+      guidance:!marvelousNotes.user?'Open Paw Notes and sign in to your mailbox.':
+        other?'Older vaults exist for this BC member on this browser. Do not clear storage; they may belong to a previous Supabase session.':
+        'The Cloud Hub and Paw Notes use separate passphrases. Keep any encrypted key backups.'};
+  }
+  // This diagnostic reports counts and booleans only; never keys, passphrases or Supabase user IDs.
+  window.MarvelousNotesVaultDiag=marvelousVaultStorageStatus;
+  async function marvelousDecodeVaultRecord(obj,password,uid){
+    if(!obj||obj.v!==1||typeof obj.salt!=='string'||typeof obj.iv!=='string'||typeof obj.ct!=='string')
+      throw Error('Invalid encrypted Paw Notes key backup.');
+    if(!password)throw Error('Enter the original Paw Notes key passphrase (not necessarily your cloud backup passphrase).');
+    try{
+      const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+      const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:marvelousUnb64(obj.salt),iterations:310000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
+      const raw=await crypto.subtle.decrypt({name:'AES-GCM',iv:marvelousUnb64(obj.iv),additionalData:marvelousUtf8('marvelous-vault:'+uid)},key,marvelousUnb64(obj.ct));
+      const vault=JSON.parse(marvelousTextDecoder.decode(raw));
+      if(vault?.v!==1||typeof vault.ecdh!=='string'||typeof vault.sign!=='string')throw Error('Damaged encryption keys.');
+      marvelousPub(vault.ecdhPublic);marvelousPub(vault.signPublic);
+      return vault;
+    }catch(e){throw Error('Cannot unlock Paw Notes keys: wrong Paw Notes passphrase, damaged vault, or mismatched mailbox login. Your cloud backup passphrase is separate.');}
+  }
+  async function marvelousRestoreVault(file,password){
+    if(!file||file.size>65536)throw Error('Select a small Marvelous encrypted-key backup JSON file.');
+    if(!marvelousNotes.user||!marvelousNotes.claim?.verified_at||!marvelousNotes.keys)
+      throw Error('Sign into your original verified mailbox before restoring keys.');
+    const backup=JSON.parse(await file.text());
+    if(backup?.format!=='MarvelousKeyBackup-v1'||numeric(backup.bc_member)!==me())
+      throw Error('This is not an encrypted key backup for your BC account.');
+    if(backup.auth_user_id!==marvelousNotes.user.id)
+      throw Error('This key backup belongs to a DIFFERENT Supabase mailbox login. Do not overwrite this vault. Identity recovery/relinking must be completed first.');
+    const vault=await marvelousDecodeVaultRecord(backup.vault,password,marvelousNotes.user.id);
+    const keys=marvelousNotes.keys;
+    if(JSON.stringify(marvelousPub(vault.ecdhPublic))!==JSON.stringify(marvelousPub(keys.ecdh_public_jwk))||
+       JSON.stringify(marvelousPub(vault.signPublic))!==JSON.stringify(marvelousPub(keys.ecdsa_public_jwk)))
+      throw Error('SECURITY: Backup public keys do not match this verified mailbox. Restore refused.');
+    const signPriv=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.sign),{name:'ECDSA',namedCurve:'P-256'},false,['sign']);
+    const signPub=await crypto.subtle.importKey('jwk',marvelousPub(keys.ecdsa_public_jwk),{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+    const test=marvelousUtf8('marvelous-vault-recovery-key-check');
+    const sig=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},signPriv,test);
+    if(!await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},signPub,sig,test))
+      throw Error('SECURITY: Signing key in backup does not match the mailbox.');
+    const ecdhPriv=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.ecdh),{name:'ECDH',namedCurve:'P-256'},false,['deriveBits']);
+    const ecdhPub=await crypto.subtle.importKey('jwk',marvelousPub(keys.ecdh_public_jwk),{name:'ECDH',namedCurve:'P-256'},false,[]);
+    const ephem=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);
+    const testA=new Uint8Array(await crypto.subtle.deriveBits({name:'ECDH',public:ephem.publicKey},ecdhPriv,256));
+    const testB=new Uint8Array(await crypto.subtle.deriveBits({name:'ECDH',public:ecdhPub},ephem.privateKey,256));
+    if(testA.length!==testB.length||testA.some((v,i)=>v!==testB[i]))
+      throw Error('SECURITY: Decryption key in backup does not match the mailbox.');
+    const key=marvelousVaultKey(),existing=localStorage.getItem(key);
+    if(existing){
+      if(!window.confirm('This browser already has an encrypted Paw Notes vault. Export the current vault and replace it with the validated backup?'))return;
+      download('Marvelous-Previous-Key-Vault-BC-'+me()+'.json','application/json',
+        JSON.stringify({format:'MarvelousKeyBackup-v1',bc_member:me(),auth_user_id:marvelousNotes.user.id,vault:JSON.parse(existing)},null,2));
+    }else if(!window.confirm('Restore the validated encrypted key backup for this verified mailbox?'))return;
+    localStorage.setItem(key,JSON.stringify(backup.vault));
+    await marvelousUnlockVault(password);
+    marvelousUpdate();notice('Your original encrypted Paw Notes keys were restored and unlocked.');
+  }
   async function marvelousStoreVault(password,ecdh,sign){
     if(password.length<12)throw Error('Use a passphrase of at least 12 characters.');
     const secret=JSON.stringify({v:1,ecdh:marvelousB64(await crypto.subtle.exportKey('pkcs8',ecdh.privateKey)),sign:marvelousB64(await crypto.subtle.exportKey('pkcs8',sign.privateKey)),ecdhPublic:marvelousPub(await crypto.subtle.exportKey('jwk',ecdh.publicKey)),signPublic:marvelousPub(await crypto.subtle.exportKey('jwk',sign.publicKey))});
@@ -6785,17 +6854,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   async function marvelousUnlockVault(password){
     const record=localStorage.getItem(marvelousVaultKey());
-    if(!record)throw Error('Encrypted keys not found on this device. This mailbox needs the original keys; never silently replace them.');
-    const obj=JSON.parse(record);
-    if(obj?.v!==1)throw Error('Unsupported mailbox key backup.');
-    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
-    const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt:marvelousUnb64(obj.salt),iterations:310000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['decrypt']);
-    let vault;
-    try{
-      const raw=await crypto.subtle.decrypt({name:'AES-GCM',iv:marvelousUnb64(obj.iv),additionalData:marvelousUtf8('marvelous-vault:'+marvelousNotes.user.id)},key,marvelousUnb64(obj.ct));
-      vault=JSON.parse(marvelousTextDecoder.decode(raw));
-    }catch{throw Error('Incorrect passphrase or damaged encrypted keys.');}
-    if(vault?.v!==1)throw Error('Unsupported key vault.');
+    if(!record)throw Error('Encrypted keys not found on this browser. Do not create new keys: restore the original key backup or recover the mailbox first.');
+    const vault=await marvelousDecodeVaultRecord(JSON.parse(record),password,marvelousNotes.user.id);
     const ecdh=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.ecdh),{name:'ECDH',namedCurve:'P-256'},false,['deriveBits']);
     const sign=await crypto.subtle.importKey('pkcs8',marvelousUnb64(vault.sign),{name:'ECDSA',namedCurve:'P-256'},false,['sign']);
     marvelousNotes.privateKeys={ecdh,sign,ecdhPublic:marvelousPub(vault.ecdhPublic),signPublic:marvelousPub(vault.signPublic)};marvelousNotes.unlocked=true;
@@ -6954,7 +7014,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }else{
       const inboxUnread=x.inbox.filter(m=>!m.read_at).length;
       inside=`<p class="muted">✓ Verified BC #${me()} · ${inboxUnread} unread · ciphertext stored for 30 days.</p>
-        ${x.privateKeys?'<p class="muted">🔓 Vault unlocked for this session.</p>':`<label>Unlock encrypted messages with your passphrase<input class="field" type="password" id="kc-marv-pass" autocomplete="off"></label><button class="primary" data-action="marv-unlock">Unlock</button>`}
+        ${x.privateKeys?'<p class="muted">🔓 Vault unlocked for this session.</p>':`<p class="muted">Paw Notes needs the passphrase chosen when this mailbox was created. The Cloud Hub backup password may be different.</p><label>Unlock encrypted messages with your Paw Notes passphrase<input class="field" type="password" id="kc-marv-pass" autocomplete="off"></label><button class="primary" data-action="marv-unlock">Unlock</button><p class="muted">Key vault on this browser: <b>${marvelousVaultStorageStatus().currentVaultFound?'found':'not found'}</b>. ${marvelousVaultStorageStatus().otherVaultsForThisBCMember?'Older login vaults also exist here; do not delete browser storage.':''}</p><label>Restore your saved encrypted-key backup (JSON)<input class="field" id="kc-marv-keyfile" type="file" accept=".json,application/json"></label><button class="secondary" data-action="marv-key-info">Check key storage</button>`}
         <div class="kc-marv-actions"><button class="secondary" data-action="marv-backup">Save encrypted key backup</button><button class="secondary" data-action="marv-refresh">↻ Refresh</button><button class="secondary" data-action="marv-switch" ${x.view==='inbox'?'disabled':''}>📥 Inbox</button><button class="secondary" data-action="marv-outbox" ${x.view==='outbox'?'disabled':''}>📤 Sent</button></div>
         ${x.privateKeys?`<section class="kc-marv-compose"><h3>✉️ Leave encrypted Paw Note</h3><label>Recipient's BC member number<input id="kc-marv-to" class="field" inputmode="numeric" placeholder="123456" value="${escapeText(x.draftTo)}"></label><label>Your private message<textarea id="kc-marv-body" class="field" rows="4" maxlength="2000">${escapeText(x.draftBody)}</textarea></label><label>Message expiration<select class="field" id="marv-message-ttl"><option value="30d" ${x.ttl==='30d'?'selected':''}>30 days</option><option value="7d" ${x.ttl==='7d'?'selected':''}>7 days</option><option value="1d" ${x.ttl==='1d'?'selected':''}>1 day</option></select></label><label>Schedule for later (optional; requires trusted scheduler)<input type="datetime-local" class="field" id="marv-send-at" value="${escapeText(x.sendAt||'')}"></label><button class="primary" data-action="marv-send">Encrypt & send</button></section>`:''}
         <h3>${x.view==='inbox'?'📥 Secure inbox':'📤 Secure sent notes'}</h3>${marvelousNoteList(x.view==='inbox'?x.inbox:x.outbox,x.view==='inbox')}`;
@@ -7046,6 +7106,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       download('Marvelous-Encrypted-Keys-BC-'+me()+'.json','application/json',JSON.stringify({format:'MarvelousKeyBackup-v1',bc_member:me(),auth_user_id:marvelousNotes.user.id,vault:JSON.parse(vault)},null,2));
       notice('Encrypted key backup saved. Store it privately; never share your passphrase.');
     });
+    if(act==='marv-key-info'){
+      const d=marvelousVaultStorageStatus();
+      notice((d.currentVaultFound?'This mailbox has an encrypted key vault on this browser.':'No encrypted keys exist for the current mailbox login on this browser.')+(d.otherVaultsForThisBCMember?' Previous-login vault(s) found: '+d.otherVaultsForThisBCMember+'.':''));
+      return;
+    }
     if(act==='marv-unlock'){
       const pass=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
       return marvelousRun(async()=>{await marvelousUnlockVault(pass);marvelousUpdate();});
@@ -9604,6 +9669,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function changeUI(e) {
     const t = e.target;
     if(t.id==='marv-memory-favorites'){marvelousRoomMemoryFilters.favoritesOnly=!!t.checked;renderRoomMemories();return;}
+    if(t.id==='kc-marv-keyfile'){
+      const file=t.files?.[0],password=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
+      if(file)void marvelousRun(()=>marvelousRestoreVault(file,password));
+      t.value='';return;
+    }
     if(t.id==='marv-message-ttl'){marvelousNotes.ttl=t.value;return;}
     if(t.id==='marvhub-ns'){marvelousHub.selectedNamespace=t.value;return;}
     if(t.id==='marvhub-notification-category'){marvelousHub.notificationCategory=['all','note','invitation','guestbook','scrapbook','plushie','group'].includes(t.value)?t.value:'all';renderMarvelousHub();return;}
