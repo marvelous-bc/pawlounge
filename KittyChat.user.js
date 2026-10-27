@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.1.7
+// @version      1.1.8
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.1.7';
+  const VERSION = '1.1.8';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7174,7 +7174,30 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     return {...w,sig:marvelousB64(signature)};
   }
   const MARVELOUS_OFFLINE_NOTE_TTL_MS=7*24*60*60*1000;
+  // Keep the original marker for backwards-compatible reading. Never show
+  // either transport marker in the user-facing mailbox or conversation history.
   const MARVELOUS_OFFLINE_CHAT_PREFIX='\u001ePawLounge-Offline-Chat-v1\u001e\n';
+  const MARVELOUS_OFFLINE_CHAT_V2_PREFIX='\u001ePawLounge-Offline-Chat-v2\u001e\n';
+  const marvelousAccountName=value=>trim(value,80).replace(/[\x00-\x1f\x7f-\x9f]/g,' ').replace(/\s+/g,' ').trim();
+  function marvelousOfflineChatContent(plaintext){
+    if(plaintext.startsWith(MARVELOUS_OFFLINE_CHAT_V2_PREFIX)){
+      let packet;
+      try{packet=JSON.parse(plaintext.slice(MARVELOUS_OFFLINE_CHAT_V2_PREFIX.length));}catch{}
+      if(packet?.v!==2||typeof packet.body!=='string'||!packet.body||packet.body.length>2000)
+        throw Error('Invalid offline chat format.');
+      return {offline:true,body:packet.body,senderName:marvelousAccountName(packet.senderName)};
+    }
+    if(plaintext.startsWith(MARVELOUS_OFFLINE_CHAT_PREFIX))
+      return {offline:true,body:plaintext.slice(MARVELOUS_OFFLINE_CHAT_PREFIX.length),senderName:''};
+    return {offline:false,body:plaintext,senderName:''};
+  }
+  // An account name is a display hint, never proof of identity. Verified,
+  // signed BC member numbers remain authoritative for message routing.
+  function marvelousKnownAccountName(member,senderName=''){
+    const roomName=Array.isArray(window.ChatRoomCharacter)?window.ChatRoomCharacter.find(p=>numeric(p?.MemberNumber)===member)?.Name:'';
+    const candidates=[roomName,state.chats[member]?.displayName,window.Player?.FriendNames?.get?.(member),state.profiles[member]?.name,senderName];
+    return candidates.map(marvelousAccountName).find(value=>value&&value!==`Kitty #${member}`&&value!==`BC #${member}`)||'';
+  }
   let marvelousOfflineImportBusy=false;
   // Real offline delivery goes through the existing authenticated, signed,
   // end-to-end encrypted mailbox. Never transmit private text through BC as a
@@ -7189,7 +7212,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       throw Error('Open Paw Notes and unlock your encryption vault before sending an offline message.');
     const to=numeric(recipient),member=await marvelousDirectory(to);
     if(!member.accept_notes)throw Error('BC #'+to+' is not accepting offline Paw Notes.');
-    const envelope=await marvelousEncrypt(MARVELOUS_OFFLINE_CHAT_PREFIX+text,to,member);
+    // The name travels inside the sender-signed, end-to-end encrypted payload.
+    // It is optional metadata and cannot replace the verified sender MemberNumber.
+    const displayName=marvelousAccountName(window.Player?.Name||window.Player?.Nickname||'');
+    const packet=MARVELOUS_OFFLINE_CHAT_V2_PREFIX+JSON.stringify({v:2,senderName:displayName,body:text});
+    const envelope=await marvelousEncrypt(packet,to,member);
     const row={id:envelope.id,sender_uid:marvelousNotes.user.id,recipient_uid:member.auth_user_id,
       sender_bc_member:me(),recipient_bc_member:to,envelope,
       expires_at:new Date(Date.now()+MARVELOUS_OFFLINE_NOTE_TTL_MS).toISOString()};
@@ -7220,13 +7247,15 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         if(seen.has(row.id)||numeric(row.recipient_bc_member)!==owner)continue;
         let plain;
         try{plain=await marvelousDecrypt(row,true);}catch{continue;}
-        if(!plain.startsWith(MARVELOUS_OFFLINE_CHAT_PREFIX))continue;
-        const body=plain.slice(MARVELOUS_OFFLINE_CHAT_PREFIX.length);
+        const content=marvelousOfflineChatContent(plain);
+        if(!content.offline)continue;
         const from=numeric(row.sender_bc_member);
-        if(!from||from===owner||!body||body.length>2000)continue;
+        if(!from||from===owner||!content.body||content.body.length>2000)continue;
         // The BC sender and member number are checked by MarvelousDecrypt's
         // signature verification before the text enters local chat history.
-        appendMessage(from,body,from,'beep','network',{messageId:'marv_'+row.id,offline:true});
+        if(content.senderName&&!state.chats[from]?.displayName)
+          rememberNativeSender(from,content.senderName);
+        appendMessage(from,content.body,from,'beep','network',{messageId:'marv_'+row.id,offline:true});
         seen.add(row.id);ledger.push(row.id);
         try{localStorage.setItem(ledgerKey,JSON.stringify(ledger.slice(-1000)));}catch(e){
           console.warn('[PawLounge] Could not save offline import marker; browser storage may be full.',e);
@@ -7286,7 +7315,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       const status=inbox&&!m.read_at?`<button class="secondary" data-action="marv-read" data-note-id="${escapeText(m.id)}">Mark read</button>`:
         `<span class="muted">${inbox?'Read':m.read_at?'Read by recipient':'Not yet read'}</span>`;
       const cached=marvelousNotes.decrypted.get(m.id);
-      return `<article class="kc-marv-item"><div class="kc-marv-meta"><b>${inbox?'From':'To'}: BC #${other}</b> <small>${when}</small></div><p class="kc-marv-body" data-marv-plain="${escapeText(m.id)}">${typeof cached==='string'?escapeText(cached):marvelousNotes.privateKeys?'Decrypting…':'🔒 Encrypted — unlock to read'}</p>${status}${inbox?`<button class="secondary" data-action="marv-block" data-bc-id="${sender}">Block #${sender}</button>`:''}</article>`;
+      let content=null;
+      if(typeof cached==='string'){
+        try{content=marvelousOfflineChatContent(cached);}catch{content={body:'Cannot display this offline chat.',offline:false,senderName:''};}
+      }
+      const accountName=marvelousKnownAccountName(other,inbox?content?.senderName||'':'');
+      const nameTag=accountName?' — '+escapeText(accountName):'';
+      return `<article class="kc-marv-item"><div class="kc-marv-meta"><b>${inbox?'From':'To'}: BC #${other}</b><span data-marv-sender-name="${escapeText(m.id)}">${nameTag}</span> <small>${when}</small></div><div class="muted" data-marv-offline-label="${escapeText(m.id)}" ${content?.offline?'':'hidden'}>Offline chat</div><p class="kc-marv-body" data-marv-plain="${escapeText(m.id)}">${content?escapeText(content.body):marvelousNotes.privateKeys?'Decrypting…':'🔒 Encrypted — unlock to read'}</p>${status}${inbox?`<button class="secondary" data-action="marv-block" data-bc-id="${sender}">Block #${sender}</button>`:''}</article>`;
     }).join('');
   }
   async function marvelousDecryptVisible(){
@@ -7300,8 +7335,17 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       try{
         const plaintext=await marvelousDecrypt(row,inbox);
         if(epoch!==marvelousNotes.epoch)return;
+        const content=marvelousOfflineChatContent(plaintext);
         marvelousNotes.decrypted.set(row.id,plaintext);
-        if(el.isConnected)el.textContent=plaintext.startsWith(MARVELOUS_OFFLINE_CHAT_PREFIX)?plaintext.slice(MARVELOUS_OFFLINE_CHAT_PREFIX.length):plaintext;
+        if(el.isConnected){
+          el.textContent=content.body;
+          const label=ui.body?.querySelector('[data-marv-offline-label="'+row.id+'"]');
+          if(label)label.hidden=!content.offline;
+          const nameTag=ui.body?.querySelector('[data-marv-sender-name="'+row.id+'"]');
+          const member=numeric(inbox?row.sender_bc_member:row.recipient_bc_member);
+          const accountName=marvelousKnownAccountName(member,inbox?content.senderName:'');
+          if(nameTag)nameTag.textContent=accountName?' — '+accountName:'';
+        }
       }catch(e){if(el.isConnected)el.textContent='⛔ Cannot authenticate/decrypt this message: '+String(e?.message||e).slice(0,130);}
       finally{marvelousNotes.decrypting.delete(row.id);}
     }
