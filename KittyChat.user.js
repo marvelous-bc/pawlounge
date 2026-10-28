@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.1
+// @version      1.2.2
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.1';
+  const VERSION = '1.2.2';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -104,7 +104,7 @@
     friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, friendStatusMinutes:0, friendStatusExpiresAt:0, petPersona:'curious-kitten', petPersonaShare:true, petPersonaDescription:'', shareLivePlushie:false, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
     shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
-    peerCacheDays:7,peerCacheCap:200,
+    peerCacheDays:7,peerCacheCap:200,showSubbycatRecentMessages:true,
     encodePrivateChat:false,quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
@@ -2680,6 +2680,13 @@
     onPublicRoomMessage(data, sender);
   }
   function restoreSubbycatRoomHistory() {
+    // Presentation-only preference: retain local history without placing it
+    // into the native BC chat log while this feature is disabled.
+    if (state.settings.showSubbycatRecentMessages === false) {
+      document.getElementById('kc-subbycat-previous-session')?.remove();
+      roomReplay.lastRoom=''; roomReplay.snapshot=[]; roomReplay.log=null;
+      return;
+    }
     const active = inHistoryRoom();
     if (!active) {
       roomReplay.lastRoom=''; roomReplay.snapshot=[]; roomReplay.log=null;
@@ -10267,6 +10274,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     <label>Temporary profile limit<select class="field" data-setting="peerCacheCap">${[50,100,200,400].map(n=>`<option value="${n}" ${Number(p.peerCacheCap)===n?'selected':''}>${n} profiles</option>`).join('')}</select></label>
     <div class="flex"><button class="secondary" data-action="pawstorage-report">Show storage breakdown</button><button class="secondary" data-action="pawstorage-clean">Clean expired other-player cache</button></div>
     <p class="muted">Marvelous cloud backups remain optional and passphrase-encrypted. Nothing is uploaded by this cleanup.</p></section>
+    <section class="paw-settings-section"><div class="smalltitle">🏠 Subbycat's place · chat history</div>
+    ${control('showSubbycatRecentMessages','Show the last 20 public messages from the previous session when I enter the room')}
+    <p class="muted">Turning this off hides the previous-session message panel immediately. It does not erase your locally saved public messages or change BC's live chat. Whispers are never included.</p></section>
     <div class="smalltitle">🎨 Cozy appearance</div><div class="settingrow"><label for="kc-theme">Colour theme</label><select class="field" id="kc-theme" data-setting="theme">${VALID_THEMES.map(t => `<option value="${t}" ${p.theme === t ? 'selected':''}>${t==='midnight'?'Velvet (default)':t[0].toUpperCase()+t.slice(1)}</option>`).join('')}</select></div>
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
     <div class="settingrow"><span>Zoom-independent sizing</span><button class="secondary" data-action="calibratezoom" type="button">Set current zoom as 100% reference</button></div>
@@ -10591,6 +10601,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(k==='peerCacheDays' && !PAW_PEER_DAYS.includes(Number(value)))return;
     if(k==='peerCacheCap' && !PAW_PEER_CAPS.includes(Number(value)))return;
     state.settings[k] = ['friendStatusMinutes','peerCacheDays','peerCacheCap'].includes(k)?Number(value):value;
+    if (k === 'showSubbycatRecentMessages') restoreSubbycatRoomHistory();
     if(['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k))scheduleStatusExpiry();
     saveSoon();
     if (['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k)) {
@@ -10712,7 +10723,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     historyDiagnostics:() => ({version:VERSION,account:state.myId,storage:'IndexedDB',queued:historyArchive.pending.length,savedThisSession:historyArchive.saved,readThisSession:historyArchive.fetched,error:historyArchive.error,hasMore:state.historyHasMore,loadedOlder:state.historyOlder.length,activeConversation:state.historySelection}),
     exportFullHistory:()=>exportFullHistory(),
     importNativeBeeps:()=>importAvailableNativeBeeps(),
-    roomHistoryDiagnostics:() => ({version:VERSION, room:window.ChatRoomData?.Name || null, tracking:inHistoryRoom(), stored:state.roomHistory.length, visible:!!document.getElementById('kc-subbycat-previous-session'), restores:roomReplay.restoreCount, limit:20}),
+    roomHistoryDiagnostics:() => ({version:VERSION, room:window.ChatRoomData?.Name || null, tracking:inHistoryRoom(), displayEnabled:state.settings.showSubbycatRecentMessages !== false, stored:state.roomHistory.length, visible:!!document.getElementById('kc-subbycat-previous-session'), restores:roomReplay.restoreCount, limit:20}),
     refreshRooms: () => { if (!ui.body) safeTick(); state.tab='rooms'; toggle(true); return searchRooms('console-refresh'); },
     roomSearchDiagnostics: () => ({ version:VERSION, activeTab:state.tab, panelOpen:state.open, roomsVisible:!!ui.shadow?.getElementById('kc-roomquery'), selected:'All spaces (X/M/F)', query:state.roomSearch, loading:state.roomLoading, searched:state.roomSearched, searchAttemptCount:state.roomsRequest, lastTrigger:state.roomSearchTrigger, lastStarted:state.roomLastStarted ? new Date(state.roomLastStarted).toISOString() : null, lastFinished:state.roomLastFinished ? new Date(state.roomLastFinished).toISOString() : null, resultCount:state.rooms.length, perSpace:{...state.roomCounts}, warnings:[...state.roomSearchWarnings], error:state.roomError, serverSearchAvailable:typeof window.ServerRoomSearch === 'function' }),
     whisperReactionsDiagnostics:()=>({version:VERSION,transport:'native BC beep for friends; targeted room Hidden for non-friends',whisperIds:'native Dictionary tagged, no visible text changes',sameRoomOnlyForNonFriends:true}),
