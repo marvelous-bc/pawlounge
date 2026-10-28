@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.1.8
+// @version      1.2.1
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.1.8';
+  const VERSION = '1.2.1';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -104,6 +104,7 @@
     friendStatusMode: 'Available', friendStatusText: '', shareFriendStatus: true, friendStatusMinutes:0, friendStatusExpiresAt:0, petPersona:'curious-kitten', petPersonaShare:true, petPersonaDescription:'', shareLivePlushie:false, pawPlushie: '', pawBadges: '', pawProfileTheme: 'velvet', pawGuestbookOpen: true,
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
     shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
+    peerCacheDays:7,peerCacheCap:200,
     encodePrivateChat:false,quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
@@ -457,24 +458,64 @@
     return '<button class="secondary" data-action="bookvaultlock">🔒 Lock local vault</button>';
   }
 
+  let pawUnreadableAccountKey='';
   const safeRead=(key,fallback)=>{
     try{
       const stored=localStorage.getItem(key);
       if(!stored)return fallback;
       const data=stored.startsWith(PAW_CODEC_PREFIX)?pawCodecDecode(stored,4500000):JSON.parse(stored);
       return data??fallback;
-    }catch(err){console.warn('[PawLounge] Cannot read saved data:',err);pawCodecMetrics.failed++;return fallback;}
-  };
-  const safeWrite=(key,value)=>{
-    try{
-      localStorage.setItem(key,pawCodecEncode(value));return true;
     }catch(err){
-      // Do not sacrifice conversation persistence to a larger encoded representation.
-      pawCodecMetrics.storageFallbacks++;
-      try{localStorage.setItem(key,JSON.stringify(value));return true;}
-      catch(e){console.warn('[PawLounge] Storage full/unavailable:',e);return false;}
+      if(String(key).startsWith('Kittychat.v1.'))pawUnreadableAccountKey=key;
+      console.warn('[PawLounge] Cannot read saved data:',err);pawCodecMetrics.failed++;return fallback;
     }
   };
+  // v1.1.11: keep the account cache in compact plain JSON rather than PL2.
+  // PL2's Base64 layer expands serialized data by ~33% and can fill the
+  // per-origin localStorage quota. safeRead() still understands older PL2
+  // values, so migration happens safely at the next successful save.
+  // This cache is not encrypted by PL2; Paw Notes keys retain their separate
+  // password-encrypted vault and are never touched by this operation.
+  let pawLastStorageWarning=0;
+  const safeWrite=(key,value)=>{
+    try {
+      const serialized=JSON.stringify(value);
+      // Avoid rewriting the entire site storage when no data changed.
+      if(localStorage.getItem(key)===serialized)return true;
+      localStorage.setItem(key,serialized);
+      return true;
+    } catch(err) {
+      pawCodecMetrics.storageFallbacks++;
+      const now=Date.now();
+      if(now-pawLastStorageWarning>30000){
+        pawLastStorageWarning=now;
+        const quota=err?.name==='QuotaExceededError'||err?.code===22||/quota/i.test(String(err?.message||''));
+        console.warn(quota?'[PawLounge] Storage full; preserving existing account record. Try PawLoungeCompactCache() or MarvelousStorageGuardian.':'[PawLounge] Cannot save local account cache:',err);
+      }
+      return false;
+    }
+  };
+
+  // Privacy-safe quota diagnostic: counts bytes only, never saved values.
+  try { Object.defineProperty(window,'PawLoungeStorageDiag',{
+    configurable:true,value:()=>{
+      const groups={WCE:0,PawLounge:0,Plushies:0,Other:0};
+      let entries=0;
+      for(let i=0;i<localStorage.length;i++){
+        const k=localStorage.key(i);if(!k)continue;
+        const value=localStorage.getItem(k)||'';
+        const bytes=(k.length+value.length)*2;
+        const group=/bce-instant-messenger|wce|bce-past-profiles/i.test(k)?'WCE':
+          /kittychat|pawlounge|marvelous|kc_/i.test(k)?'PawLounge':
+          /subby|plush|essentials/i.test(k)?'Plushies':'Other';
+        groups[group]+=bytes;entries++;
+      }
+      return {version:VERSION,estimatedTotalMB:Number((Object.values(groups).reduce((a,b)=>a+b,0)/1048576).toFixed(2)),
+        byPluginMB:Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,Number((v/1048576).toFixed(2))])),
+        entries,accountCacheFormat:String(localStorage.getItem(dataKey())||'').startsWith(PAW_CODEC_PREFIX)?'legacy PL2':'compact JSON or missing',
+        currentAccountCacheKB:Number(((localStorage.getItem(dataKey())||'').length*2/1024).toFixed(1)),cacheCompactions:pawCacheCompactions,cacheArchiveReady:pawCacheArchiveReadyFor===state.myId,cacheLastError:pawCacheLastCompactionError,note:'Usage estimates only. No saved values, keys, or passphrases are displayed.'};
+    }
+  });}catch{/* optional diagnostic */}
 
   // v0.9.13 Message Integrity Shield. BC supplies the outer sender member number.
   // Packet JSON and any self-declared sender inside it are UNTRUSTED. This is
@@ -1310,17 +1351,378 @@
     clearTimeout(state.lastSave);
     state.lastSave = setTimeout(saveNow, 650);
   };
+  // Small fast-cache snapshots. Durable message history remains in IndexedDB.
+  // A snapshot is NEVER reduced until IndexedDB confirms the message archive
+  // transaction has finished; this protects accounts with a broken archive.
+  let pawCacheArchiveReadyFor=0;
+  let pawCacheCompactionRunning=false;
+  let pawCacheCompactions=0;
+  let pawCacheLastCompactionError='';
+  function pawCacheSnapshot(){
+    return { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles,
+      moments:state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30),
+      catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,
+      catchUpGroupsSince:state.catchUpGroupsSince,
+      sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30),
+      privateBookPages:pawBookVault.active?{}:state.privateBookPages,
+      invitations:state.invitations.slice(-70),pawGuestbook:state.pawGuestbook.slice(-50),
+      roomFavorites:state.roomFavorites.slice(-70),roomRecent:state.roomRecent.slice(-25),roomSort:state.roomSort,
+      scheduledMessages:state.scheduledMessages.slice(-100),deliveryOutbox:state.deliveryOutbox.slice(-120),
+      integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT),fabPosition:state.fabPosition,
+      windowRect:pawViewportScale.mobile&&pawViewportScale.lastDesktopRect?pawViewportScale.lastDesktopRect:state.windowRect,
+      lastSelected:state.selected,lastSelectedGroup:state.selectedGroup,
+      roomHistory:state.roomHistory.slice(-20),roomMemories:state.roomMemories.slice(-60),
+      leftCollapsed:state.leftCollapsed,rightCollapsed:state.rightCollapsed };
+  }
+  function pawCompactSnapshot(snapshot, emergency=false){
+    const maxActive=emergency?12:40, maxTail=emergency?5:24;
+    // Preserve all contact and group metadata so the user can reopen an older
+    // conversation; their actual messages come from the IndexedDB archive.
+    const recent=Object.entries(snapshot.chats||{}).sort((a,b)=>(b[1]?.updated||0)-(a[1]?.updated||0));
+    const active=new Set(recent.slice(0,maxActive).map(([k])=>k));
+    const chats=Object.fromEntries(recent.map(([k,chat])=>[
+      k,{...chat,messages:active.has(k)?(chat.messages||[]).slice(-maxTail):[]}
+    ]));
+    const groups=Object.fromEntries(Object.entries(snapshot.groups||{}).map(([k,group])=>[
+      k,{...group,messages:(group.messages||[]).slice(-maxTail)}
+    ]));
+    const outbox=(snapshot.deliveryOutbox||[]).filter(x=>
+      !['sent','acknowledged','cancelled'].includes(x?.status)||
+      (Number(x.updated||x.created)||Date.now())>Date.now()-7*86400000);
+    return {...snapshot,chats,groups,
+      deliveryOutbox:outbox.slice(emergency?-35:-75),
+      integritySeen:(snapshot.integritySeen||[]).slice(emergency?-90:-180),
+      roomHistory:(snapshot.roomHistory||[]).slice(emergency?-8:-14),
+      roomRecent:(snapshot.roomRecent||[]).slice(emergency?-12:-20)};
+  }
+  // v1.2.0: Durable, account-isolated bulk snapshots. Native BC, WCE, BCX,
+  // Plushies and encrypted Marvelous key-vault storage are never touched.
+  const pawBulkState = {database:null,loading:null,chain:Promise.resolve(),queued:0,saved:0,restored:0,
+    error:'',hydrating:false,lastSaved:0};
+  let pawDataRevision=0;
+  let pawHydrationAccount=0;
+  let pawSaveRequestedWhileHydrating=false;
+  // Per-BC-account storage boundaries. "Mine" contains settings and private
+  // journal material; "shared" includes conversation data; "peers" is an
+  // expiring cache of OTHER people's profile/presence data only. All three
+  // stores commit atomically. No BCX/WCE keys or Paw Notes vaults are touched.
+  const PAW_PEER_DAYS=[1,7,14,30];
+  const PAW_PEER_CAPS=[50,100,200,400];
+  const PAW_SHARED_KEYS=['chats','groups','invitations','pawGuestbook','sharedAlbums',
+    'privateBookPages','scheduledMessages','deliveryOutbox','roomHistory'];
+  function pawPeerPolicy(){
+    return {
+      days:PAW_PEER_DAYS.includes(Number(state.settings.peerCacheDays))?Number(state.settings.peerCacheDays):7,
+      cap:PAW_PEER_CAPS.includes(Number(state.settings.peerCacheCap))?Number(state.settings.peerCacheCap):200
+    };
+  }
+  function pawProtectedPeers(snapshot,account){
+    const keep=new Set([String(account)]);
+    for(const [id,chat] of Object.entries(snapshot.chats||{}))
+      if(chat&&(chat.favorite===true||chat.pinned===true))keep.add(String(id));
+    for(const circle of snapshot.circles||[])
+      for(const id of circle?.members||[])if(numeric(id))keep.add(String(id));
+    return keep;
+  }
+  function pawPartitionSnapshot(account,snapshot){
+    const personal={...snapshot};
+    const shared={};
+    for(const key of PAW_SHARED_KEYS){
+      shared[key]=personal[key];delete personal[key];
+    }
+    delete personal.profiles;
+    const policy=pawPeerPolicy(),now=Date.now();
+    const pinned=pawProtectedPeers(snapshot,account);
+    const peers=Object.entries(snapshot.profiles||{}).filter(([id,p])=>
+      numeric(id)&&Number(id)!==account&&p&&typeof p==='object'&&!Array.isArray(p))
+      .map(([id,p])=>[id,p,Math.min(now,Number(p?._marvelousSeenAt||p?.updated)||now)]);
+    const kept=peers.filter(([id,p,at])=>pinned.has(id)||now-at<=policy.days*86400000);
+    const protectedEntries=kept.filter(([id])=>pinned.has(id));
+    const temporary=kept.filter(([id])=>!pinned.has(id)).sort((a,b)=>b[2]-a[2]).slice(0,policy.cap);
+    const peerProfiles=Object.fromEntries([...protectedEntries,...temporary].map(([id,v,at])=>
+      [id,{...v,_marvelousSeenAt:at}]));
+    if(snapshot.profiles?.[account])personal.ownProfile=snapshot.profiles[account];
+    return {personal,shared,peers:peerProfiles,
+      counts:{personal:1,sharedChats:Object.keys(shared.chats||{}).length,
+        peers:Object.keys(peerProfiles).length,protectedPeers:protectedEntries.length,
+        expired:peers.length-kept.length,overCap:kept.length-protectedEntries.length-temporary.length}};
+  }
+  function pawBulkDb(){
+    if(pawBulkState.loading)return pawBulkState.loading;
+    pawBulkState.loading=new Promise((resolve,reject)=>{
+      if(!window.indexedDB)return reject(Error('IndexedDB unavailable'));
+      const r=window.indexedDB.open('Marvelous-PawLounge-Storage-v2',2);
+      r.onupgradeneeded=()=>{
+        for(const store of ['accounts','shared','peerCache'])
+          if(!r.result.objectStoreNames.contains(store))
+            r.result.createObjectStore(store,{keyPath:'account'});
+      };
+      r.onerror=()=>reject(r.error||Error('Cannot open PawLounge storage'));
+      r.onblocked=()=>reject(Error('PawLounge storage is blocked by another tab'));
+      r.onsuccess=()=>{const db=r.result;db.onversionchange=()=>{db.close();pawBulkState.loading=null;};
+        pawBulkState.database=db;resolve(db);};
+    }).catch(err=>{pawBulkState.loading=null;throw err;});
+    return pawBulkState.loading;
+  }
+  async function pawBulkRead(account){
+    const db=await pawBulkDb();
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction(['accounts','shared','peerCache'],'readonly');
+      let owner=null,shared=null,peers=null;
+      tx.objectStore('accounts').get(account).onsuccess=e=>{owner=e.target.result||null;};
+      tx.objectStore('shared').get(account).onsuccess=e=>{shared=e.target.result||null;};
+      tx.objectStore('peerCache').get(account).onsuccess=e=>{peers=e.target.result||null;};
+      tx.oncomplete=()=>{
+        if(!owner){resolve(null);return;}
+        if(owner.format!==3){resolve(owner);return;} // read previous v2 records
+        if(!shared||!peers){reject(Error('Account storage is incomplete: keeping old cache unchanged.'));return;}
+        const personal=owner.snapshot||{};
+        const profile={...(peers.profiles||{})};
+        if(personal.ownProfile)profile[account]=personal.ownProfile;
+        const {ownProfile,...rest}=personal;
+        resolve({...owner,snapshot:{...rest,...(shared.snapshot||{}),profiles:profile}});
+      };
+      tx.onerror=()=>reject(tx.error||Error('Bulk read transaction failed'));
+      tx.onabort=()=>reject(tx.error||Error('Bulk read aborted'));
+    });
+  }
+  async function pawBulkPut(account,snapshot){
+    const db=await pawBulkDb();
+    const savedAt=Date.now(),parts=pawPartitionSnapshot(account,snapshot);
+    // A single transaction means a failed write cannot split the records.
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(['accounts','shared','peerCache'],'readwrite');
+      tx.objectStore('accounts').put({account,snapshot:parts.personal,savedAt,format:3});
+      tx.objectStore('shared').put({account,snapshot:parts.shared,savedAt});
+      tx.objectStore('peerCache').put({account,profiles:parts.peers,savedAt,policy:pawPeerPolicy()});
+      tx.oncomplete=resolve;
+      tx.onerror=()=>reject(tx.error||Error('Partition write failed'));
+      tx.onabort=()=>reject(tx.error||Error('Partition write aborted'));
+    });
+    pawBulkState.partitionCounts=parts.counts;
+    return savedAt;
+  }
+  function pawFastSnapshot(snapshot,stamp){
+    // Preserve all contact/group metadata. Full content is in IndexedDB and
+    // the existing separate per-message archive. No key vault is included.
+    const outbox=(snapshot.deliveryOutbox||[]).filter(x=>
+      !['sent','acknowledged','cancelled'].includes(x?.status)||
+      (Number(x.updated||x.created)||0)>Date.now()-7*86400000);
+    const chats=Object.fromEntries(Object.entries(snapshot.chats||{}).map(([id,c])=>
+      [id,{...c,messages:[]}]));
+    const groups=Object.fromEntries(Object.entries(snapshot.groups||{}).map(([id,c])=>
+      [id,{...c,messages:[]}]));
+    return {...snapshot,chats,groups,
+      profiles:{}, // OTHER players live exclusively in the bounded peer cache
+      moments:(snapshot.moments||[]).slice(-12),
+      sharedAlbums:[],privateBookPages:{},pawGuestbook:[],invitations:[],
+      roomMemories:(snapshot.roomMemories||[]).slice(-12),
+      integritySeen:(snapshot.integritySeen||[]).slice(-80),
+      roomHistory:(snapshot.roomHistory||[]).slice(-8),
+      roomRecent:(snapshot.roomRecent||[]).slice(-12),
+      deliveryOutbox:outbox.slice(-75),
+      _bulkStoredAt:stamp,_bulkFormat:2};
+  }
+  function pawMinimumSnapshot(snapshot,stamp){
+    const small=pawFastSnapshot(snapshot,stamp);
+    // Last-resort bootstrap: all other content has already been durably
+    // committed to IndexedDB. Keep unsent outbox and small preferences local.
+    return {...small,profiles:{},moments:[],sharedAlbums:[],invitations:[],
+      pawGuestbook:[],roomMemories:[],roomFavorites:[],roomRecent:[],
+      chats:Object.fromEntries(Object.entries(small.chats).map(([id,c])=>
+        [id,{id:c.id,displayName:c.displayName,updated:c.updated,
+          unread:c.unread,draft:c.draft,messages:[]}])),
+      groups:Object.fromEntries(Object.entries(small.groups).map(([id,c])=>
+        [id,{...c,messages:[],polls:[],receipts:{}}])),
+      deliveryOutbox:small.deliveryOutbox,
+      _bulkStoredAt:stamp,_bulkFormat:2};
+  }
+  function pawBulkSave(account,snapshot){
+    if(!account)return;
+    const revision=++pawDataRevision;
+    pawBulkState.queued++;
+    const commit=async()=>{
+      if(account===state.myId && revision!==pawDataRevision)return;
+      // Every message MUST reach the indexed archive before its UI copy shrinks.
+      if(pawCacheArchiveReadyFor!==account){
+        for(const [id,c] of Object.entries(snapshot.chats||{}))
+          if(numeric(id)&&Array.isArray(c.messages))archiveMessages(account,'chat',id,c.messages);
+        for(const [id,g] of Object.entries(snapshot.groups||{}))
+          if(/^g_[a-zA-Z0-9_-]{8,44}$/.test(id)&&Array.isArray(g.messages))
+            archiveMessages(account,'group',id,g.messages);
+      }
+      await flushHistoryArchive();
+      const stamp=await pawBulkPut(account,snapshot);
+      pawBulkState.saved++;pawBulkState.error='';pawBulkState.lastSaved=stamp;
+      pawCacheArchiveReadyFor=account;
+      // Never overwrite a newer local session's cache with an older snapshot.
+      if(account===state.myId && revision===pawDataRevision){
+        if(!safeWrite(dataKey(),pawFastSnapshot(snapshot,stamp))&&
+           !safeWrite(dataKey(),pawMinimumSnapshot(snapshot,stamp)))
+          pawBulkState.error='IndexedDB saved but localStorage is entirely full; free another addon cache manually.';
+      }
+    };
+    pawBulkState.chain=pawBulkState.chain.catch(()=>{}).then(commit).catch(e=>{
+      pawBulkState.error=String(e?.message||e);
+      // Keep the original local snapshot if the IDB write failed. Never
+      // remove or compact unarchived records.
+      if(account===state.myId && revision===pawDataRevision)
+        safeWrite(dataKey(),snapshot);
+    }).finally(()=>{pawBulkState.queued=Math.max(0,pawBulkState.queued-1);});
+  }
+  function pawMergeMessages(previous,current){
+    const result=new Map();
+    for(const m of previous||[])if(m&&typeof m.id==='string')result.set(m.id,m);
+    for(const m of current||[])if(m&&typeof m.id==='string')result.set(m.id,m);
+    return [...result.values()].sort((a,b)=>(Number(a.time)||0)-(Number(b.time)||0)).slice(-MAX_MESSAGES);
+  }
+  async function pawBulkHydrate(account,revision){
+    try{
+      const record=await pawBulkRead(account);
+      if(!record||![2,3].includes(record.format)||!record.snapshot||state.myId!==account)return;
+      // Never overwrite edits made after entering a room or changing accounts.
+      if(pawDataRevision!==revision)return;
+      const doc=record.snapshot;
+      pawBulkState.lastSaved=record.savedAt||0;
+      const listFields=['moments','circles','invitations','pawGuestbook','roomMemories',
+        'roomFavorites','roomRecent','sharedAlbums'];
+      for(const k of listFields){
+        if(k==='sharedAlbums'&&pawBookVault.active)continue;
+        if(!Array.isArray(doc[k]))continue;
+        const seen=new Map();
+        // Current local changes win; older bulk-only entries are retained.
+        const identity=(x)=>String(x?.id ?? (x?.Name?x.Name+':'+x.Space:JSON.stringify(x)));
+        for(const x of doc[k])seen.set(identity(x),x);
+        for(const x of Array.isArray(state[k])?state[k]:[])seen.set(identity(x),x);
+        state[k]=[...seen.values()];
+      }
+      if(doc.profiles&&typeof doc.profiles==='object'){
+        const safe=pawPartitionSnapshot(account,{...doc,chats:doc.chats||{},circles:state.circles,profiles:{...doc.profiles,...state.profiles}});
+        state.profiles={...safe.peers,...(safe.personal.ownProfile?{[account]:safe.personal.ownProfile}:{})};
+      }
+      if(!pawBookVault.active&&doc.privateBookPages&&typeof doc.privateBookPages==='object')
+        state.privateBookPages={...doc.privateBookPages,...state.privateBookPages};
+      for(const [id,full] of Object.entries(doc.chats||{})){
+        if(!numeric(id))continue;
+        const recent=state.chats[id];
+        state.chats[id]={...full,...(recent||{}),
+          messages:pawMergeMessages(full.messages,recent?.messages)};
+      }
+      for(const [id,full] of Object.entries(doc.groups||{})){
+        if(!/^g_[a-zA-Z0-9_-]{8,44}$/.test(id))continue;
+        const recent=state.groups[id];
+        state.groups[id]={...full,...(recent||{}),
+          messages:pawMergeMessages(full.messages,recent?.messages)};
+      }
+      pawCacheArchiveReadyFor=account;
+      pawBulkState.restored++;pawBulkState.error='';
+      if(state.open)render();
+    }catch(e){pawBulkState.error=String(e?.message||e);}
+  }
+  // Export the complete PawLounge state stored in IndexedDB. This export is
+  // private and may contain chat text. It does NOT include Paw Notes private
+  // keys, server credentials, or the separate full message archive.
+  window.MarvelousBulkStorageExport=async()=>{
+    const account=state.myId;
+    if(!account)throw Error('Log into Bondage Club first.');
+    await pawBulkState.chain;
+    const row=await pawBulkRead(account);
+    if(!row?.snapshot)throw Error('No committed bulk snapshot yet. Save once and try again.');
+    const payload={format:'MarvelousPawLoungeBulk-v2',account,
+      savedAt:row.savedAt,snapshot:row.snapshot};
+    download(`Marvelous-PawLounge-BULK-${account}-${new Date().toISOString().slice(0,10)}.json`,
+      'application/json',JSON.stringify(payload));
+    return {exportStarted:true,account,warning:'Private local account data. Keep the downloaded file secure. Export full message history separately.'};
+  };
+  try{Object.defineProperty(window,'MarvelousStorageDiag',{configurable:true,value:()=>({
+    account:state.myId,bulkSaved:pawBulkState.saved,bulkRestored:pawBulkState.restored,
+    pendingWrites:pawBulkState.queued,lastSaved:pawBulkState.lastSaved,
+    bulkError:pawBulkState.error,archiveError:historyArchive.error,
+    partitions:pawBulkState.partitionCounts||null,peerPolicy:pawPeerPolicy(),
+    note:'Personal, peer cache, and shared records are separate by BC account. Paw Notes vaults are untouched.'
+  })});}catch{}
+
+  // Safe, explicit cleanup: only old non-favorite/non-circle peer snapshots.
+  // Full messages, memories, unsent outbox and key vaults are never candidates.
+  window.PawLoungeStorageCategories=()=>{
+    const snap=pawCacheSnapshot(),part=pawPartitionSnapshot(state.myId,snap);
+    const size=x=>Math.round(JSON.stringify(x||{}).length*2/1024);
+    return {account:state.myId,policy:pawPeerPolicy(),counts:part.counts,
+      estimatedKiB:{mine:size(part.personal),shared:size(part.shared),otherPlayers:size(part.peers)},
+      caveat:'Estimates describe current PawLounge snapshots, not WCE/BCX or total disk use.',
+      cloud:'Uploads require an explicit Marvelous Hub action and permission.'};
+  };
+  window.MarvelousStorageBoundaryDiag=()=>({
+    account:state.myId,
+    pawLounge:window.PawLoungeStorageCategories(),
+    plushies:window.SubbysDataBoundaries?.status?.()||{connected:false},
+    privacy:'No server uploads or deletion of encrypted keys. BCX/WCE keys are untouched.'
+  });
+  window.PawLoungeCleanupOtherPlayers=async()=>{
+    const account=state.myId;
+    if(!account||pawHydrationAccount===account)throw Error('Wait for account data to finish loading.');
+    const parts=pawPartitionSnapshot(account,pawCacheSnapshot());
+    let removed=0;
+    for(const id of Object.keys(state.profiles)){
+      if(Number(id)!==account&&!Object.hasOwn(parts.peers,id)){
+        delete state.profiles[id];removed++;
+      }
+    }
+    if(removed){pawBulkSave(account,pawCacheSnapshot());await pawBulkState.chain;}
+    return {account,removed,kept:Object.keys(parts.peers).length,error:pawBulkState.error,
+      note:'Only OTHER-player profile cache entries were removed. Shared chats and private records are preserved.'};
+  };
+
+  async function pawEnsureCacheArchive(account){
+    if(pawHydrationAccount===account)return false;
+    if(pawCacheCompactionRunning)return false;
+    pawCacheCompactionRunning=true;
+    try{
+      if(!account||account!==state.myId) return false;
+      // Queue every cached message into the indexed archive before trimming.
+      for(const [id,chat] of Object.entries(state.chats))
+        if(numeric(id)&&Array.isArray(chat.messages))archiveMessages(account,'chat',id,chat.messages);
+      for(const [id,group] of Object.entries(state.groups))
+        if(/^g_[a-zA-Z0-9_-]{8,44}$/.test(id)&&Array.isArray(group.messages))
+          archiveMessages(account,'group',id,group.messages);
+      await flushHistoryArchive();
+      if(state.myId!==account||historyArchive.error)return false;
+      pawCacheArchiveReadyFor=account;
+      const snap=pawCacheSnapshot();
+      const stamp=await pawBulkPut(account,snap);
+      pawBulkState.saved++;pawBulkState.lastSaved=stamp;
+      if(!safeWrite(dataKey(),pawFastSnapshot(snap,stamp))&&
+         !safeWrite(dataKey(),pawMinimumSnapshot(snap,stamp)))
+        pawCacheLastCompactionError='Bulk archive saved, but browser localStorage remains full.';
+      pawCacheCompactions++;
+      pawCacheLastCompactionError='';
+      return true;
+    }catch(e){pawCacheLastCompactionError=String(e?.message||e);return false;}
+    finally{pawCacheCompactionRunning=false;}
+  }
+  window.PawLoungeCompactCache=async()=>({ok:await pawEnsureCacheArchive(state.myId),
+    account:state.myId,compactions:pawCacheCompactions,error:pawCacheLastCompactionError,
+    note:'Messages are archived before cache reduction; encryption keys are untouched.'});
   function saveNow(force=false) {
     clearTimeout(state.lastSave);
+    if(pawHydrationAccount===state.myId){pawSaveRequestedWhileHydrating=true;return;}
+    if(pawUnreadableAccountKey===dataKey()){
+      pawBulkState.error='Account cache cannot be decoded. Existing record preserved; export/recover it before writing.';
+      return;
+    }
     if (!force && motionRuntime.active) { saveSoon(); return; }
-    // Only cap the fast localStorage cache; the IndexedDB archive is never trimmed.
-    const entries = Object.values(state.chats).sort((a,b) => (b.updated || 0) - (a.updated || 0));
-    for (const chat of entries) chat.messages = (chat.messages || []).slice(-MAX_MESSAGES);
-    for (const old of entries.slice(MAX_CONVERSATIONS)) delete state.chats[old.id];
-    for (const g of Object.values(state.groups)) g.messages = (g.messages || []).slice(-MAX_MESSAGES);
-    for (const old of Object.values(state.groups).sort((a,b) => (b.updated||0) - (a.updated||0)).slice(MAX_GROUPS)) delete state.groups[old.id];
+    // Keep the in-memory tail for the current session; the fast disk copy is smaller.
+    const entries=Object.values(state.chats).sort((a,b)=>(b.updated||0)-(a.updated||0));
+    for(const chat of entries)chat.messages=(chat.messages||[]).slice(-MAX_MESSAGES);
+    for(const old of entries.slice(MAX_CONVERSATIONS))delete state.chats[old.id];
+    for(const group of Object.values(state.groups))group.messages=(group.messages||[]).slice(-MAX_MESSAGES);
+    for(const old of Object.values(state.groups).sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(MAX_GROUPS))delete state.groups[old.id];
     if(pawBookVault.active&&!pawBookVault.locked)bookVaultQueueSave();
-    safeWrite(dataKey(), { settings: state.settings, chats: state.chats, groups: state.groups, profiles: state.profiles, moments: state.moments.slice(-MOMENT_LIMIT), circles:state.circles.slice(0,30), catchUpSince:state.catchUpSince,catchUpWhispersSince:state.catchUpWhispersSince,catchUpGroupsSince:state.catchUpGroupsSince, sharedAlbums:pawBookVault.active?[]:state.sharedAlbums.slice(-30), privateBookPages:pawBookVault.active?{}:state.privateBookPages, invitations:state.invitations.slice(-70), pawGuestbook:state.pawGuestbook.slice(-50), roomFavorites:state.roomFavorites.slice(-70), roomRecent:state.roomRecent.slice(-25), roomSort:state.roomSort, scheduledMessages:state.scheduledMessages.slice(-100), deliveryOutbox:state.deliveryOutbox.slice(-120), integritySeen:state.integritySeen.slice(-INTEGRITY_LOG_LIMIT), fabPosition: state.fabPosition, windowRect: pawViewportScale.mobile&&pawViewportScale.lastDesktopRect?pawViewportScale.lastDesktopRect:state.windowRect, lastSelected: state.selected, lastSelectedGroup: state.selectedGroup, roomHistory:state.roomHistory.slice(-20), roomMemories:state.roomMemories.slice(-60), leftCollapsed: state.leftCollapsed, rightCollapsed: state.rightCollapsed });
+    const snap=pawCacheSnapshot();
+    // The full snapshot and all messages are committed to IndexedDB first.
+    // Only then is the much smaller localStorage bootstrap copy replaced.
+    // This also migrates old account snapshots if localStorage is already full.
+    pawBulkSave(state.myId,snap);
   }
   function loadForAccount(id) {
     if (state.myId === id) return;
@@ -1335,6 +1737,8 @@
     state.integritySeen=[];
     state.selected = 0; state.selectedGroup = ''; state.chats = {}; state.groups = {}; state.profiles = {}; state.roomHistory = []; state.roomMemories=[];state.roomMemoryDraft={name:'',notes:'',tags:''};state.moments=[];state.circles=[];state.circleFilter='';state.catchUpSince=0;state.catchUpWhispersSince=0;state.catchUpGroupsSince=0;state.sharedAlbums=[];state.privateBookPages={};state.invitations=[];state.pawGuestbook=[];state.roomFavorites=[];state.roomRecent=[];state.scheduledMessages=[];state.deliveryOutbox=[];state.replyTarget=null; state.panelScroll = { left: 0, right: 0 };
     const loaded = safeRead(dataKey(), {});
+    // Legacy PL2 data stays untouched until its full IndexedDB migration
+    // commits successfully. This avoids a quota failure during login.
     state.integritySeen=(Array.isArray(loaded.integritySeen)?loaded.integritySeen:[]).slice(-INTEGRITY_LOG_LIMIT)
       .filter(x=>Array.isArray(x)&&typeof x[0]==='string'&&x[0].length<180&&Number.isFinite(Number(x[1]))&&Number(x[1])>Date.now()-14*86400000);
     integrity.keys=new Set(state.integritySeen.map(x=>x[0]));
@@ -1389,6 +1793,12 @@
         archiveMessages(id,'group',gid,g.messages.filter(m=>m&&typeof m.text==='string'));
       }
     }
+    // Full storage is loaded asynchronously before migration. Never write the
+    // trimmed bootstrap cache back over a durable full snapshot.
+    pawHydrationAccount=id;
+    pawCacheArchiveReadyFor=0;
+    pawBulkState.lastSaved=0;
+    pawSaveRequestedWhileHydrating=false;
     state.historyEpoch++;state.historySelection='';state.historyOlder=[];
     state.historyHasMore=false;state.historyLoading=false;
     // Restore only Subbycat's place public transcript. Never restore private text.
@@ -1399,6 +1809,10 @@
       sender:numeric(m.sender) })) : [];
     roomReplay.lastRoom = ''; roomReplay.snapshot = []; roomReplay.log = null;
     state.settings = { ...DEFAULT_SETTINGS, ...(loaded.settings || {}) };
+    if(!PAW_PEER_DAYS.includes(Number(state.settings.peerCacheDays)))state.settings.peerCacheDays=7;
+    if(!PAW_PEER_CAPS.includes(Number(state.settings.peerCacheCap)))state.settings.peerCacheCap=200;
+    state.settings.peerCacheDays=Number(state.settings.peerCacheDays);
+    state.settings.peerCacheCap=Number(state.settings.peerCacheCap);
     // Repo move to marvelous-bc/pawlounge. Only migrate the old built-in
     // repository URLs, never arbitrary custom URLs or saved friend profiles.
     // Keep storage keys and member IDs intact to preserve every conversation.
@@ -1465,8 +1879,18 @@
       chat.unread = Number(chat.unread) || 0;
     }
     for(const g of Object.values(state.groups))assignMissingMessageIds(g.messages);
-    // Persist repaired legacy IDs so they never change on the next restart.
-    if(legacyIdsRepaired)saveSoon();
+    // Hydrate bulk data before any save/compaction can overwrite it. Future
+    // account changes invalidate this callback's account guard.
+    const hydrationRevision=pawDataRevision;
+    void pawBulkHydrate(id,hydrationRevision).finally(()=>{
+      if(state.myId!==id)return;
+      pawHydrationAccount=0;
+      const needsSave=pawSaveRequestedWhileHydrating||legacyIdsRepaired>0;
+      pawSaveRequestedWhileHydrating=false;
+      // First migration and future restores go through the same verified
+      // archive + full IndexedDB write before shrinking the local copy.
+      if(needsSave||!pawBulkState.lastSaved)saveSoon();
+    });
   }
   function notice(text) {
     if (!ui.status) return;
@@ -1570,7 +1994,11 @@
       }
       if(envelope.length>1800)return false;
       state.suppressOutgoing = true;
-      window.ServerSend('AccountBeep', { MemberNumber:member, BeepType:quiet?'KCGroupControl':'', IsSecret:true, Message:envelope });
+      // All PawLounge group packets are addon control traffic, not native friend beeps.
+      // Keep their type explicit so other addons (notably WCE's Instant Messenger)
+      // do not archive the compressed KC2 envelope in ordinary beep history.
+      // Older PawLounge clients already handle KCGroupControl in receiveBeep().
+      window.ServerSend('AccountBeep', { MemberNumber:member, BeepType:'KCGroupControl', IsSecret:true, Message:envelope });
       return true;
     } catch(err) { console.warn('[Kittychat] Group message send failed',err); return false; }
     finally { state.suppressOutgoing = false; }
@@ -7962,10 +8390,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const friends=new Set(myFriends());
     const roomIds=new Set(currentRoomRoster().map(character=>numeric(character.MemberNumber)));
     const inRoomOnly=state.contactsMode==='inroom';
-    const ids = inRoomOnly ? roomIds : new Set([...Object.keys(state.chats).map(numeric), ...friends, ...roomIds]);
+    const onlineOnly=state.contactsMode==='online';
+    // Online means actual BC friends confirmed online by native presence,
+    // not every player in the current room or stale profile statuses.
+    const ids = inRoomOnly ? roomIds : onlineOnly ? friends : new Set([...Object.keys(state.chats).map(numeric), ...friends, ...roomIds]);
     ids.delete(me());
     const query=state.search.toLowerCase();
     return [...ids].filter(numeric)
+      .filter(id => !onlineOnly || (friends.has(id) && pawFriendConfirmedOnline(id)))
       // In Room is a separate live roster, not a subset of a friend circle.
       .filter(id => inRoomOnly || !state.circleFilter || (state.circleFilter === '__paw_bc_friends__'
         ? friends.has(id)
@@ -8110,16 +8542,16 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     restoreSideScroll('left');
   }
   function contactRowHTML(id,onlineMembers){
-    const c=state.chats[id],m=c?.messages?.at(-1),online=onlineMembers.has(id);
+    const c=state.chats[id],m=c?.messages?.at(-1),online=onlineMembers.has(id),friendOnline=pawFriendConfirmedOnline(id);
     return `<button class="contact ${id===state.selected?'active':''}" data-contact="${id}">
       ${avatar(id)}<span class="info"><div class="topline"><span class="nameline">${escapeText(name(id))} ${c?.favorite?'♡':''}</span><span class="time">${m?new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</span></div><div class="preview">${escapeText(m?.text||(online?'In your room':'No messages yet'))}</div>${statusMarkup(id)}</span>
-      ${c?.replyLater?'<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread?`<span class="tiny-pill">${Math.min(99,c.unread)}</span>`:''}<span class="presence ${online?'on':''}" title="${online?'In your room':'Not in your room'}"></span></button>`;
+      ${c?.replyLater?'<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread?`<span class="tiny-pill">${Math.min(99,c.unread)}</span>`:''}<span class="presence ${friendOnline?'on':''}" title="${online?'In your room':friendOnline?'Online friend':'Not confirmed online'}"></span></button>`;
   }
   function contactRowSignature(id,onlineMembers){
     const c=state.chats[id],m=c?.messages?.at(-1);
     return JSON.stringify([id,id===state.selected,name(id),m?.id,m?.time,m?.text,
       c?.unread,c?.favorite,c?.replyLater,c?.requestPending,c?.pinned,c?.muted,
-      onlineMembers.has(id),statusLabel(id),state.profiles[id]?.updated||0]);
+      onlineMembers.has(id),pawFriendConfirmedOnline(id),statusLabel(id),state.profiles[id]?.updated||0]);
   }
   const sidebarDiffStats={patches:0,rebuilt:0,kept:0,rowsReplaced:0,rowsAdded:0};
   function reconcileSidebarContacts(){
@@ -8158,11 +8590,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!items.length){
       if(!list.querySelector('.kc-room-empty,.muted')){
         list.innerHTML=state.contactsMode==='inroom'?
-          `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom'?'Join a BC room to see everyone there.':'Nobody else is in this room yet.'}</div>`:'<div class="muted">No kitties found yet.</div>';
+          `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom'?'Join a BC room to see everyone there.':'Nobody else is in this room yet.'}</div>`:
+          state.contactsMode==='online'?`<div class="muted">${pawPresenceIsFresh()?'No BC friends online right now.':'Checking which BC friends are online…'}</div>`:
+          '<div class="muted">No kitties found yet.</div>';
         changed=true;
       }
     }else for(const empty of list.querySelectorAll(':scope > .muted')){empty.remove();changed=true;}
-    const heroId=state.contactsMode==='inroom'?(items.includes(state.selected)?state.selected:items[0]||0):(state.selected||items[0]||0);
+    const heroId=['inroom','online'].includes(state.contactsMode)?(items.includes(state.selected)?state.selected:items[0]||0):(state.selected||items[0]||0);
     const hero=ui.menu.querySelector('.side-mainline');
     if(hero && heroId && numeric(hero.querySelector('.avatar')?.dataset.kcMember)===heroId){
       const current=state.chats[heroId],last=current?.messages?.at(-1);
@@ -8183,7 +8617,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     // v0.9.4: The old v0.8.16 simplification incorrectly removed the
     // entire inbox-filter strip. Keep the original choices and ensure any
     // stale/unknown mode falls back safely to All.
-    const inboxModes = ['all','inroom','unread','favorites','later','requests','muted','pinned'];
+    const inboxModes = ['all','online','inroom','unread','favorites','later','requests','muted','pinned'];
     if (!inboxModes.includes(state.contactsMode)) state.contactsMode = 'all';
     const confirmedFriends=new Set(myFriends());
     for(const [id,c] of Object.entries(state.chats)) if(c?.requestPending && confirmedFriends.has(Number(id))){c.requestPending=false;c.requestAccepted=true;saveSoon();}
@@ -8196,7 +8630,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const onlineMembers = new Set(currentRoomRoster().map(p=>numeric(p.MemberNumber)));
     // The spotlight follows this roster too, rather than showing someone
     // outside the room when In Room is selected.
-    const heroId = state.contactsMode==='inroom' ?
+    const heroId = ['inroom','online'].includes(state.contactsMode) ?
       (items.includes(state.selected) ? state.selected : items[0] || 0) :
       (state.selected || items[0] || 0);
     const heroChat = heroId ? state.chats[heroId] : null;
@@ -8207,7 +8641,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <div class="side-search"><input class="search" id="kc-search" type="search" placeholder="Search kitties..." value="${escapeText(state.search)}"/><span class="pawhint">${asset('ui-paw.svg','','🐾')}</span></div>
       <div class="paw-circle-row"><select id="paw-circle-filter" class="field" aria-label="Filter contacts by friend circle"><option value="">🐾 All friend circles</option><option value="__paw_bc_friends__" ${state.circleFilter==='__paw_bc_friends__'?'selected':''}>🐈 BC Friends only</option>${state.circles.map(c=>`<option value="${escapeText(c.id)}" ${state.circleFilter===c.id?'selected':''}>${escapeText(c.name)} (${c.members.length})</option>`).join('')}</select><button class="secondary" data-action="opencircles">Manage</button></div>
       <div class="kc-inbox-filter-wrap">
-        <div class="side-filters kc-inbox-filters" aria-label="Inbox filters">${[['all','All'],['inroom',`🏠 In Room (${onlineMembers.size})`],['unread','♡ Unread'],['favorites','💗 Favorites'],['later','⏰ Later'],['requests','✉ Requests'],['muted','🔕 Muted'],['pinned','📌 Pinned']].map(([key,label])=>`<button type="button" class="filterbtn ${state.contactsMode===key?'active':''}" data-filter="${key}" aria-pressed="${state.contactsMode===key}">${label}</button>`).join('')}</div>
+        <div class="side-filters kc-inbox-filters" aria-label="Inbox filters">${[['all','All'],['online','🟢 Online'],['inroom',`🏠 In Room (${onlineMembers.size})`],['unread','♡ Unread'],['favorites','💗 Favorites'],['later','⏰ Later'],['requests','✉ Requests'],['muted','🔕 Muted'],['pinned','📌 Pinned']].map(([key,label])=>`<button type="button" class="filterbtn ${state.contactsMode===key?'active':''}" data-filter="${key}" aria-pressed="${state.contactsMode===key}">${label}</button>`).join('')}</div>
         <div class="kc-filter-scroll-controls" aria-label="Scroll inbox filters">
           <button type="button" class="kc-filter-scroll-btn" data-action="inboxscrollleft" title="Previous filters" aria-label="Scroll filters left">‹</button>
           <div class="kc-filter-scroll-track" role="scrollbar" tabindex="0" aria-label="Inbox filters horizontal scrollbar" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="kc-filter-scroll-thumb"></div></div>
@@ -8216,7 +8650,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       </div>
       <div class="contacts-scroll" tabindex="0" role="region" aria-label="Scroll kitty names and contacts">
         <div class="side-list">${items.map(id=>contactRowHTML(id,onlineMembers)).join('') || (state.contactsMode==='inroom' ?
-          `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom' ? 'Join a BC room to see everyone there.' : state.search.trim() ? 'No matching room members.' : 'Nobody else is in this room yet.'}</div>` : '<div class="muted">No kitties found yet.</div>')}</div>
+          `<div class="muted kc-room-empty">${window.CurrentScreen!=='ChatRoom' ? 'Join a BC room to see everyone there.' : state.search.trim() ? 'No matching room members.' : 'Nobody else is in this room yet.'}</div>` : state.contactsMode==='online' ? `<div class="muted">${state.search.trim()?'No matching online friends.':pawPresenceIsFresh()?'No BC friends online right now.':'Checking which BC friends are online…'}</div>` : '<div class="muted">No kitties found yet.</div>')}</div>
       </div>
       <button class="new-kitty" data-action="new">＋ Add a kitty by member #</button>
     </div>`;
@@ -9827,6 +10261,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const p = state.settings;
     const control = (name, label) => `<div class="settingrow"><label for="kc-${name}">${label}</label><input type="checkbox" id="kc-${name}" data-setting="${name}" ${p[name] ? 'checked':''}/></div>`;
     ui.body.innerHTML = `<div class="screen"><div class="sectiontitle">⚙ PawLounge Settings</div><p class="muted">Personal preferences live on this browser only. No additional server is used.</p>
+    <section class="paw-settings-section"><div class="smalltitle">🗃 Storage · My data / Other players / Shared</div>
+    <p class="muted">Your memories and settings stay protected. Conversation archives stay separate. Only cached profiles of other players expire; favorites and members of your circles are excluded.</p>
+    <label>Other-player profile cache retention<select class="field" data-setting="peerCacheDays">${[[1,'1 day'],[7,'7 days (default)'],[14,'14 days'],[30,'30 days']].map(([n,t])=>`<option value="${n}" ${Number(p.peerCacheDays)===n?'selected':''}>${t}</option>`).join('')}</select></label>
+    <label>Temporary profile limit<select class="field" data-setting="peerCacheCap">${[50,100,200,400].map(n=>`<option value="${n}" ${Number(p.peerCacheCap)===n?'selected':''}>${n} profiles</option>`).join('')}</select></label>
+    <div class="flex"><button class="secondary" data-action="pawstorage-report">Show storage breakdown</button><button class="secondary" data-action="pawstorage-clean">Clean expired other-player cache</button></div>
+    <p class="muted">Marvelous cloud backups remain optional and passphrase-encrypted. Nothing is uploaded by this cleanup.</p></section>
     <div class="smalltitle">🎨 Cozy appearance</div><div class="settingrow"><label for="kc-theme">Colour theme</label><select class="field" id="kc-theme" data-setting="theme">${VALID_THEMES.map(t => `<option value="${t}" ${p.theme === t ? 'selected':''}>${t==='midnight'?'Velvet (default)':t[0].toUpperCase()+t.slice(1)}</option>`).join('')}</select></div>
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
     <div class="settingrow"><span>Zoom-independent sizing</span><button class="secondary" data-action="calibratezoom" type="button">Set current zoom as 100% reference</button></div>
@@ -9948,7 +10388,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.group){selectGroup(target.dataset.group);return;}
     if (target.dataset.groupAccept){respondGroup(target.dataset.groupAccept,true);return;}
     if (target.dataset.groupDecline){respondGroup(target.dataset.groupDecline,false);return;}
-    if (target.dataset.filter) { const mode=target.dataset.filter; if(!['all','inroom','unread','favorites','later','requests','muted','pinned'].includes(mode))return; state.contactsMode = mode; renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
+    if (target.dataset.filter) { const mode=target.dataset.filter; if(!['all','online','inroom','unread','favorites','later','requests','muted','pinned'].includes(mode))return; state.contactsMode = mode; if(mode==='online') pawRequestPresenceForDelivery(); renderSidebar(); const list=ui.menu?.querySelector('.contacts-scroll'); if (list) list.scrollTop=0; state.panelScroll.left=0; return; }
     if (target.dataset.quick !== undefined) { (currentGroup()?sendGroupMessage:sendText)(state.settings.shortcuts[Number(target.dataset.quick)]); return; }
     if (target.dataset.react !== undefined) { const chosen=window.prompt('Reaction emoji: 💗 🐾 😽 ✨ 😹','💗');if(chosen)replyAndReact(currentConversationKind(),target.dataset.react,trim(chosen,12));return; }
     if (target.dataset.sticker) { const st = STICKERS.find(x => x.id === target.dataset.sticker); if (!st) return; if (!currentGroup() && !state.chats[state.selected]) { notice('Choose a kitty or Group Den before sending a sticker.'); return; } (currentGroup()?sendGroupMessage:sendText)(`🐱 Kittychat sticker: ${st.name} ${st.emoji}`); return; }
@@ -9958,6 +10398,17 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.momentdelete!==undefined){if(window.confirm('Delete this saved Paw Moment?')){state.moments=state.moments.filter(m=>m.id!==target.dataset.momentdelete);saveSoon();bookRender();}return;}
     if(target.dataset.join!==undefined){joinRoomFromRadar(state.rooms[Number(target.dataset.join)]);return;}
     const act = target.dataset.action;
+    if(act==='pawstorage-report'){
+      const d=window.PawLoungeStorageCategories();
+      notice(`Mine ${d.estimatedKiB.mine} KiB · Shared ${d.estimatedKiB.shared} KiB · Other ${d.estimatedKiB.otherPlayers} KiB`);
+      console.info('[PawLounge] Local storage categories (sizes only)',d);return;
+    }
+    if(act==='pawstorage-clean'){
+      void window.PawLoungeCleanupOtherPlayers().then(r=>{
+        notice(`Removed ${r.removed} expired profiles; kept ${r.kept}.`);
+        if(state.tab==='settings')renderSettings();
+      }).catch(e=>notice('Storage cleanup unavailable: '+String(e.message||e)));return;
+    }
     if (act === 'bookvaultenable') void bookVaultEnable();
     else if (act === 'bookvaultunlock') void bookVaultUnlock();
     else if (act === 'bookvaultlock') void bookVaultLock();
@@ -10137,7 +10588,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (k==='petPersonaDescription' && String(value).length>300) { notice('Pet description is limited to 300 characters.'); return; }
     if (k==='friendStatusMode' && !Object.hasOwn(STATUS_MODES,value)) return;
     if(k==='friendStatusMinutes' && ![0,30,60,240,1440].includes(Number(value))) return;
-    state.settings[k] = k==='friendStatusMinutes'?Number(value):value;
+    if(k==='peerCacheDays' && !PAW_PEER_DAYS.includes(Number(value)))return;
+    if(k==='peerCacheCap' && !PAW_PEER_CAPS.includes(Number(value)))return;
+    state.settings[k] = ['friendStatusMinutes','peerCacheDays','peerCacheCap'].includes(k)?Number(value):value;
     if(['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k))scheduleStatusExpiry();
     saveSoon();
     if (['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k)) {
