@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.3
+// @version      1.2.4
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.3';
+  const VERSION = '1.2.4';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6322,18 +6322,39 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       </header>
       <div class="workspace">
         <nav class="rail" aria-label="PawLounge navigation">
-          <button class="railtab active" data-tab="chats"><span class="ic">${asset('ui-paw.svg','','🐾')}</span><span class="tx">Chats</span></button>
-          <button class="railtab" data-tab="groups" title="Group Dens and invitations" aria-label="Groups"><span class="ic" aria-hidden="true">👥</span><span class="tx">Groups</span></button>
-          <button class="railtab" data-tab="pawbooks" title="Collaborative Scrapbooks and memory books" aria-label="PawBooks"><span class="ic" aria-hidden="true">📚</span><span class="tx">PawBooks</span></button>
-          <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
-          <button class="railtab" data-tab="notes" title="Private Paw Notes · send and receive messages"><span class="ic">✉️</span><span class="tx">Paw Notes</span></button>
-          <button class="railtab" data-tab="marvelous" title="Marvelous encrypted cloud and shared features"><span class="ic">☁️</span><span class="tx">Marvelous</span></button>
-          <button class="railtab" data-tab="moments" title="Private memories and Paw Moments" aria-label="Memories and Moments"><span class="ic"><img class="kc-moments-icon" src="${KC_MOMENTS_ICON_SRC}" alt="" width="32" height="32" draggable="false" decoding="async"/></span><span class="tx">Memories</span></button>
-          <button class="railtab" data-tab="personality" title="Pet personality studio"><span class="ic">🐾</span><span class="tx">Pet Self</span></button>
-          <button class="railtab" data-tab="focus" title="Room focus mode"><span class="ic">🎬</span><span class="tx">Focus</span></button>
-          <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
-          <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
-          <button class="railtab" data-tab="settings"><span class="ic">${asset('ui-settings.svg','','⚙')}</span><span class="tx">Settings</span></button>
+          <button class="railtab active" data-tab="chats" title="Private conversations" aria-label="Chats"><span class="ic">${asset('ui-paw.svg','','🐾')}</span><span class="tx">Chats</span></button>
+          <button class="railtab" data-tab="notes" title="Encrypted Paw Notes" aria-label="Paw Notes"><span class="ic">✉️</span><span class="tx">Paw Notes</span></button>
+          <details class="kc-nav-folder" data-nav-group="social">
+            <summary title="Groups, catch-up, friends and profile"><span class="kc-nav-ic">💗</span><span class="kc-nav-title">Social</span><span class="kc-nav-arrow" aria-hidden="true">⌄</span></summary>
+            <div class="kc-nav-items">
+              <button class="railtab" data-tab="groups" title="Group Dens and invitations"><span class="ic">👥</span><span class="tx">Groups</span></button>
+              <button class="railtab" data-tab="catchup" title="Catch up on conversations and invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
+              <button class="railtab" data-tab="circles" title="Friend Circles"><span class="ic">🫂</span><span class="tx">Circles</span></button>
+              <button class="railtab" data-tab="personality" title="Pet personality studio"><span class="ic">🐾</span><span class="tx">Pet Self</span></button>
+            </div>
+          </details>
+          <details class="kc-nav-folder" data-nav-group="memories">
+            <summary title="Memories and scrapbooks"><span class="kc-nav-ic">♡</span><span class="kc-nav-title">Keepsakes</span><span class="kc-nav-arrow" aria-hidden="true">⌄</span></summary>
+            <div class="kc-nav-items">
+              <button class="railtab" data-tab="moments" title="Paw Moments and room memories"><span class="ic"><img class="kc-moments-icon" src="${KC_MOMENTS_ICON_SRC}" alt="" width="32" height="32" draggable="false" decoding="async"/></span><span class="tx">Memories</span></button>
+              <button class="railtab" data-tab="pawbooks" title="Shared scrapbook and journals"><span class="ic">📚</span><span class="tx">PawBooks</span></button>
+            </div>
+          </details>
+          <details class="kc-nav-folder" data-nav-group="rooms">
+            <summary title="Room discovery, stickers, room focus"><span class="kc-nav-ic">⌂</span><span class="kc-nav-title">Explore</span><span class="kc-nav-arrow" aria-hidden="true">⌄</span></summary>
+            <div class="kc-nav-items">
+              <button class="railtab" data-tab="rooms" title="Find rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
+              <button class="railtab" data-tab="stickers" title="Sticker library"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
+              <button class="railtab" data-tab="focus" title="Room focus mode"><span class="ic">🎬</span><span class="tx">Focus</span></button>
+            </div>
+          </details>
+          <details class="kc-nav-folder" data-nav-group="tools">
+            <summary title="Cloud Hub and settings"><span class="kc-nav-ic">⚙</span><span class="kc-nav-title">Tools</span><span class="kc-nav-arrow" aria-hidden="true">⌄</span></summary>
+            <div class="kc-nav-items">
+              <button class="railtab" data-tab="marvelous" title="Marvelous Hub"><span class="ic">☁️</span><span class="tx">Marvelous</span></button>
+              <button class="railtab" data-tab="settings" title="PawLounge settings"><span class="ic">${asset('ui-settings.svg','','⚙')}</span><span class="tx">Settings</span></button>
+            </div>
+          </details>
           <div class="railspacer"></div>
         </nav>
         <aside class="sidebar" id="kc-side"></aside>
@@ -6357,6 +6378,63 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
          </div>
        </section>`;
     const marvelousFiveStyle=document.createElement('style');marvelousFiveStyle.textContent='\n/* Marvelous Five Features: compact kitten UI cards; parent theme variables stay intact. */\n#kc-panel .rail{overflow-y:auto;min-height:0;scrollbar-width:thin;overscroll-behavior:contain}\n#kc-panel .railtab{flex-shrink:0}\n#kc-panel .marv-feature-page{padding:20px;max-width:960px;margin:0 auto;overflow:auto;height:100%;box-sizing:border-box}\n#kc-panel .marv-feature-page h2{margin:0 0 12px;color:#ffe1f2;font-size:22px}\n#kc-panel .marv-feature-card{border:1px solid #9e6388;border-radius:16px;background:linear-gradient(135deg,#50304a9c,#342238cf);padding:14px;margin:12px 0;max-width:100%;overflow-wrap:anywhere}\n#kc-panel .marv-feature-card label{display:block;margin:8px 0}\n#kc-panel .marv-feature-card .field{width:100%;box-sizing:border-box;max-width:100%}\n#kc-panel .marv-feature-top,#kc-panel .marv-feature-actions,#kc-panel .marv-prompt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}\n#kc-panel .marv-feature-actions{justify-content:flex-start}\n#kc-panel .marv-feature-card p{white-space:pre-wrap}\n#kc-panel .marv-room-thumb{display:block;object-fit:contain;max-width:min(100%,420px);max-height:240px;border-radius:10px;margin:10px 0}\n#kc-panel .marv-image-label{display:inline-block!important;padding:8px 12px;background:#754061;border:1px solid #c67fad;border-radius:9px;cursor:pointer}\n#kc-panel .marv-image-label input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}\n#kc-panel .marv-pet-icon{font-size:48px;text-align:center;margin:16px auto}\n#kc-panel .marv-feature-page .settingrow{display:flex;justify-content:space-between;gap:15px;align-items:center}\n';shadow.appendChild(marvelousFiveStyle);
+    // v1.2.4 — navigation and settings are collapsible, not new data routes.
+    const tidyStyle=document.createElement('style');
+    tidyStyle.textContent=`
+      #kc-panel .rail{gap:8px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+      #kc-panel .rail>.railtab{min-height:69px;flex-shrink:0}
+      #kc-panel .rail>.railtab .ic{font-size:25px}
+      #kc-panel .rail>.railtab .tx{font-size:12px;line-height:1.14}
+      #kc-panel .kc-nav-folder{width:100%;min-width:0;flex-shrink:0}
+      #kc-panel .kc-nav-folder>summary{list-style:none;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:66px;padding:7px 2px;border:1px solid var(--border);border-radius:16px;color:var(--sub);background:linear-gradient(180deg,#ffffff08,#00000009);text-align:center;user-select:none}
+      #kc-panel .kc-nav-folder>summary::-webkit-details-marker{display:none}
+      #kc-panel .kc-nav-folder>summary::marker{content:''}
+      #kc-panel .kc-nav-folder>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+      #kc-panel .kc-nav-ic{font-size:23px;line-height:1.1;color:var(--ink)}
+      #kc-panel .kc-nav-title{font-size:11px;line-height:1.12;font-weight:800;overflow-wrap:anywhere}
+      #kc-panel .kc-nav-arrow{font-size:11px;line-height:9px;opacity:.75;transition:transform .15s ease}
+      #kc-panel .kc-nav-folder[open] .kc-nav-arrow{transform:rotate(180deg)}
+      #kc-panel .kc-nav-folder.kc-nav-current>summary,#kc-panel .kc-nav-folder[open]>summary{border-color:var(--accent);background:var(--accent2);color:var(--ink)}
+      #kc-panel .kc-nav-items{display:grid;gap:5px;margin:6px 0 2px;padding-left:3px;border-left:2px solid var(--accent)}
+      #kc-panel .kc-nav-items .railtab{min-width:0;min-height:55px;padding:5px 1px;border-radius:12px;gap:3px}
+      #kc-panel .kc-nav-items .railtab .ic{font-size:20px;line-height:1.1}
+      #kc-panel .kc-nav-items .railtab .tx{font-size:10px;line-height:1.15;overflow-wrap:anywhere}
+      #kc-panel .kc-nav-items .kc-moments-icon{width:23px;height:23px;object-fit:contain}
+      #kc-panel .kc-settings-screen{max-width:980px;margin:0 auto;width:100%}
+      #kc-panel .kc-settings-folder{border:1px solid var(--border);border-radius:17px;overflow:hidden;background:var(--card);margin:11px 0}
+      #kc-panel .kc-settings-folder>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;padding:15px 17px;font-weight:800;font-size:16px;background:linear-gradient(90deg,var(--card2),transparent);color:var(--ink)}
+      #kc-panel .kc-settings-folder>summary::-webkit-details-marker{display:none}
+      #kc-panel .kc-settings-folder>summary::marker{content:''}
+      #kc-panel .kc-settings-folder>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+      #kc-panel .kc-settings-folder .kc-folder-caret{font-size:15px;color:var(--sub);transition:transform .15s}
+      #kc-panel .kc-settings-folder[open] .kc-folder-caret{transform:rotate(180deg)}
+      #kc-panel .kc-settings-folder>.kc-settings-contents{padding:7px 17px 16px}
+      #kc-panel .kc-settings-folder .smalltitle{margin-top:12px}
+      #kc-panel .kc-settings-folder .settingrow{flex-wrap:wrap}
+      #kc-panel .kc-settings-folder .settingrow>*:last-child{max-width:100%}
+      @container (max-width:650px){
+        #kc-panel .kc-nav-folder>summary{min-height:58px;padding:5px 1px;border-radius:12px}
+        #kc-panel .kc-nav-ic{font-size:18px}
+        #kc-panel .kc-nav-title{font-size:9px}
+        #kc-panel .kc-nav-items{margin-top:4px;padding-left:2px}
+        #kc-panel .kc-nav-items .railtab{min-height:48px}
+        #kc-panel .kc-nav-items .railtab .ic{font-size:17px}
+        #kc-panel .kc-nav-items .railtab .tx{font-size:9px}
+        #kc-panel .rail>.railtab{min-height:57px}
+        #kc-panel .kc-settings-folder>summary{padding:12px}
+        #kc-panel .kc-settings-folder>.kc-settings-contents{padding:7px 12px 13px}
+      }
+    `;shadow.appendChild(tidyStyle);
+    // Open at most one folder in either accordion; other UI dialogs are untouched.
+    shadow.addEventListener('toggle',event=>{
+      const folder=event.target;
+      if(!(folder instanceof HTMLDetailsElement)||!folder.open)return;
+      if(folder.classList.contains('kc-nav-folder')){
+        shadow.querySelectorAll('.kc-nav-folder').forEach(other=>{if(other!==folder)other.open=false;});
+      }else if(folder.classList.contains('kc-settings-folder')){
+        ui.body?.querySelectorAll('.kc-settings-folder').forEach(other=>{if(other!==folder)other.open=false;});
+      }
+    },true);
     const memoryHubStyle=document.createElement('style');
     memoryHubStyle.textContent=`
       #kc-panel .kc-memory-hub{overflow:auto;max-width:1060px}
@@ -8372,6 +8450,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (state.tab === 'memories') state.tab = 'moments'; // Legacy room-memory route now opens the unified hub.
     setTheme();marvelousUpdateUnreadIndicator();
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
+    ui.shadow.querySelectorAll('.kc-nav-folder').forEach(folder=>{
+      const current=!!folder.querySelector('.railtab.active');
+      folder.classList.toggle('kc-nav-current',current);
+      if(current&&!folder.open){
+        ui.shadow.querySelectorAll('.kc-nav-folder').forEach(other=>{if(other!==folder)other.open=false;});
+        folder.open=true;
+      }
+    });
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
     ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='groups'));
     ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles' || state.tab==='notes' || state.tab==='marvelous' || state.tab==='memories' || state.tab==='personality' || state.tab==='focus');
@@ -10296,16 +10382,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function renderSettings() {
     const p = state.settings;
     const control = (name, label) => `<div class="settingrow"><label for="kc-${name}">${label}</label><input type="checkbox" id="kc-${name}" data-setting="${name}" ${p[name] ? 'checked':''}/></div>`;
-    ui.body.innerHTML = `<div class="screen"><div class="sectiontitle">⚙ PawLounge Settings</div><p class="muted">Personal preferences live on this browser only. No additional server is used.</p>
-    <section class="paw-settings-section"><div class="smalltitle">🗃 Storage · My data / Other players / Shared</div>
-    <p class="muted">Your memories and settings stay protected. Conversation archives stay separate. Only cached profiles of other players expire; favorites and members of your circles are excluded.</p>
-    <label>Other-player profile cache retention<select class="field" data-setting="peerCacheDays">${[[1,'1 day'],[7,'7 days (default)'],[14,'14 days'],[30,'30 days']].map(([n,t])=>`<option value="${n}" ${Number(p.peerCacheDays)===n?'selected':''}>${t}</option>`).join('')}</select></label>
-    <label>Temporary profile limit<select class="field" data-setting="peerCacheCap">${[50,100,200,400].map(n=>`<option value="${n}" ${Number(p.peerCacheCap)===n?'selected':''}>${n} profiles</option>`).join('')}</select></label>
-    <div class="flex"><button class="secondary" data-action="pawstorage-report">Show storage breakdown</button><button class="secondary" data-action="pawstorage-clean">Clean expired other-player cache</button></div>
-    <p class="muted">Marvelous cloud backups remain optional and passphrase-encrypted. Nothing is uploaded by this cleanup.</p></section>
-    <section class="paw-settings-section"><div class="smalltitle">🏠 Subbycat's place · chat history</div>
-    ${control('showSubbycatRecentMessages','Show the last 20 public messages from the previous session when I enter the room')}
-    <p class="muted">Turning this off hides the previous-session message panel immediately. It does not erase your locally saved public messages or change BC's live chat. Whispers are never included.</p></section>
+    // Keep the open category through toggles, selects, and repeated renders.
+    const prevFolders=ui.body?.querySelectorAll('details.kc-settings-folder');
+    const hadFolders=!!prevFolders?.length;
+    const expanded=new Set([... (prevFolders||[])].filter(node=>node.open).map(node=>node.dataset.settingsGroup));
+    const folder=(id,title)=>`<details class="kc-settings-folder" data-settings-group="${id}" ${hadFolders?expanded.has(id)?'open':'':id==='appearance'?'open':''}><summary>${title}<span class="kc-folder-caret" aria-hidden="true">⌄</span></summary><div class="kc-settings-contents">`;
+    ui.body.innerHTML = `<div class="screen kc-settings-screen"><div class="sectiontitle">⚙ PawLounge Settings</div><p class="muted">Everything is still here, organized by category. Changes are saved for your BC account as before.</p>
+    ${folder('appearance','🎨 Appearance & layout')}
     <div class="smalltitle">🎨 Cozy appearance</div><div class="settingrow"><label for="kc-theme">Colour theme</label><select class="field" id="kc-theme" data-setting="theme">${VALID_THEMES.map(t => `<option value="${t}" ${p.theme === t ? 'selected':''}>${t==='midnight'?'Velvet (default)':t[0].toUpperCase()+t.slice(1)}</option>`).join('')}</select></div>
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
     <div class="settingrow"><span>Zoom-independent sizing</span><button class="secondary" data-action="calibratezoom" type="button">Set current zoom as 100% reference</button></div>
@@ -10315,11 +10398,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ${control('layoutEdit','Enable drag-and-drop sidebar editor')}<p class="muted">When enabled, drag Now Purring, Search, Circles and Inbox filter into your preferred order. Your layout is saved locally.</p>
     <label>Message bubble shape<select class="field" data-setting="bubbleShape">${[['rounded','Rounded'],['square','Squared'],['cloud','Cloudy']].map(([v,t])=>`<option value="${v}" ${p.bubbleShape===v?'selected':''}>${t}</option>`).join('')}</select></label>
     <label>Bubble opacity: ${p.bubbleOpacity}% <input type="range" min="50" max="100" step="5" value="${p.bubbleOpacity}" data-setting="bubbleOpacity"/></label>
-    <p class="muted">Keyboard: Alt+K open/close, Alt+Shift+1–6 select tabs, Alt+↑/↓ move through contacts, Escape closes PawLounge, Enter sends and Shift+Enter adds a line.</p>
+    <p class="muted">Keyboard: Alt+K open/close, Alt+Shift+1–7 select tabs, Alt+↑/↓ move through contacts, Escape closes PawLounge, Enter sends and Shift+Enter adds a line.</p>
     <div class="smalltitle">🖱 Side panel scrolling</div>${control('panelScrollbars','Always show left and right panel scrollbars')}
     <p class="muted">Scroll the kitty name list and right widgets separately with the mouse wheel, trackpad, touch, or scrollbar. Your conversation stays in place.</p>
-    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws in Beeps and Whispers')}<p class="muted">The other player must use PawLounge. Beeps work with verified BC friends; Whispers work with anyone in your current BC room. Typing paws disappear automatically after you stop typing.</p><div class="smalltitle">🔡 PawLounge data encoding</div>${control('encodePrivateChat','Encode native whisper/beep messages for updated PawLounge recipients only')}<div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
-    ${pawPrivacySettingsMarkup()}<section class="paw-settings-section"><div class="smalltitle">🛡 Message Integrity Shield · active</div><p class="muted">Incoming addon packets are checked for valid senders, permissions, lengths, rate limits and replays. Group delivery acknowledgments are recipient-client reports, not proof of receipt or reading. Older plugin clients have limited replay protection.</p><p class="muted">This session: ${integrity.rejects} rejected · ${integrity.duplicates} duplicates blocked · ${integrity.rateLimited} rate-limited</p></section><section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
+    </div></details>
+    ${folder('profile','💗 Profile & friend status')}
+<section class="kc-status-settings"><div class="smalltitle">💗 Friend status</div>
       <p class="muted">Show a short status to your BC friends who use PawLounge. Your full Paw Profile stays separate.</p>
       <label>Status preset<select class="field" data-setting="friendStatusMode">${Object.keys(STATUS_MODES).map(mode=>`<option value="${escapeText(mode)}" ${p.friendStatusMode===mode?'selected':''}>${STATUS_MODES[mode]} ${escapeText(mode)}</option>`).join('')}</select></label>
       <label>Custom status message<input class="field" data-setting="friendStatusText" value="${escapeText(p.friendStatusText)}" placeholder="Cuddles welcome ♡" maxlength="100"/></label>
@@ -10338,13 +10422,33 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       ${control('pawGuestbookOpen','Allow BC friends to leave guestbook pawprints')}
       <div class="muted">Guestbook entries are private to your local PawLounge until you decide to share them.</div>
     </section>
+    </div></details>
+    ${folder('messages','💌 Messages & alerts')}
+    <div class="smalltitle">🔔 Notifications</div>${control('notifications','Message alerts')}${control('sounds','Kitty chime (optional)')}${control('typing','Send typing paws in Beeps and Whispers')}<p class="muted">The other player must use PawLounge. Beeps work with verified BC friends; Whispers work with anyone in your current BC room. Typing paws disappear automatically after you stop typing.</p><div class="smalltitle">🔡 PawLounge data encoding</div>${control('encodePrivateChat','Encode native whisper/beep messages for updated PawLounge recipients only')}<div class="smalltitle">🌙 Quiet Hours</div>${control('quietHours','Silence PawLounge message alerts during these hours')}<div class="flex"><label>From<input class="field" data-setting="quietStart" type="time" value="${escapeText(p.quietStart)}"/></label><label>Until<input class="field" data-setting="quietEnd" type="time" value="${escapeText(p.quietEnd)}"/></label></div><p class="muted">Affects PawLounge alerts and chimes, not native BC presence or notifications.</p>
+    <section class="paw-settings-section"><div class="smalltitle">🏠 Subbycat's place · chat history</div>
+    ${control('showSubbycatRecentMessages','Show the last 20 public messages from the previous session when I enter the room')}
+    <p class="muted">Turning this off hides the previous-session message panel immediately. It does not erase your locally saved public messages or change BC's live chat. Whispers are never included.</p></section>
+    </div></details>
+    ${folder('privacy','🛡 Privacy & security')}
+    ${pawPrivacySettingsMarkup()}<section class="paw-settings-section"><div class="smalltitle">🛡 Message Integrity Shield · active</div><p class="muted">Incoming addon packets are checked for valid senders, permissions, lengths, rate limits and replays. Group delivery acknowledgments are recipient-client reports, not proof of receipt or reading. Older plugin clients have limited replay protection.</p><p class="muted">This session: ${integrity.rejects} rejected · ${integrity.duplicates} duplicates blocked · ${integrity.rateLimited} rate-limited</p></section>
+    </div></details>
+    ${folder('data','🗃 Storage & backups')}
+    <section class="paw-settings-section"><div class="smalltitle">🗃 Storage · My data / Other players / Shared</div>
+    <p class="muted">Your memories and settings stay protected. Conversation archives stay separate. Only cached profiles of other players expire; favorites and members of your circles are excluded.</p>
+    <label>Other-player profile cache retention<select class="field" data-setting="peerCacheDays">${[[1,'1 day'],[7,'7 days (default)'],[14,'14 days'],[30,'30 days']].map(([n,t])=>`<option value="${n}" ${Number(p.peerCacheDays)===n?'selected':''}>${t}</option>`).join('')}</select></label>
+    <label>Temporary profile limit<select class="field" data-setting="peerCacheCap">${[50,100,200,400].map(n=>`<option value="${n}" ${Number(p.peerCacheCap)===n?'selected':''}>${n} profiles</option>`).join('')}</select></label>
+    <div class="flex"><button class="secondary" data-action="pawstorage-report">Show storage breakdown</button><button class="secondary" data-action="pawstorage-clean">Clean expired other-player cache</button></div>
+    <p class="muted">Marvelous cloud backups remain optional and passphrase-encrypted. Nothing is uploaded by this cleanup.</p></section>
     <section class="paw-settings-section"><div class="smalltitle">🔒 Device transfer</div><p class="muted">Encrypted backup includes your full IndexedDB message history, circles, Moments, albums, chat themes, Paw Profiles and settings. Choose a password you can remember; PawLounge cannot recover it.</p>
       <div class="flex"><button class="secondary" data-action="exportsecure">🔐 Export encrypted backup</button><button class="secondary" data-action="importsecure">📥 Import / merge backup</button></div><input class="hidden" type="file" id="paw-import-file" accept=".json,.pawbackup,application/json"/>
     </section>
+    </div></details>
+    ${folder('advanced','⚙ Advanced tools')}
     <div class="smalltitle">🖼 Image repository</div><label>Asset base URL<input class="field" data-setting="assetBase" value="${escapeText(p.assetBase)}" maxlength="500"/></label>
     <p class="muted">Use an HTTPS folder URL ending in /; for example the raw GitHub assets folder. Emoji fallbacks are shown if an image is missing.</p>
     <div class="smalltitle">💌 Quick paws (one per line)</div><textarea class="field" id="kc-quick-settings" rows="4" maxlength="600">${escapeText(p.shortcuts.join('\n'))}</textarea><div class="flex" style="margin-top:10px"><button class="secondary" data-action="savequick">Save quick paws</button><button class="secondary" data-action="resetwindow">Reset window to reference size</button><button class="secondary" data-action="downloadall">Export FULL history (JSON)</button><button class="secondary" data-action="importnativebeeps">Import available BC beeps</button><button class="secondary" data-action="clearall">Clear local chat history</button></div>
     <p class="muted">🐾 Messages are archived in browser IndexedDB without a fixed count limit (subject to browser storage space). Only the last 90 remain in the fast UI cache. Click “Load older messages” in a chat to browse further back. No server history is recovered from before installation.</p>
+    </div></details>
     <p class="muted" style="margin-top:16px">PawLounge v${VERSION} · Alt+K to open/close · Data saved separately per BC member number.</p></div>`;
   }
   // Keep the composer ready for the next message even if sending repaints the chat.
