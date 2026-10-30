@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.2
+// @version      1.2.3
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.2';
+  const VERSION = '1.2.3';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6328,12 +6328,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
           <button class="railtab" data-tab="notes" title="Private Paw Notes · send and receive messages"><span class="ic">✉️</span><span class="tx">Paw Notes</span></button>
           <button class="railtab" data-tab="marvelous" title="Marvelous encrypted cloud and shared features"><span class="ic">☁️</span><span class="tx">Marvelous</span></button>
-          <button class="railtab" data-tab="memories" title="Private room memories"><span class="ic">📔</span><span class="tx">Memories</span></button>
+          <button class="railtab" data-tab="moments" title="Private memories and Paw Moments" aria-label="Memories and Moments"><span class="ic"><img class="kc-moments-icon" src="${KC_MOMENTS_ICON_SRC}" alt="" width="32" height="32" draggable="false" decoding="async"/></span><span class="tx">Memories</span></button>
           <button class="railtab" data-tab="personality" title="Pet personality studio"><span class="ic">🐾</span><span class="tx">Pet Self</span></button>
           <button class="railtab" data-tab="focus" title="Room focus mode"><span class="ic">🎬</span><span class="tx">Focus</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
           <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
-          <button class="railtab" data-tab="moments" title="Paw Moments" aria-label="Paw Moments"><span class="ic"><img class="kc-moments-icon" src="${KC_MOMENTS_ICON_SRC}" alt="" width="32" height="32" draggable="false" decoding="async"/></span><span class="tx">Moments</span></button>
           <button class="railtab" data-tab="settings"><span class="ic">${asset('ui-settings.svg','','⚙')}</span><span class="tx">Settings</span></button>
           <div class="railspacer"></div>
         </nav>
@@ -6358,6 +6357,26 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
          </div>
        </section>`;
     const marvelousFiveStyle=document.createElement('style');marvelousFiveStyle.textContent='\n/* Marvelous Five Features: compact kitten UI cards; parent theme variables stay intact. */\n#kc-panel .rail{overflow-y:auto;min-height:0;scrollbar-width:thin;overscroll-behavior:contain}\n#kc-panel .railtab{flex-shrink:0}\n#kc-panel .marv-feature-page{padding:20px;max-width:960px;margin:0 auto;overflow:auto;height:100%;box-sizing:border-box}\n#kc-panel .marv-feature-page h2{margin:0 0 12px;color:#ffe1f2;font-size:22px}\n#kc-panel .marv-feature-card{border:1px solid #9e6388;border-radius:16px;background:linear-gradient(135deg,#50304a9c,#342238cf);padding:14px;margin:12px 0;max-width:100%;overflow-wrap:anywhere}\n#kc-panel .marv-feature-card label{display:block;margin:8px 0}\n#kc-panel .marv-feature-card .field{width:100%;box-sizing:border-box;max-width:100%}\n#kc-panel .marv-feature-top,#kc-panel .marv-feature-actions,#kc-panel .marv-prompt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}\n#kc-panel .marv-feature-actions{justify-content:flex-start}\n#kc-panel .marv-feature-card p{white-space:pre-wrap}\n#kc-panel .marv-room-thumb{display:block;object-fit:contain;max-width:min(100%,420px);max-height:240px;border-radius:10px;margin:10px 0}\n#kc-panel .marv-image-label{display:inline-block!important;padding:8px 12px;background:#754061;border:1px solid #c67fad;border-radius:9px;cursor:pointer}\n#kc-panel .marv-image-label input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}\n#kc-panel .marv-pet-icon{font-size:48px;text-align:center;margin:16px auto}\n#kc-panel .marv-feature-page .settingrow{display:flex;justify-content:space-between;gap:15px;align-items:center}\n';shadow.appendChild(marvelousFiveStyle);
+    const memoryHubStyle=document.createElement('style');
+    memoryHubStyle.textContent=`
+      #kc-panel .kc-memory-hub{overflow:auto;max-width:1060px}
+      #kc-panel .kc-memory-actions,#kc-panel .kc-memory-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+      #kc-panel .kc-memory-tools{margin:12px 0;display:grid;gap:10px}
+      #kc-panel .kc-memory-tools label{display:block;font-size:12px}
+      #kc-panel .kc-memory-tools .field{width:100%;max-width:600px;box-sizing:border-box;margin-top:5px}
+      #kc-panel .kc-memory-filters button{min-height:34px}
+      #kc-panel .kc-memory-favorite-toggle{display:flex;gap:8px;align-items:center}
+      #kc-panel .kc-memory-composer{margin:12px 0}
+      #kc-panel .kc-memory-composer label{display:block;margin:8px 0}
+      #kc-panel .kc-memory-feed{align-items:start}
+      #kc-panel .kc-memory-entry{min-width:0;margin:0;overflow-wrap:anywhere;box-sizing:border-box}
+      #kc-panel .kc-memory-entry .flex,#kc-panel .kc-memory-entry .marv-feature-actions{display:flex;flex-wrap:wrap;gap:6px}
+      #kc-panel .kc-memory-entry .kc-memory-kind{font-size:11px;font-weight:700;opacity:.8;margin-bottom:8px}
+      #kc-panel .kc-memory-entry blockquote{white-space:pre-wrap;overflow-wrap:anywhere}
+      #kc-panel .kc-memory-entry img{max-width:100%;height:auto}
+      @container (max-width:530px){#kc-panel .kc-memory-feed{grid-template-columns:1fr}}
+    `;
+    shadow.appendChild(memoryHubStyle);
     shadow.appendChild(wrap);
     document.body.appendChild(host);
     Object.assign(ui, { host, shadow, fab:shadow.getElementById('kc-fab'),
@@ -8350,6 +8369,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function render() {
     if (!ui.body) return;
     if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
+    if (state.tab === 'memories') state.tab = 'moments'; // Legacy room-memory route now opens the unified hub.
     setTheme();marvelousUpdateUnreadIndicator();
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
@@ -8381,7 +8401,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (state.tab === 'catchup') renderCatchUp();
     else if (state.tab === 'notes') {renderMarvelousNotes();marvelousEnterTab();}
     else if (state.tab === 'marvelous') {renderMarvelousHub();void marvelousHubOpen();}
-    else if (state.tab === 'memories') renderRoomMemories();
     else if (state.tab === 'personality') renderPetPersonality();
     else if (state.tab === 'focus') renderFocusMode();
     else if (state.tab === 'circles') renderCircles();
@@ -9505,7 +9524,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <div class="pawbook-toolbar"><input class="field" id="pawbook-search" type="search" value="${escapeText(pawBookUI.query)}" placeholder="Search books and memories…"/></div>
       ${pending.map(p=>`<div class="pawbook-invite"><b>${escapeText(p.name)}</b> · Invitation from ${escapeText(name(p.owner))}<button class="primary" data-paw-album-accept="${escapeText(p.id)}">Accept</button><button class="secondary" data-paw-album-decline="${escapeText(p.id)}">Decline</button></div>`).join('')}
       <div class="pawbook-shelf">${list.map(a=>`<button type="button" class="pawbook-shelf-card" data-paw-album="${escapeText(a.id)}">${pawCoverMarkup(a)}<strong>${escapeText(a.name)}</strong><small>${a.cards.length} memories · ${a.members.length} members · ${a.bookPages.length} chapters</small></button>`).join('')||'<div class="pawbook-empty">No matching books yet. Create one to begin your shared story ♡</div>'}</div>
-      <div class="pawbook-bottom"><button class="secondary" data-action="pawbooksmoments">♡ Private Paw Moments</button></div></div>`;
+      <div class="pawbook-bottom"><button class="secondary" data-action="pawbooksmoments">♡ Private Memories</button></div></div>`;
   }
   function bookHandlePacket(a,p,from){
     const act=p.action,owned=from===a.owner,editor=bookCanEdit(a,from),member=a.members.includes(from);
@@ -9924,11 +9943,41 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }catch(e){console.warn('[PawLounge] Import failed',e);notice('Import failed. Check your password and backup file, then try again.');}
   }
 
+  // Memories + Paw Moments share one rail button and one chronological view.
+  // Storage intentionally stays in its original arrays/IndexedDB stores: no
+  // destructive migration, and Marvelous room-backup permissions are unchanged.
   function renderMoments() {
-    const moments=state.moments.slice().reverse();
-    ui.body.innerHTML=`<div class="screen kc-moments-screen"><div class="sectiontitle">♡ Paw Moments</div><p class="muted">Your private scrapbook of saved messages and memories. Nothing is shared automatically.</p>
-      <div class="flex"><button class="primary" data-action="newmoment">＋ Write a Paw Moment</button><button class="secondary" data-action="openpawbooks">📚 Open PawBooks</button><button class="secondary" data-action="momentsfromchat">← Back to Chats</button></div>
-      <div class="kc-moments-grid">${moments.map(m=>`<article class="kc-moment-card"><div class="kc-moment-decor">${escapeText(m.decoration)}</div><div class="kc-moment-title">${escapeText(m.title)}</div>${m.image?`<img src="${escapeText(m.image)}" alt="Moment image" loading="lazy"/>`:''}<blockquote>${escapeText(m.text)}</blockquote><div class="muted">${escapeText(m.source)} · ${new Date(m.at).toLocaleDateString()}</div><div class="flex"><button class="secondary" data-momentshare="${escapeText(m.id)}">💌 Share</button><button class="secondary" data-paw-album-moment="${escapeText(m.id)}">📒 Add to album</button><button class="secondary" data-momentdelete="${escapeText(m.id)}">Delete</button></div></article>`).join('')||'<p class="muted">No moments yet. Save one from a message using ☆.</p>'}</div></div>`;
+    if(!ui.body)return;
+    const f=marvelousRoomMemoryFilters;
+    const view=['all','moments','rooms'].includes(f.view)?f.view:'all';
+    const query=String(f.query||'').trim().toLocaleLowerCase();
+    const records=[
+      ...state.moments.map(m=>({kind:'moment',at:Number(m.at)||0,item:m,
+        search:[m.title,m.text,m.source,m.decoration].join(' ').toLocaleLowerCase()})),
+      ...state.roomMemories.map(m=>({kind:'room',at:Number(m.created)||0,item:m,
+        search:[m.room,m.notes,m.tags].join(' ').toLocaleLowerCase()}))
+    ].filter(r=>(view==='all'||(view==='moments'?r.kind==='moment':r.kind==='room')) &&
+      (!query||r.search.includes(query)) &&
+      (r.kind!=='room'||!f.favoritesOnly||r.item.favorite))
+      .sort((a,b)=>b.at-a.at);
+    const draft=state.roomMemoryDraft||{name:'',notes:'',tags:''};
+    const current=trim(window.ChatRoomData?.Name||'',110);
+    const tabs=[['all','All',state.moments.length+state.roomMemories.length],
+      ['moments','Paw Moments',state.moments.length],['rooms','Room Memories',state.roomMemories.length]];
+    const card=r=>{
+      const m=r.item;
+      if(r.kind==='moment')return `<article class="kc-moment-card kc-memory-entry"><div class="kc-memory-kind">♡ Paw Moment</div><div class="kc-moment-decor">${escapeText(m.decoration)}</div><div class="kc-moment-title">${escapeText(m.title)}</div>${m.image?`<img src="${escapeText(m.image)}" alt="Moment image" loading="lazy"/>`:''}<blockquote>${escapeText(m.text)}</blockquote><div class="muted">${escapeText(m.source)} · ${new Date(r.at).toLocaleDateString()}</div><div class="flex"><button class="secondary" data-momentshare="${escapeText(m.id)}">💌 Share</button><button class="secondary" data-paw-album-moment="${escapeText(m.id)}">📒 Add to album</button><button class="secondary" data-momentdelete="${escapeText(m.id)}">Delete</button></div></article>`;
+      return `<article class="marv-feature-card kc-memory-entry" data-mem-id="${escapeText(m.id)}"><div class="kc-memory-kind">📔 Room Memory</div><div class="marv-feature-top"><b>${m.favorite?'⭐ ':''}${escapeText(m.room||'Unnamed room')}</b><span class="muted">${new Date(r.at).toLocaleDateString()}</span></div><p>${escapeText(m.notes)}</p>${m.tags?`<p class="muted">🏷 ${escapeText(m.tags)}</p>`:''}${m.hasImage?`<img class="marv-room-thumb" data-marv-memory-img="${escapeText(m.id)}" alt="Room memory screenshot" loading="lazy"/>`:''}<div class="marv-feature-actions"><button class="secondary" data-action="marv-feature-favorite-memory" data-id="${escapeText(m.id)}">${m.favorite?'★ Unfavorite':'☆ Favorite'}</button><label class="marv-image-label">📷 Attach screenshot<input type="file" data-memory-file="${escapeText(m.id)}" accept="image/png,image/jpeg,image/webp"></label><button class="secondary" data-action="marv-feature-delete-memory" data-id="${escapeText(m.id)}">Delete</button></div></article>`;
+    };
+    ui.body.innerHTML=`<div class="marv-feature-page kc-memory-hub"><h2>♡ Memories</h2><p class="muted">Paw Moments and private room memories together in one place. Nothing is shared or uploaded automatically.</p>
+      <div class="kc-memory-actions"><button class="primary" data-action="newmoment">＋ Write a Moment</button><button class="secondary" data-action="memoryhub-compose">${f.composeOpen?'✕ Close Room Journal':'📔 Add Room Memory'}</button><button class="secondary" data-action="openpawbooks">📚 PawBooks</button></div>
+      ${f.composeOpen?`<div class="marv-feature-card kc-memory-composer"><div class="smalltitle">📔 Save a private room memory</div><label>Room name<input class="field" id="marv-memory-room" maxlength="110" placeholder="${escapeText(current||'Room name')}" value="${escapeText(draft.name)}"></label><label>Your private memory<textarea class="field" id="marv-memory-note" maxlength="2000" rows="3" placeholder="What made this moment memorable?">${escapeText(draft.notes)}</textarea></label><label>Optional tags<input class="field" id="marv-memory-tags" maxlength="100" placeholder="cuddles, friends" value="${escapeText(draft.tags)}"></label><button class="primary" data-action="marv-feature-add-memory">♡ Keep this memory</button></div>`:''}
+      <div class="kc-memory-tools"><div class="kc-memory-filters" role="group" aria-label="Filter memories">${tabs.map(([id,label,count])=>`<button class="${view===id?'primary':'secondary'}" data-action="memoryhub-view-${id}" aria-pressed="${view===id}">${label} (${count})</button>`).join('')}</div>
+      <label>Find a memory<input class="field" type="search" id="marv-memory-search" maxlength="120" placeholder="Search moments, messages, rooms or tags" value="${escapeText(f.query)}" autocomplete="off"></label>
+      ${view!=='moments'?`<label class="kc-memory-favorite-toggle"><input type="checkbox" id="marv-memory-favorites" ${f.favoritesOnly?'checked':''}> Starred room memories only</label>`:''}<p class="muted">${records.length} saved ${records.length===1?'entry':'entries'} shown</p></div>
+      <div class="kc-moments-grid kc-memory-feed">${records.map(card).join('')||'<p class="muted">No matching memories. Save a Moment or write a room memory to begin. ♡</p>'}</div></div>`;
+    // Room screenshots live in the old IndexedDB store. Load only those shown.
+    for(const r of records)if(r.kind==='room'&&r.item.hasImage)void marvelousShowImage(r.item.id);
   }
   function addOwnMoment() {
     const title=window.prompt('Paw Moment title:','A sweet memory ♡');if(title===null)return;
@@ -10157,29 +10206,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       memory.hasImage=true;saveSoon();renderRoomMemories();notice('Screenshot kept privately in this browser.');
     }catch(e){notice('Screenshot could not be saved: '+String(e?.message||e).slice(0,80));}
   }
-  const marvelousRoomMemoryFilters={query:'',favoritesOnly:false};
+  const marvelousRoomMemoryFilters={query:'',favoritesOnly:false,view:'all',composeOpen:false};
   function renderRoomMemories(){
-    if(!ui.body)return;
-    const d=state.roomMemoryDraft||{name:'',notes:'',tags:''};
-    const current=trim(window.ChatRoomData?.Name||'',110);
-    const q=String(marvelousRoomMemoryFilters.query||'').trim().toLocaleLowerCase();
-    const ordered=state.roomMemories.filter(m=>(!marvelousRoomMemoryFilters.favoritesOnly||m.favorite)&&(!q||[m.room,m.notes,m.tags].some(v=>String(v||'').toLocaleLowerCase().includes(q)))).sort((a,b)=>Number(b.favorite)-Number(a.favorite)||b.created-a.created);
-    ui.body.innerHTML=`<div class="marv-feature-page">
-      <h2>📔 Room Memories <small>Private journal · local</small></h2>
-      <p class="muted">Save moments yourself. No room messages, member names or screenshots are automatically collected or uploaded to Marvelous.</p>
-      <div class="marv-feature-card">
-       <label>Room name<input class="field" id="marv-memory-room" maxlength="110" placeholder="${escapeText(current||'Room name')}" value="${escapeText(d.name)}"></label>
-       <label>Your private memory<textarea class="field" id="marv-memory-note" maxlength="2000" rows="3" placeholder="What made this moment memorable?">${escapeText(d.notes)}</textarea></label>
-       <label>Optional tags<input class="field" id="marv-memory-tags" maxlength="100" placeholder="cuddles, friends" value="${escapeText(d.tags)}"></label>
-       <button class="primary" data-action="marv-feature-add-memory">♡ Keep this memory</button>
-      </div><div class="marv-feature-card"><b>Find a memory</b>
-      <label>Search room, note or tag<input class="field" id="marv-memory-search" maxlength="120" placeholder="Search private memories" value="${escapeText(marvelousRoomMemoryFilters.query)}"></label>
-      <label><input type="checkbox" id="marv-memory-favorites" ${marvelousRoomMemoryFilters.favoritesOnly?'checked':''}> Favorites only</label>
-      <p class="muted">${ordered.length} match(es) from ${state.roomMemories.length} local memories.</p></div>
-      <div class="smalltitle">Saved memories (${state.roomMemories.length}/60)</div>
-      ${!ordered.length?'<p class="muted">Your journal is empty. Add the first memory above.</p>':ordered.map(m=>`<div class="marv-feature-card" data-mem-id="${m.id}"><div class="marv-feature-top"><b>${m.favorite?'⭐ ':''}${escapeText(m.room||'Unnamed room')}</b><span class="muted">${new Date(m.created).toLocaleDateString()}</span></div><p>${escapeText(m.notes)}</p>${m.tags?`<p class="muted">🏷 ${escapeText(m.tags)}</p>`:''}${m.hasImage?`<img class="marv-room-thumb" data-marv-memory-img="${m.id}" alt="Room memory screenshot" />`:''}
-       <div class="marv-feature-actions"><button class="secondary" data-action="marv-feature-favorite-memory" data-id="${m.id}">${m.favorite?'★ Unfavorite':'☆ Favorite'}</button><label class="marv-image-label">📷 Attach screenshot<input type="file" data-memory-file="${m.id}" accept="image/png,image/jpeg,image/webp"></label><button class="secondary" data-action="marv-feature-delete-memory" data-id="${m.id}">Delete</button></div></div>`).join('')}</div>`;
-    for(const m of ordered)if(m.hasImage)void marvelousShowImage(m.id);
+    if(state.open && (state.tab==='moments'||state.tab==='memories'))renderMoments();
   }
   const marvelousPetPrompt=(id,index)=>PET_PERSONAS[id]?.lines?.[index]||'';
   function renderPetPersonality(){
@@ -10235,7 +10264,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(!room||!notes){notice('Enter a room name and a memory first.');return;}
       const id='rm_'+(crypto.randomUUID?.().replaceAll('-','')||Date.now().toString(36)+'_'+Math.random().toString(36).slice(2));
       state.roomMemories.push({id,room,notes,tags,created:Date.now(),favorite:false,hasImage:false});
-      state.roomMemories=state.roomMemories.slice(-60);state.roomMemoryDraft={name:'',notes:'',tags:''};saveSoon();renderRoomMemories();notice('Saved privately to your local journal.');
+      state.roomMemories=state.roomMemories.slice(-60);state.roomMemoryDraft={name:'',notes:'',tags:''};marvelousRoomMemoryFilters.composeOpen=false;saveSoon();renderRoomMemories();notice('Saved privately to your local journal.');
     }else if(action==='marv-feature-favorite-memory'){
       const m=state.roomMemories.find(x=>x.id===el.dataset.id);if(m){m.favorite=!m.favorite;saveSoon();renderRoomMemories();}
     }else if(action==='marv-feature-delete-memory'){
@@ -10299,7 +10328,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <button class="primary kc-publish-status" data-action="sharefriendstatus">🐾 Save &amp; Share Status</button>
       <div class="kc-status-example" role="status">Your status: ${p.shareFriendStatus?escapeText(statusLabel(me())):'Hidden from friends'}</div>
     </section>
-    <div class="flex"><button class="secondary" data-tab="personality">🐾 Open Pet Personality Studio</button><button class="secondary" data-tab="memories">📔 Room Memories</button><button class="secondary" data-tab="focus">🎬 Room Focus</button></div><div class="smalltitle">🐾 Paw Profile</div><label>Avatar HTTPS image URL<input class="field" data-setting="avatar" value="${escapeText(p.avatar)}" placeholder="https://.../avatar.png" maxlength="500"/></label><label>Banner / hero HTTPS image URL<input class="field" data-setting="pawHero" value="${escapeText(p.pawHero)}" placeholder="https://.../hero.png" maxlength="500"/></label><label>Status / signature<input class="field" data-setting="signature" value="${escapeText(p.signature)}" maxlength="140"/></label><label>About me<input class="field" data-setting="pawAbout" value="${escapeText(p.pawAbout)}" maxlength="240"/></label><label>Likes<input class="field" data-setting="pawLikes" value="${escapeText(p.pawLikes)}" maxlength="240"/></label><label>Dislikes<input class="field" data-setting="pawDislikes" value="${escapeText(p.pawDislikes)}" maxlength="240"/></label><label>Looking for<input class="field" data-setting="pawLookingFor" value="${escapeText(p.pawLookingFor)}" maxlength="240"/></label><div class="flex" style="gap:10px"><label style="flex:1">Timezone<input class="field" data-setting="pawTimezone" value="${escapeText(p.pawTimezone)}" maxlength="60"/></label><label style="flex:1">Pronouns<input class="field" data-setting="pawPronouns" value="${escapeText(p.pawPronouns)}" maxlength="60"/></label></div><div class="smalltitle" style="margin-top:12px">🖼 Gallery (up to 4 HTTPS image URLs)</div><label>Gallery image 1<input class="field" data-setting="pawGallery1" value="${escapeText(p.pawGallery1)}" maxlength="500"/></label><label>Gallery image 2<input class="field" data-setting="pawGallery2" value="${escapeText(p.pawGallery2)}" maxlength="500"/></label><label>Gallery image 3<input class="field" data-setting="pawGallery3" value="${escapeText(p.pawGallery3)}" maxlength="500"/></label><label>Gallery image 4<input class="field" data-setting="pawGallery4" value="${escapeText(p.pawGallery4)}" maxlength="500"/></label>
+    <div class="flex"><button class="secondary" data-tab="personality">🐾 Open Pet Personality Studio</button><button class="secondary" data-tab="moments">♡ Memories</button><button class="secondary" data-tab="focus">🎬 Room Focus</button></div><div class="smalltitle">🐾 Paw Profile</div><label>Avatar HTTPS image URL<input class="field" data-setting="avatar" value="${escapeText(p.avatar)}" placeholder="https://.../avatar.png" maxlength="500"/></label><label>Banner / hero HTTPS image URL<input class="field" data-setting="pawHero" value="${escapeText(p.pawHero)}" placeholder="https://.../hero.png" maxlength="500"/></label><label>Status / signature<input class="field" data-setting="signature" value="${escapeText(p.signature)}" maxlength="140"/></label><label>About me<input class="field" data-setting="pawAbout" value="${escapeText(p.pawAbout)}" maxlength="240"/></label><label>Likes<input class="field" data-setting="pawLikes" value="${escapeText(p.pawLikes)}" maxlength="240"/></label><label>Dislikes<input class="field" data-setting="pawDislikes" value="${escapeText(p.pawDislikes)}" maxlength="240"/></label><label>Looking for<input class="field" data-setting="pawLookingFor" value="${escapeText(p.pawLookingFor)}" maxlength="240"/></label><div class="flex" style="gap:10px"><label style="flex:1">Timezone<input class="field" data-setting="pawTimezone" value="${escapeText(p.pawTimezone)}" maxlength="60"/></label><label style="flex:1">Pronouns<input class="field" data-setting="pawPronouns" value="${escapeText(p.pawPronouns)}" maxlength="60"/></label></div><div class="smalltitle" style="margin-top:12px">🖼 Gallery (up to 4 HTTPS image URLs)</div><label>Gallery image 1<input class="field" data-setting="pawGallery1" value="${escapeText(p.pawGallery1)}" maxlength="500"/></label><label>Gallery image 2<input class="field" data-setting="pawGallery2" value="${escapeText(p.pawGallery2)}" maxlength="500"/></label><label>Gallery image 3<input class="field" data-setting="pawGallery3" value="${escapeText(p.pawGallery3)}" maxlength="500"/></label><label>Gallery image 4<input class="field" data-setting="pawGallery4" value="${escapeText(p.pawGallery4)}" maxlength="500"/></label>
     <div class="flex" style="margin-top:10px;gap:10px"><button class="secondary" data-action="previewmypawprofile">Preview my Paw Profile</button></div><p class="muted">Open a conversation and choose “Share Profile” to send this Paw Profile. No automatic profile sharing.</p>
     <section class="paw-settings-section"><div class="smalltitle">✨ Interactive Paw Profile 2.0</div>
       <label>Favorite plushie<input class="field" data-setting="pawPlushie" maxlength="80" value="${escapeText(p.pawPlushie)}" placeholder="My Subbycat plushie"/></label>
@@ -10393,7 +10422,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (target.dataset.reactionId!==undefined) {replyAndReact(currentConversationKind(),target.dataset.reactionId,target.dataset.emoji);return;}
     if (target.dataset.kickGroupMember!==undefined) {changeGroupMember('kick',target.dataset.kickGroupMember);return;}
     if (target.dataset.roleToggle!==undefined) {const g=currentGroup(),id=numeric(target.dataset.roleToggle);if(g?.creator===me()&&g.members.includes(id)&&id!==me()){g.moderators||=[];g.moderators=g.moderators.includes(id)?g.moderators.filter(x=>x!==id):[...g.moderators,id];syncGroup(g);saveSoon();renderGroupChat();}return;}
-    if (target.dataset.tab) {state.compactOpen=['chats','groups'].includes(target.dataset.tab); state.tab=target.dataset.tab;state.replyTarget=null;render();if (state.tab==='rooms') void searchRooms('rooms-tab');return;}
+    if (target.dataset.tab) {state.compactOpen=['chats','groups'].includes(target.dataset.tab); state.tab=target.dataset.tab==='memories'?'moments':target.dataset.tab;state.replyTarget=null;render();if (state.tab==='rooms') void searchRooms('rooms-tab');return;}
     if (target.dataset.contact) { selectChat(numeric(target.dataset.contact)); return; }
     if (target.dataset.group){selectGroup(target.dataset.group);return;}
     if (target.dataset.groupAccept){respondGroup(target.dataset.groupAccept,true);return;}
@@ -10485,6 +10514,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (act === 'send') sendFromComposer();
     else if (act === 'loadolderhistory') void loadOlderHistory();
     else if (act === 'cancelreply') {state.replyTarget=null;renderReplyBar();}
+    else if (act==='memoryhub-compose'){marvelousRoomMemoryFilters.composeOpen=!marvelousRoomMemoryFilters.composeOpen;renderMoments();if(marvelousRoomMemoryFilters.composeOpen)ui.shadow.getElementById('marv-memory-room')?.focus();}
+    else if (act==='memoryhub-view-all'||act==='memoryhub-view-moments'||act==='memoryhub-view-rooms'){marvelousRoomMemoryFilters.view=act.slice('memoryhub-view-'.length);renderMoments();}
     else if (act==='newmoment')addOwnMoment();
     else if (act==='momentsfromchat'){state.tab='chats';render();}
     else if (act === 'recovergroup') {const g=currentGroup();if(g){
