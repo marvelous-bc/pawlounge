@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.8
+// @version      1.2.9
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.8';
+  const VERSION = '1.2.9';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -1729,6 +1729,10 @@
     statusWire.dispatchTimer=null;statusWire.pending=[];statusWire.queued.clear();
     statusWire.requested.clear();statusWire.responded.clear();statusWire.bootAccount=0;
     state.myId = id;
+    marvelousVerifyReset();
+    // Never carry an old account's cached mailbox verification into a new BC login.
+    marvelousNotesReset();
+    marvelousHub.initialized=false;
     bookVaultPrepareAccount(id);
     integrity.bursts.clear();integrity.recovery.clear();integrity.quorums.clear();integrity.keys.clear();
     state.integritySeen=[];
@@ -2878,6 +2882,17 @@
         }
         mod.hookFunction('ServerSend', 1, (args, next) => { try { onOutgoing(args[0], args[1]); } catch (e) { console.warn('[Kittychat] send:',e); } return next(args); });
         mod.hookFunction('ChatRoomMessage', 1, (args, next) => { try { captureNativeRoomMessage(args[0]); } catch (e) { console.warn('[Kittychat] whisper:',e); } return inMutedNativePacket('whisper', args[0], () => next(args)); });
+        // Handle /pawverify via ModSDK as a secondary path for BC send methods
+        // that bypass Enter keydown. Never send the command into public chat.
+        if(typeof window.ChatRoomSendChat==='function'){
+          try{mod.hookFunction('ChatRoomSendChat',1,(args,next)=>{
+            const field=document.getElementById('InputChat');
+            if(window.CurrentScreen==='ChatRoom'&&field&&/^\/pawverify\s*$/i.test(String(field.value||''))){
+              field.value='';marvelousVerifyOpen();return;
+            }
+            return next(args);
+          });}catch(err){console.warn('[PawLounge] /pawverify fallback hook unavailable:',err);}
+        }
         // Optional BC hooks are independent: a renamed API must not break
         // the existing messenger hooks or prevent Kittychat from loading.
         if (typeof window.ServerShowBeep === 'function') {
@@ -6410,7 +6425,31 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
              <button class="secondary" data-action="marv-prompt-never">No, never ask again</button>
            </div>
          </div>
+       </section>
+       <section id="kc-verify-room-prompt" class="kc-verify-room-prompt" role="region" aria-label="Marvelous account verification" hidden>
+         <strong>🐾 PawID is here!</strong>
+         <p>Verify your BC account with Marvelous? PawLounge will guide you through the secure setup.</p>
+         <div class="kc-verify-room-buttons"><button class="primary" data-action="marv-verify-open">Start verification</button><button class="secondary" data-action="marv-verify-dismiss">Not now</button></div>
        </section>`;
+    style.textContent += `
+      #kc-verify-room-prompt{position:fixed;right:clamp(10px,3vw,28px);bottom:clamp(16px,4vh,55px);z-index:2147483646;max-width:min(360px,calc(100vw - 24px));padding:14px 16px;box-sizing:border-box;pointer-events:auto;background:#302139;color:#ffebf7;border:1px solid #e3a1c7;box-shadow:0 12px 35px #0009;border-radius:16px;font:13px/1.45 system-ui,sans-serif}
+      #kc-verify-room-prompt[hidden]{display:none!important}
+      #kc-verify-room-prompt strong{font-size:16px;color:#ffe6f7}
+      #kc-verify-room-prompt p{margin:7px 0 12px}
+      #kc-verify-room-prompt .kc-verify-room-buttons{display:flex;flex-wrap:wrap;gap:8px}
+      #kc-verify-room-prompt button{border:1px solid #bc7a9e;background:#5c3c60;color:#fff;padding:8px 12px;border-radius:9px;cursor:pointer;font:inherit}
+      #kc-verify-room-prompt button.primary{background:#9e5086;font-weight:700}
+      #kc-panel .marv-verification-step{max-width:780px;margin:14px 0;padding:16px;box-sizing:border-box;border:1px solid #c68baa;border-radius:14px;background:linear-gradient(130deg,#4e304f,#312638);overflow-wrap:anywhere}
+      #kc-panel .marv-verification-step h3{margin:8px 0 10px}
+      #kc-panel .marv-verification-step .marv-verify-progress{display:flex;gap:6px;margin:12px 0;align-items:center;flex-wrap:wrap}
+      #kc-panel .marv-verification-step .marv-verify-progress span{border:1px solid #976d90;border-radius:8px;padding:6px 9px;font-size:11px;background:#3a2c43;white-space:normal}
+      #kc-panel .marv-verification-step .marv-verify-progress span.current{border-color:#f6b6d7;background:#805176;font-weight:bold}
+      #kc-panel .marv-verification-step .marv-verify-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0}
+      #kc-panel .marv-verification-step .marv-verify-actions button{max-width:100%}
+      #kc-panel .marv-verification-step .marv-verify-status{padding:9px 10px;border-left:3px solid #dda3c7;background:#402e4b;margin:10px 0}
+      #kc-panel .marv-verification-step label{display:block;margin:10px 0}
+      #kc-panel .marv-verification-step .field{width:100%;max-width:480px;box-sizing:border-box}
+    `;
     const marvelousFiveStyle=document.createElement('style');marvelousFiveStyle.textContent='\n/* Marvelous Five Features: compact kitten UI cards; parent theme variables stay intact. */\n#kc-panel .rail{overflow-y:auto;min-height:0;scrollbar-width:thin;overscroll-behavior:contain}\n#kc-panel .railtab{flex-shrink:0}\n#kc-panel .marv-feature-page{padding:20px;max-width:960px;margin:0 auto;overflow:auto;height:100%;box-sizing:border-box}\n#kc-panel .marv-feature-page h2{margin:0 0 12px;color:#ffe1f2;font-size:22px}\n#kc-panel .marv-feature-card{border:1px solid #9e6388;border-radius:16px;background:linear-gradient(135deg,#50304a9c,#342238cf);padding:14px;margin:12px 0;max-width:100%;overflow-wrap:anywhere}\n#kc-panel .marv-feature-card label{display:block;margin:8px 0}\n#kc-panel .marv-feature-card .field{width:100%;box-sizing:border-box;max-width:100%}\n#kc-panel .marv-feature-top,#kc-panel .marv-feature-actions,#kc-panel .marv-prompt{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}\n#kc-panel .marv-feature-actions{justify-content:flex-start}\n#kc-panel .marv-feature-card p{white-space:pre-wrap}\n#kc-panel .marv-room-thumb{display:block;object-fit:contain;max-width:min(100%,420px);max-height:240px;border-radius:10px;margin:10px 0}\n#kc-panel .marv-image-label{display:inline-block!important;padding:8px 12px;background:#754061;border:1px solid #c67fad;border-radius:9px;cursor:pointer}\n#kc-panel .marv-image-label input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}\n#kc-panel .marv-pet-icon{font-size:48px;text-align:center;margin:16px auto}\n#kc-panel .marv-feature-page .settingrow{display:flex;justify-content:space-between;gap:15px;align-items:center}\n';shadow.appendChild(marvelousFiveStyle);
     const memoryHubStyle=document.createElement('style');
     memoryHubStyle.textContent=`
@@ -7299,6 +7338,93 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // This is NOT the player's own MemberNumber. No verifier = fail closed.
   const MARVELOUS_VERIFIER_BC_MEMBER=264370;
   let marvelousVerificationPoll=null;
+  // v1.2.9: local-only onboarding state, never a replacement for PawID's trusted BC sender check.
+  const marvelousVerifyUI={account:0,dismissed:false,promptVisible:false,autoQueued:false,
+    commandBound:false,lastPresence:false,status:'',sentChallenge:'',wizardOpenedAt:0,completedAt:0};
+  function marvelousVerifierHere(){
+    return window.CurrentScreen==='ChatRoom' && currentRoomRoster().some(c=>numeric(c?.MemberNumber)===MARVELOUS_VERIFIER_BC_MEMBER);
+  }
+  function marvelousVerifyReset(){
+    Object.assign(marvelousVerifyUI,{account:me(),dismissed:false,promptVisible:false,autoQueued:false,
+      lastPresence:false,status:'',sentChallenge:'',wizardOpenedAt:0,completedAt:0});
+    if(marvelousVerificationPoll){clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;}
+  }
+  function marvelousVerifyOpen(){
+    if(!me()){notice('Log into Bondage Club before verifying.');return;}
+    if(marvelousVerifyUI.account!==me())marvelousVerifyReset();
+    marvelousVerifyUI.dismissed=true;
+    marvelousVerifyUI.wizardOpenedAt=Date.now();
+    marvelousVerifyUI.autoQueued=marvelousVerifierHere()&&!marvelousNotes.claim?.verified_at;
+    const prompt=ui.shadow?.getElementById('kc-verify-room-prompt');if(prompt)prompt.hidden=true;
+    state.tab='marvelous';toggle(true);
+    if(!marvelousNotes.initialized)marvelousEnterTab();
+  }
+  function marvelousVerifyRoomSearch(){
+    marvelousVerifyUI.autoQueued=false;
+    state.roomSearch="Subbycat's place";
+    state.tab='rooms';toggle(true);
+    void searchRooms('pawid-verify-room');
+    notice('Look for Subbycat’s place in the room results. Join the room with PawID (#264370).');
+  }
+  function marvelousVerifyStep(){
+    if(!marvelousNotes.initialized||marvelousNotes.busy&&!marvelousNotes.user)return 0;
+    if(!marvelousNotes.user)return 1;
+    if(!marvelousNotes.claim||!marvelousNotes.keys)return 2;
+    return marvelousNotes.claim?.verified_at?4:3;
+  }
+  function marvelousVerificationWizard(){
+    const x=marvelousNotes,step=marvelousVerifyStep(),here=marvelousVerifierHere();
+    const progress=['Mailbox','Passphrase & keys','Verify with PawID','Verified'];
+    const bars=`<div class="marv-verify-progress" aria-label="Verification progress">${progress.map((v,i)=>`<span class="${i===Math.max(0,step-1)?'current':''}">${i+1}. ${v}</span>`).join('')}</div>`;
+    let body='';
+    if(step===0)body='<h3>Checking your mailbox…</h3><p>Reading your existing Marvelous status without changing it.</p>';
+    else if(step===1)body='<h3>Create your private mailbox</h3><p>No email address is required. Create a mailbox for your current BC character.</p><div class="marv-verify-actions"><button class="primary" data-action="marv-start">Create my mailbox</button></div>';
+    else if(step===2&&!x.claim)body=`<h3>Protect your mailbox</h3><p>Choose and confirm your encryption passphrase. This protects your private keys; it is not sent to PawID or the room.</p>${x.user&&localStorage.getItem(marvelousVaultKey())?'<p class="muted">An existing encrypted key vault was found. Enter the ORIGINAL passphrase to reuse it.</p>':''}<label>Passphrase (12+ characters)<input id="kc-marv-pass" class="field" type="password" autocomplete="new-password" minlength="12"></label><label>Confirm passphrase<input id="kc-marv-pass-confirm" class="field" type="password" autocomplete="new-password" minlength="12"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-register">Continue securely</button></div>`;
+    else if(step===2)body='<h3>Resume your existing mailbox</h3><p>Your identity was already started. Enter your original passphrase to finish the key setup without deleting existing data.</p><label>Original passphrase<input id="kc-marv-pass" class="field" type="password" autocomplete="off"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-resume">Continue setup</button></div>';
+    else if(step===3){
+      body=`<h3>Verify your BC identity</h3><p>${here?'✓ PawID (#264370) is in this room.':'PawID (#264370) is not in your current room.'} Verification uses a <b>private whisper</b> that PawLounge sends directly to PawID. It will never publish your code to room chat.</p>
+      <div class="marv-verify-actions">${here?'<button class="primary" data-action="marv-auto-verify">Send private verification whisper</button>':'<button class="primary" data-action="marv-verify-find-room">Find Subbycat’s place</button>'}<button class="secondary" data-action="marv-refresh">Check confirmation</button></div>
+      <p class="muted">${here?'You can send now. After sending, PawLounge checks automatically for confirmation.':'Once you are in the same room as PawID, return here or use /pawverify.'}</p>
+      <details><summary>Advanced: show one-time verification code</summary><code>Marvelous verify: ${escapeText(x.claim.challenge_code||'')}</code><p class="muted">Only the private whisper sent by your BC character can establish ownership. Do not post this code publicly.</p></details>`;
+    }else body='<h3>✓ Account verified!</h3><p>Your BC account was confirmed by PawID. No further verification is needed for this mailbox.</p><div class="marv-verify-actions"><button class="primary" data-tab="notes">Open Paw Notes</button></div>';
+    const msg=x.error?`<p class="kc-marv-error" role="alert">${escapeText(x.error)}</p>`:'';
+    return `<section class="marv-verification-step" aria-label="Verify Marvelous account"><h2>🐾 Marvelous account setup</h2>${bars}${msg}${body}${marvelousVerifyUI.status?`<div class="marv-verify-status" role="status">${escapeText(marvelousVerifyUI.status)}</div>`:''}<p class="muted">BC #${me()} · Verification is one-time. Keep your passphrase and encrypted key backup safe.</p></section>`;
+  }
+  function marvelousVerifyTick(){
+    const id=me();if(!id||!ui.shadow)return;
+    if(marvelousVerifyUI.account!==id)marvelousVerifyReset();
+    const here=marvelousVerifierHere();
+    const prompt=ui.shadow.getElementById('kc-verify-room-prompt');
+    if(here&&!marvelousNotes.initialized)marvelousEnterTab();
+    const verified=!!marvelousNotes.claim?.verified_at&&marvelousNotes.owner===id;
+    const eligible=here&&!marvelousNotes.busy&&marvelousNotes.initialized&&!verified&&!marvelousVerifyUI.dismissed;
+    // Never show a prompt over an open PawLounge panel or a BC dialog.
+    const show=eligible&&!state.open&&!marvelousPrompt.shown&&!document.hidden;
+    if(prompt)prompt.hidden=!show;
+    marvelousVerifyUI.promptVisible=!!show;
+    if(verified){marvelousVerifyUI.autoQueued=false;marvelousVerifyUI.status='';}
+    if(state.open&&state.tab==='marvelous'&&here!==marvelousVerifyUI.lastPresence)renderMarvelousHub();
+    marvelousVerifyUI.lastPresence=here;
+    // A Start click consents to ONE automatic BC whisper once mailbox creation is finished.
+    if(marvelousVerifyUI.autoQueued&&here&&!verified&&state.open&&state.tab==='marvelous'&&
+       Date.now()-marvelousVerifyUI.wizardOpenedAt<10*60*1000&&!marvelousNotes.busy&&!marvelousVerificationPoll&&
+       marvelousNotes.claim&&marvelousNotes.keys&&numeric(marvelousNotes.claim.claimed_member_number)===id){
+      marvelousVerifyUI.autoQueued=false;
+      void marvelousAction('marv-auto-verify');
+    }
+    if(state.open){
+      const rail=ui.shadow.querySelector('[data-tab="marvelous"]');
+      if(rail){const tx=rail.querySelector('.tx');if(tx)tx.textContent=verified?'Marvelous ✓':'Marvelous';
+        rail.title=verified?'Marvelous account verified':'Marvelous — verify your BC account';}
+    }
+  }
+  function marvelousVerifyChatKeydown(e){
+    if(e.key!=='Enter'||e.isComposing||window.CurrentScreen!=='ChatRoom')return;
+    const input=e.target;
+    if(input?.id!=='InputChat'||!/^\/pawverify\s*$/i.test(String(input.value||'')))return;
+    e.preventDefault();e.stopImmediatePropagation();input.value='';marvelousVerifyOpen();
+  }
+  document.addEventListener('keydown',marvelousVerifyChatKeydown,true);
   const MARVELOUS_SCHEDULE_DISPATCHER_READY=false; // set true ONLY after cron migration 07 was successfully installed
   const marvelousNotes={owner:0,client:null,user:null,claim:null,keys:null,privateKeys:null,inbox:[],outbox:[],decrypted:new Map(),decrypting:new Set(),view:'inbox',busy:false,error:'',initialized:false,epoch:0,draftTo:'',draftBody:'',ttl:'30d',sendAt:'',unlocked:false};
   // Session-only, opt-in unlocking. Never persist or log the entered password.
@@ -7809,7 +7935,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(document.hidden)return;
     marvelousNextBackgroundSync=Date.now()+(marvelousBridge.lowCpu?360000:120000);void marvelousRun(marvelousFetch);
   }
-  function marvelousUpdate(){if(state.open&&state.tab==='notes')renderMarvelousNotes();marvelousUpdateUnreadIndicator();}
+  function marvelousUpdate(){if(state.open&&state.tab==='notes')renderMarvelousNotes();if(state.open&&state.tab==='marvelous')renderMarvelousHub();marvelousUpdateUnreadIndicator();}
   async function marvelousRun(task){
     if(marvelousNotes.busy)return;
     marvelousNotes.busy=true;marvelousNotes.error='';marvelousUpdate();
@@ -7899,12 +8025,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         <h3>${x.view==='inbox'?'📥 Secure inbox':'📤 Secure sent notes'}</h3>${marvelousNoteList(x.view==='inbox'?x.inbox:x.outbox,x.view==='inbox')}`;
     }
     const guide=!x.claim?.verified_at?`<section class="marv-feature-card" aria-label="How PawID verification works">
-      <h3>🐾 How to verify with PawID</h3>
-      <ol><li>Log into the BC character you want to register and create your mailbox here.</li>
-      <li>Find <b>PawID (#264370)</b> in the <b>Subbycat's place</b> chatroom. PawID must be online.</li>
-      <li>While you and PawID are in the same chatroom, choose <b>Send verification whisper</b>. PawLounge privately sends your one-time code to PawID.</li>
-      <li>Come back here and use <b>Check verification</b> if needed. When PawID confirms the BC MemberNumber, your mailbox unlocks.</li></ol>
-      <p class="muted">No email or password for PawID is needed. You normally verify just once per mailbox. If PawID is offline or not in your room, try again once you are both in the same chatroom. Never give another player your encryption passphrase.</p>
+      <h3>🐾 Need to verify?</h3>
+      <p>You can find the full guided setup in <b>Marvelous → Verify Account</b>, or type <b>/pawverify</b> in the BC room chat.</p>
+      <button class="primary" data-action="marv-verify-open">🐾 Open guided verification</button>
+      <p class="muted">When PawID (#264370) joins your room, PawLounge can offer a direct shortcut. Your one-time code is sent only in a private whisper to PawID. Never give anyone your passphrase.</p>
     </section>`:'';
     ui.body.innerHTML=`<div class="kc-marv-page"><h2>💌 Marvelous Paw Notes</h2><p class="muted">Private notes are addressed to verified BC member numbers and encrypted before they leave your browser.</p>${guide}${message}${inside}${x.busy?'<p class="muted">Working…</p>':''}<p class="muted">Keep an encrypted key backup before clearing browser data or switching devices. If you lose your saved keys, old notes may become unreadable. Paw Notes and regular BC whispers are separate. For extra security, compare encryption fingerprints with your friends.</p></div>`;
     if(x.privateKeys)void marvelousDecryptVisible();
@@ -7916,8 +8040,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(!res.data.session)marvelousCheck(await c.auth.signInAnonymously());
       await marvelousFetch();
     });
-    if(act==='marv-refresh')return marvelousRun(marvelousFetch);
-    if(act==='marv-auto-verify')return marvelousRun(async()=>{
+    if(act==='marv-refresh')return marvelousRun(async()=>{await marvelousFetch();if(marvelousNotes.claim?.verified_at&&marvelousVerifyUI.wizardOpenedAt){marvelousVerifyUI.completedAt=Date.now();marvelousHub.initialized=false;void marvelousHubOpen();}});
+    if(act==='marv-auto-verify'){marvelousVerifyUI.autoQueued=false;marvelousVerifyUI.status='Sending a private whisper to PawID…';return marvelousRun(async()=>{
       const target=Number(MARVELOUS_VERIFIER_BC_MEMBER);
       if(!Number.isSafeInteger(target)||target<=0||target===me())throw Error('Marvelous verifier account is not configured.');
       if(!marvelousNotes.claim||marvelousNotes.claim.verified_at||numeric(marvelousNotes.claim.claimed_member_number)!==me())
@@ -7940,15 +8064,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       // Whisper delivery is restricted by BC to players in this same chatroom.
       window.ServerSend('ChatRoomChat',{Type:'Whisper',Target:target,
         Content:'Marvelous verify: '+claim.challenge_code});
-      notice('Private verification whisper sent to PawID #'+target+'. Check verification shortly.');
+      marvelousVerifyUI.status='Private whisper sent. Waiting for PawID to confirm your BC identity…';
+      notice('Private verification whisper sent to PawID #'+target+'. PawLounge is checking confirmation automatically.');
       if(marvelousVerificationPoll)clearInterval(marvelousVerificationPoll);
       const myMember=me();let attempts=0;
       marvelousVerificationPoll=setInterval(async()=>{
-        if(++attempts>30||me()!==myMember||marvelousNotes.claim?.verified_at){clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;return;}
-        try{await marvelousFetch();if(marvelousNotes.claim?.verified_at){notice('✓ Marvelous BC #'+myMember+' verified automatically!');marvelousUpdate();clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;}}
+        if(++attempts>30||me()!==myMember||marvelousNotes.claim?.verified_at){
+          if(attempts>30&&!marvelousNotes.claim?.verified_at)marvelousVerifyUI.status='No confirmation yet. Check that PawID received your private whisper, then retry or check confirmation.';
+          clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;marvelousUpdate();return;}
+        try{await marvelousFetch();if(marvelousNotes.claim?.verified_at){marvelousVerifyUI.status='';marvelousVerifyUI.autoQueued=false;marvelousVerifyUI.completedAt=Date.now();marvelousHub.initialized=false;notice('✓ Marvelous BC #'+myMember+' verified automatically!');marvelousUpdate();if(state.open&&state.tab==='marvelous')void marvelousHubOpen();clearInterval(marvelousVerificationPoll);marvelousVerificationPoll=null;}}
         catch(e){console.warn('[Marvelous auto-verification]',e);}
       },10000);
-    });
+    });}
     if(act==='marv-register'){
       const pass=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
       if(pass.length<12){marvelousNotes.error='Choose a passphrase at least 12 characters long.';marvelousUpdate();return;}
@@ -8273,10 +8400,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function renderMarvelousHub(){if(!ui.body)return;
     const h=marvelousHub,verified=!!marvelousNotes.user&&!!marvelousNotes.claim?.verified_at&&marvelousNotes.owner===me();
     const opts=Object.entries(marvelousHubNamespaces).map(([k,n])=>`<option value="${k}" ${h.selectedNamespace===k?'selected':''}>${escapeText(n)}</option>`).join('');
-    const desc='<p class="muted">Cloud sharing is optional. You choose what to save, and private backups are encrypted with your passphrase before uploading. Keep that passphrase somewhere safe.</p>';
-    const nav=`<div class="flex">${[['cloud','☁️ Cloud'],['social','💗 Social'],['shared','📚 Shared'],['security','🔐 Security']].map(([v,n])=>`<button class="${h.tab===v?'primary':'secondary'}" data-action="marvhub-tab" data-value="${v}">${n}</button>`).join('')}</div>`;
+    const desc=verified?`<p class="muted">✓ Verified BC #${me()} · Cloud sharing is optional. You choose what to save, and private backups are encrypted with your passphrase before uploading.</p>`:'<p class="muted">🔐 Verification required to use Marvelous cloud services. Your existing local data will not be changed.</p>';
+    const nav=verified?`<div class="flex">${[['cloud','☁️ Cloud'],['social','💗 Social'],['shared','📚 Shared'],['security','🔐 Security']].map(([v,n])=>`<button class="${h.tab===v?'primary':'secondary'}" data-action="marvhub-tab" data-value="${v}">${n}</button>`).join('')}</div>`:'';
     let inner='';
-    if(!verified)inner=`<p class="kc-marv-error">Verify your BC account in Paw Notes to unlock cloud features. Everything saved on this browser remains available.</p><button class="secondary" data-tab="notes">Open Paw Notes</button>
+    if(!verified)inner=`${marvelousVerificationWizard()}
       <div class="marv-feature-card"><b>🧸 Local plushie milestones</b>${marvelousBridge.events.length?marvelousBridge.events.slice(0,12).map(e=>`<p>${escapeText(e.message)} · ${marvelousHubShortDate(e.at)}</p>`).join(''):'<p class="muted">No milestones this session.</p>'}</div>`;
     else if(h.tab==='cloud')inner=`<div class="marv-feature-card"><b>Encrypted cloud snapshots</b>
       <label>Choose category<select class="field" id="marvhub-ns">${opts}</select></label>
@@ -8327,7 +8454,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <button class="secondary" data-action="marvhub-save-perms">Save permissions</button></div>
       <div class="marv-feature-card"><b>Your data & privacy</b><p class="muted">You can export your encrypted cloud records or remove your saved cloud snapshots here. Full account deletion and lost-key recovery are not available yet.</p>
       <button class="secondary" data-action="marvhub-export">Export cloud data</button><button class="secondary" data-action="marvhub-clear">Clear my cloud snapshots</button></div>`;
-    ui.body.innerHTML=`<div class="marv-feature-page"><h2>☁️ Marvelous Hub</h2>${desc}${nav}${h.busy?'<p class="muted">Syncing…</p>':''}${h.error?`<p class="kc-marv-error">${escapeText(h.error)}</p>`:''}${h.status?`<p class="muted">${escapeText(h.status)}</p>`:''}<div class="flex"><button class="secondary" data-action="marvhub-refresh">Refresh</button><span class="muted">${escapeText(h.lastSynced)}</span></div>${inner}</div>`;
+    const verifiedWelcome=verified&&marvelousVerifyUI.completedAt&&Date.now()-marvelousVerifyUI.completedAt<60000?
+      `<section class="marv-verification-step" role="status"><h3>✅ Your BC account is verified!</h3><p>PawID confirmed BC #${me()}. Your secure Marvelous mailbox is linked.</p><div class="marv-verify-actions"><button class="primary" data-tab="notes">Open Paw Notes</button><button class="secondary" data-action="marv-verify-complete">Continue to Marvelous</button></div></section>`:'';
+    const hubToolbar=verified?`${nav}${h.busy?'<p class="muted">Syncing…</p>':''}${h.error?`<p class="kc-marv-error">${escapeText(h.error)}</p>`:''}${h.status?`<p class="muted">${escapeText(h.status)}</p>`:''}<div class="flex"><button class="secondary" data-action="marvhub-refresh">Refresh</button><span class="muted">${escapeText(h.lastSynced)}</span></div>`:'';
+    ui.body.innerHTML=`<div class="marv-feature-page"><h2>☁️ Marvelous Hub</h2>${desc}${verifiedWelcome}${hubToolbar}${inner}</div>`;
   }
   function marvelousHubAction(act,element){
     if(act==='marvhub-tab'){marvelousHub.tab=element.dataset.value;renderMarvelousHub();return;}
@@ -8425,6 +8555,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       }
     });
   }
+  window.MarvelousVerificationDiag=()=>({version:VERSION,account:me(),step:marvelousVerifyStep(),pawidInSameRoom:marvelousVerifierHere(),promptVisible:marvelousVerifyUI.promptVisible,verified:!!marvelousNotes.claim?.verified_at,autoQueued:marvelousVerifyUI.autoQueued,awaitingConfirmation:!!marvelousVerificationPoll,status:marvelousVerifyUI.status,error:marvelousNotes.error});
   window.MarvelousHubDiag=()=>({version:VERSION,owner:me(),verified:!!marvelousNotes.claim?.verified_at,restorePoints:marvelousHub.rows.filter(r=>r.record_key!=='current').length,loaded:marvelousHub.initialized,
     cloudRecords:marvelousHub.rows.length,notifications:marvelousHub.notifs.length,error:marvelousHub.error});
 
@@ -10433,6 +10564,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function clickUI(e) {
     const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-kick-group-member],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
     if (!target) return;
+    if(target.dataset.action==='marv-verify-open'){marvelousVerifyOpen();return;}
+    if(target.dataset.action==='marv-verify-dismiss'){
+      marvelousVerifyUI.dismissed=true;marvelousVerifyUI.autoQueued=false;
+      const node=ui.shadow?.getElementById('kc-verify-room-prompt');if(node)node.hidden=true;
+      return;
+    }
+    if(target.dataset.action==='marv-verify-find-room'){marvelousVerifyRoomSearch();return;}
+    if(target.dataset.action==='marv-verify-complete'){marvelousVerifyUI.completedAt=0;renderMarvelousHub();return;}
     if(target.dataset.action==='marv-prompt-unlock'){void marvelousPromptUnlock();return;}
     if(target.dataset.action==='marv-prompt-later'){marvelousPrompt.suppressed=true;marvelousPromptHide();return;}
     if(target.dataset.action==='marv-prompt-never'){
@@ -10772,6 +10911,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     }
     hookBC();
     marvelousPromptTick();
+    marvelousVerifyTick();
     // A small once-per-login refresh for friends known to have Kittychat.
     if (statusWire.bootAccount!==id && typeof window.ServerSend==='function') {
       statusWire.bootAccount=id;
