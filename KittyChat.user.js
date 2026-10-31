@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.3
+// @version      1.2.7
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.3';
+  const VERSION = '1.2.7';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -105,7 +105,7 @@
     pawTimezone: '', pawPronouns: '', pawGallery1: '', pawGallery2: '', pawGallery3: '', pawGallery4: '',
     shortcuts: ['Purr purr~', '*gently boops your nose*', 'Sending you a big kitty hug!'],
     peerCacheDays:7,peerCacheCap:200,showSubbycatRecentMessages:true,
-    encodePrivateChat:false,quietHours:false,quietStart:'22:00',quietEnd:'08:00',minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
+    encodePrivateChat:false,quietHours:false,quietStart:'22:00',quietEnd:'08:00',conversationFocus:false,minimalist:false,bubbleShape:'rounded',bubbleOpacity:95,layoutEdit:false,sidebarOrder:['side-card','side-search','paw-circle-row','kc-inbox-filter-wrap'] };
   const MAX_CONVERSATIONS = 100, MAX_MESSAGES = 90, MAX_GROUPS = 40, MAX_GROUP_MEMBERS = 10, MAX_GROUP_TEXT = 380;
   const MOMENT_LIMIT=150;
   const ui = { host: null, shadow: null, fab: null, panel: null, badge: null, body: null,
@@ -1838,6 +1838,9 @@
     state.settings.petPersonaShare=state.settings.petPersonaShare!==false;
     state.settings.petPersonaDescription=trim(state.settings.petPersonaDescription||'',300);
     delete state.settings.focusPreset; // Retired focus presets: Conversation Focus is the only mode.
+    state.settings.conversationFocus=state.settings.conversationFocus===true;
+    marvelousFocusRuntime.enabled=state.settings.conversationFocus;
+    applyMarvelousFocus();
     if(!validHour(state.settings.quietStart))state.settings.quietStart='22:00';
     if(!validHour(state.settings.quietEnd))state.settings.quietEnd='08:00';
     if(!['rounded','square','cloud'].includes(state.settings.bubbleShape))state.settings.bubbleShape='rounded';
@@ -6190,6 +6193,63 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
 #kc-panel .group-member{gap:5px;min-width:0;flex-wrap:wrap}
 #kc-panel .group-member>div{min-width:0;flex:1 1 90px}
 #kc-panel .kc-group-kick{margin:2px 0 2px auto;flex:0 0 auto;border-color:#f18caa!important;color:#ffd3df!important}
+
+/* v1.2.6: Contact row stability. The portrait, text and status indicators must
+   never compete for a single flex line, especially at narrow panel widths.
+   Keep native portrait canvases mounted during sidebar diff updates. */
+#kc-panel .contacts-scroll, #kc-panel .contacts-scroll>.side-list{
+  min-width:0!important; max-width:100%!important;
+}
+#kc-panel .contacts-scroll .contact{
+  display:grid!important;
+  grid-template-columns:36px minmax(0,1fr) 24px!important;
+  align-items:center!important;
+  column-gap:7px!important;
+  width:100%!important;max-width:100%!important;min-width:0!important;
+  height:auto!important;overflow:hidden!important;
+  text-align:left!important;
+}
+#kc-panel .contacts-scroll .contact>.avatar{
+  grid-column:1!important;min-width:0!important;max-width:36px!important;
+  width:36px!important;height:36px!important;min-height:36px!important;
+  align-self:center!important;
+}
+#kc-panel .contacts-scroll .contact>.info{
+  grid-column:2!important;display:block!important;min-width:0!important;
+  max-width:100%!important;width:100%!important;overflow:hidden!important;
+}
+#kc-panel .contacts-scroll .contact .topline{
+  display:flex!important;min-width:0!important;max-width:100%!important;
+  align-items:center!important;gap:4px!important;overflow:hidden!important;
+}
+#kc-panel .contacts-scroll .contact .nameline{
+  display:block!important;flex:1 1 0!important;min-width:0!important;
+  width:auto!important;max-width:100%!important;overflow:hidden!important;
+  white-space:nowrap!important;text-overflow:ellipsis!important;
+}
+#kc-panel .contacts-scroll .contact .time{
+  display:block!important;flex:0 0 auto!important;
+  min-width:0!important;max-width:48%!important;
+  overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;
+}
+#kc-panel .contacts-scroll .contact .preview,
+#kc-panel .contacts-scroll .contact .kc-status-label{
+  display:block!important;max-width:100%!important;min-width:0!important;
+  overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;
+}
+#kc-panel .contacts-scroll .contact>.kc-contact-indicators{
+  grid-column:3!important;min-width:0!important;max-width:24px!important;
+  width:24px!important;display:flex!important;flex-direction:column!important;
+  align-items:center!important;justify-content:center!important;
+  gap:2px!important;overflow:hidden!important;line-height:1.1!important;
+}
+#kc-panel .contacts-scroll .contact .tiny-pill{
+  min-width:20px!important;max-width:24px!important;
+  width:auto!important;white-space:nowrap!important;padding:2px 3px!important;
+}
+#kc-panel .contacts-scroll .contact .presence{
+  flex:0 0 8px!important;margin:0!important;
+}
 `; }
 
   // Browser zoom changes devicePixelRatio on desktop Firefox/Chrome.
@@ -6324,15 +6384,14 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         <nav class="rail" aria-label="PawLounge navigation">
           <button class="railtab active" data-tab="chats"><span class="ic">${asset('ui-paw.svg','','🐾')}</span><span class="tx">Chats</span></button>
           <button class="railtab" data-tab="groups" title="Group Dens and invitations" aria-label="Groups"><span class="ic" aria-hidden="true">👥</span><span class="tx">Groups</span></button>
-          <button class="railtab" data-tab="pawbooks" title="Collaborative Scrapbooks and memory books" aria-label="PawBooks"><span class="ic" aria-hidden="true">📚</span><span class="tx">PawBooks</span></button>
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
+          <button class="railtab" data-tab="pawbooks" title="Collaborative Scrapbooks and memory books" aria-label="PawBooks"><span class="ic" aria-hidden="true">📚</span><span class="tx">PawBooks</span></button>
           <button class="railtab" data-tab="notes" title="Private Paw Notes · send and receive messages"><span class="ic">✉️</span><span class="tx">Paw Notes</span></button>
-          <button class="railtab" data-tab="marvelous" title="Marvelous encrypted cloud and shared features"><span class="ic">☁️</span><span class="tx">Marvelous</span></button>
           <button class="railtab" data-tab="moments" title="Private memories and Paw Moments" aria-label="Memories and Moments"><span class="ic"><img class="kc-moments-icon" src="${KC_MOMENTS_ICON_SRC}" alt="" width="32" height="32" draggable="false" decoding="async"/></span><span class="tx">Memories</span></button>
           <button class="railtab" data-tab="personality" title="Pet personality studio"><span class="ic">🐾</span><span class="tx">Pet Self</span></button>
-          <button class="railtab" data-tab="focus" title="Room focus mode"><span class="ic">🎬</span><span class="tx">Focus</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
           <button class="railtab" data-tab="stickers"><span class="ic">${asset('ui-heart.svg','','♡')}</span><span class="tx">Stickers</span></button>
+          <button class="railtab" data-tab="marvelous" title="Marvelous encrypted cloud and shared features"><span class="ic">☁️</span><span class="tx">Marvelous</span></button>
           <button class="railtab" data-tab="settings"><span class="ic">${asset('ui-settings.svg','','⚙')}</span><span class="tx">Settings</span></button>
           <div class="railspacer"></div>
         </nav>
@@ -8370,11 +8429,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if (!ui.body) return;
     if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
     if (state.tab === 'memories') state.tab = 'moments'; // Legacy room-memory route now opens the unified hub.
+    if (state.tab === 'focus') state.tab = 'settings'; // The old route now opens Focus in Settings.
     setTheme();marvelousUpdateUnreadIndicator();
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
     ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='groups'));
-    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles' || state.tab==='notes' || state.tab==='marvelous' || state.tab==='memories' || state.tab==='personality' || state.tab==='focus');
+    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles' || state.tab==='notes' || state.tab==='marvelous' || state.tab==='memories' || state.tab==='personality');
     if (state.tab === 'chats' || state.tab === 'groups') {
       if (state.tab==='chats') {
         ensureDefaultSelection();
@@ -8402,7 +8462,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (state.tab === 'notes') {renderMarvelousNotes();marvelousEnterTab();}
     else if (state.tab === 'marvelous') {renderMarvelousHub();void marvelousHubOpen();}
     else if (state.tab === 'personality') renderPetPersonality();
-    else if (state.tab === 'focus') renderFocusMode();
     else if (state.tab === 'circles') renderCircles();
     else renderSettings();
     ui.panel?.classList.toggle('left-collapsed', !!state.leftCollapsed);
@@ -8571,7 +8630,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const c=state.chats[id],m=c?.messages?.at(-1),online=onlineMembers.has(id),friendOnline=pawFriendConfirmedOnline(id);
     return `<button class="contact ${id===state.selected?'active':''}" data-contact="${id}">
       ${avatar(id)}<span class="info"><div class="topline"><span class="nameline">${escapeText(name(id))} ${c?.favorite?'♡':''}</span><span class="time">${m?new Date(m.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''}</span></div><div class="preview">${escapeText(m?.text||(online?'In your room':'No messages yet'))}</div>${statusMarkup(id)}</span>
-      ${c?.replyLater?'<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread?`<span class="tiny-pill">${Math.min(99,c.unread)}</span>`:''}<span class="presence ${friendOnline?'on':''}" title="${online?'In your room':friendOnline?'Online friend':'Not confirmed online'}"></span></button>`;
+      <span class="kc-contact-indicators">${c?.replyLater?'<span title="Reply later">⏰</span>':''}${c?.requestPending?'<span title="Message request">✉</span>':''}${c?.unread?`<span class="tiny-pill">${Math.min(99,c.unread)}</span>`:''}<span class="presence ${friendOnline?'on':''}" title="${online?'In your room':friendOnline?'Online friend':'Not confirmed online'}"></span></span></button>`;
   }
   function contactRowSignature(id,onlineMembers){
     const c=state.chats[id],m=c?.messages?.at(-1);
@@ -10242,20 +10301,15 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     try{marvelousBridgeConnect()?.setExternalFocus?.(active);}catch{}
   }
   function toggleMarvelousFocus(enable){
-    marvelousFocusRuntime.enabled=enable===undefined?!marvelousFocusRuntime.enabled:!!enable;
+    const enabled=enable===undefined?!marvelousFocusRuntime.enabled:!!enable;
+    marvelousFocusRuntime.enabled=enabled;
+    state.settings.conversationFocus=enabled;
     applyMarvelousFocus();
-    if(state.open&&state.tab==='focus')renderFocusMode();
-    return marvelousFocusRuntime.enabled;
-  }
-  function renderFocusMode(){
-    if(!ui.body)return;applyMarvelousFocus();
-    const enabled=marvelousFocusRuntime.enabled;
-    ui.body.innerHTML=`<div class="marv-feature-page"><h2>🎬 Conversation Focus</h2>
-      <p class="muted">Keep the conversation in view by hiding compatible chatroom menu controls. Your character, clothing, and chat messages stay unchanged.</p>
-      <div class="marv-feature-card">
-        <button class="${enabled?'secondary':'primary'}" data-action="marv-feature-toggle-focus">${enabled?'Disable Focus Mode':'Enable Focus Mode'}</button>
-        <p class="muted">Shortcut: <b>Alt + Shift + F</b>. Focus applies only in chatrooms; some BC canvas controls may remain visible.</p>
-      </div></div>`;
+    // Keep the setting synchronized when the shortcut is used.
+    const toggle=ui.shadow?.getElementById('kc-conversationFocus');
+    if(toggle)toggle.checked=enabled;
+    if(state.myId)saveSoon();
+    return enabled;
   }
   function marvelousFeatureAction(action,el){
     if(action==='marv-feature-add-memory'){
@@ -10277,8 +10331,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(!line)return;
       if(window.navigator.clipboard?.writeText){void window.navigator.clipboard.writeText(line).then(()=>notice('Copied roleplay expression.'),()=>window.prompt('Copy this expression:',line));}
       else window.prompt('Copy this expression:',line);
-    }else if(action==='marv-feature-toggle-focus'){
-      toggleMarvelousFocus();notice(marvelousFocusRuntime.enabled?'Focus Mode enabled (Alt+Shift+F to exit).':'Focus Mode disabled.');
     }
   }
   document.addEventListener('keydown',e=>{
@@ -10310,6 +10362,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     <div class="settingrow"><label for="kc-fontSize">Text size / readability</label><select class="field" id="kc-fontSize" data-setting="fontSize"><option value="normal" ${p.fontSize==='normal'?'selected':''}>Standard</option><option value="large" ${p.fontSize==='large'?'selected':''}>Large (default)</option><option value="extra" ${p.fontSize==='extra'?'selected':''}>Extra large</option></select></div>
     <div class="settingrow"><span>Zoom-independent sizing</span><button class="secondary" data-action="calibratezoom" type="button">Set current zoom as 100% reference</button></div>
     <p class="muted">Desktop browser zoom is compensated relative to this reference. Calibrate at your preferred Firefox zoom. On mobile, normal touch-friendly sizing is used.</p>
+    <div class="smalltitle">🎬 Conversation Focus</div>
+    ${control('conversationFocus','Enable Focus Mode (hide compatible chatroom menu controls)')}
+    <p class="muted">Focus only affects chatroom controls, not clothing or messages. Shortcut: <b>Alt + Shift + F</b>. Saved per BC account.</p>
     <div class="smalltitle">🪄 Layout &amp; chat bubbles</div>
     ${control('minimalist','Minimalist mode (hide decorative artwork)')}
     ${control('layoutEdit','Enable drag-and-drop sidebar editor')}<p class="muted">When enabled, drag Now Purring, Search, Circles and Inbox filter into your preferred order. Your layout is saved locally.</p>
@@ -10328,7 +10383,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <button class="primary kc-publish-status" data-action="sharefriendstatus">🐾 Save &amp; Share Status</button>
       <div class="kc-status-example" role="status">Your status: ${p.shareFriendStatus?escapeText(statusLabel(me())):'Hidden from friends'}</div>
     </section>
-    <div class="flex"><button class="secondary" data-tab="personality">🐾 Open Pet Personality Studio</button><button class="secondary" data-tab="moments">♡ Memories</button><button class="secondary" data-tab="focus">🎬 Room Focus</button></div><div class="smalltitle">🐾 Paw Profile</div><label>Avatar HTTPS image URL<input class="field" data-setting="avatar" value="${escapeText(p.avatar)}" placeholder="https://.../avatar.png" maxlength="500"/></label><label>Banner / hero HTTPS image URL<input class="field" data-setting="pawHero" value="${escapeText(p.pawHero)}" placeholder="https://.../hero.png" maxlength="500"/></label><label>Status / signature<input class="field" data-setting="signature" value="${escapeText(p.signature)}" maxlength="140"/></label><label>About me<input class="field" data-setting="pawAbout" value="${escapeText(p.pawAbout)}" maxlength="240"/></label><label>Likes<input class="field" data-setting="pawLikes" value="${escapeText(p.pawLikes)}" maxlength="240"/></label><label>Dislikes<input class="field" data-setting="pawDislikes" value="${escapeText(p.pawDislikes)}" maxlength="240"/></label><label>Looking for<input class="field" data-setting="pawLookingFor" value="${escapeText(p.pawLookingFor)}" maxlength="240"/></label><div class="flex" style="gap:10px"><label style="flex:1">Timezone<input class="field" data-setting="pawTimezone" value="${escapeText(p.pawTimezone)}" maxlength="60"/></label><label style="flex:1">Pronouns<input class="field" data-setting="pawPronouns" value="${escapeText(p.pawPronouns)}" maxlength="60"/></label></div><div class="smalltitle" style="margin-top:12px">🖼 Gallery (up to 4 HTTPS image URLs)</div><label>Gallery image 1<input class="field" data-setting="pawGallery1" value="${escapeText(p.pawGallery1)}" maxlength="500"/></label><label>Gallery image 2<input class="field" data-setting="pawGallery2" value="${escapeText(p.pawGallery2)}" maxlength="500"/></label><label>Gallery image 3<input class="field" data-setting="pawGallery3" value="${escapeText(p.pawGallery3)}" maxlength="500"/></label><label>Gallery image 4<input class="field" data-setting="pawGallery4" value="${escapeText(p.pawGallery4)}" maxlength="500"/></label>
+    <div class="flex"><button class="secondary" data-tab="personality">🐾 Open Pet Personality Studio</button><button class="secondary" data-tab="moments">♡ Memories</button></div><div class="smalltitle">🐾 Paw Profile</div><label>Avatar HTTPS image URL<input class="field" data-setting="avatar" value="${escapeText(p.avatar)}" placeholder="https://.../avatar.png" maxlength="500"/></label><label>Banner / hero HTTPS image URL<input class="field" data-setting="pawHero" value="${escapeText(p.pawHero)}" placeholder="https://.../hero.png" maxlength="500"/></label><label>Status / signature<input class="field" data-setting="signature" value="${escapeText(p.signature)}" maxlength="140"/></label><label>About me<input class="field" data-setting="pawAbout" value="${escapeText(p.pawAbout)}" maxlength="240"/></label><label>Likes<input class="field" data-setting="pawLikes" value="${escapeText(p.pawLikes)}" maxlength="240"/></label><label>Dislikes<input class="field" data-setting="pawDislikes" value="${escapeText(p.pawDislikes)}" maxlength="240"/></label><label>Looking for<input class="field" data-setting="pawLookingFor" value="${escapeText(p.pawLookingFor)}" maxlength="240"/></label><div class="flex" style="gap:10px"><label style="flex:1">Timezone<input class="field" data-setting="pawTimezone" value="${escapeText(p.pawTimezone)}" maxlength="60"/></label><label style="flex:1">Pronouns<input class="field" data-setting="pawPronouns" value="${escapeText(p.pawPronouns)}" maxlength="60"/></label></div><div class="smalltitle" style="margin-top:12px">🖼 Gallery (up to 4 HTTPS image URLs)</div><label>Gallery image 1<input class="field" data-setting="pawGallery1" value="${escapeText(p.pawGallery1)}" maxlength="500"/></label><label>Gallery image 2<input class="field" data-setting="pawGallery2" value="${escapeText(p.pawGallery2)}" maxlength="500"/></label><label>Gallery image 3<input class="field" data-setting="pawGallery3" value="${escapeText(p.pawGallery3)}" maxlength="500"/></label><label>Gallery image 4<input class="field" data-setting="pawGallery4" value="${escapeText(p.pawGallery4)}" maxlength="500"/></label>
     <div class="flex" style="margin-top:10px;gap:10px"><button class="secondary" data-action="previewmypawprofile">Preview my Paw Profile</button></div><p class="muted">Open a conversation and choose “Share Profile” to send this Paw Profile. No automatic profile sharing.</p>
     <section class="paw-settings-section"><div class="smalltitle">✨ Interactive Paw Profile 2.0</div>
       <label>Favorite plushie<input class="field" data-setting="pawPlushie" maxlength="80" value="${escapeText(p.pawPlushie)}" placeholder="My Subbycat plushie"/></label>
@@ -10631,6 +10686,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(k==='friendStatusMinutes' && ![0,30,60,240,1440].includes(Number(value))) return;
     if(k==='peerCacheDays' && !PAW_PEER_DAYS.includes(Number(value)))return;
     if(k==='peerCacheCap' && !PAW_PEER_CAPS.includes(Number(value)))return;
+    if(k==='conversationFocus'){toggleMarvelousFocus(!!value);return;}
     state.settings[k] = ['friendStatusMinutes','peerCacheDays','peerCacheCap'].includes(k)?Number(value):value;
     if (k === 'showSubbycatRecentMessages') restoreSubbycatRoomHistory();
     if(['friendStatusText','friendStatusMode','shareFriendStatus','friendStatusMinutes'].includes(k))scheduleStatusExpiry();
