@@ -1,6 +1,6 @@
 {
-  "version": "1.2.10",
+  "version": "1.2.11",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Restores Recover existing account in Paw Notes and Marvelous setup, adds password-encrypted mailbox-login backup and restore, verifies BC member identity, and guards against accidentally creating a second mailbox. Preserve your original session and encrypted Paw Notes keys for recovery.",
+  "notes": "Shows Recover previous mailbox throughout account setup and PawID verification, including after an accidental new mailbox was created. Safely disconnects unverified local login before restoring a valid encrypted original-login backup; never deletes cloud mailboxes or encryption keys. Includes v1.2.10 login recovery.",
   "released": "2026-11-02"
 }
