@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.15
+// @version      1.2.16
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.15';
+  const VERSION = '1.2.16';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -8603,7 +8603,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // NEVER put secret/service role keys here. The account's anonymous Supabase session
   // is NOT independent proof of the BC MemberNumber.
   const marvelousHub={busy:false,error:'',rows:[],notifs:[],devices:[],connections:[],groups:[],members:[],cards:[],shared:[],
-    initialized:false,options:{chats:false,memories:false,plushies:false},tab:'cloud',target:'',note:'',signal:'',publicSignal:false,availability:false,guestbook:false,
+    initialized:false,options:{chats:false,memories:false,plushies:false},memberVerification:{},tab:'cloud',target:'',note:'',signal:'',publicSignal:false,availability:false,guestbook:false,
     selectedNamespace:'settings',status:'',lookupCard:null,lastSynced:'',password:'',notificationCategory:'all',notificationUnreadOnly:false};
   const marvelousHubNamespaces={
     settings:'PawLounge settings',memories:'Room Memories',plushies:'Subby’s Plushies & Essentials (full backup)',
@@ -8637,11 +8637,53 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const results=await Promise.all(queries);results.forEach(marvelousCheck);
     [marvelousHub.rows,marvelousHub.notifs,marvelousHub.devices,marvelousHub.connections,marvelousHub.groups,marvelousHub.members,marvelousHub.shared]=results.slice(0,7).map(x=>x.data||[]);
     const options=results[8].data?.options;if(options&&typeof options==='object')marvelousHub.options={chats:!!options.chats,memories:!!options.memories,plushies:!!options.plushies};
+    // Verify IDs against the *registered, PawID-verified public key directory*.
+    // No BC friend-list mirroring and no reliance on a player's display name.
+    const connectionMembers=[...new Set(marvelousHub.connections.flatMap(p=>[
+      Number(p.requester_member),Number(p.requested_member)]).filter(n=>Number.isSafeInteger(n)&&n>0))].slice(0,50);
+    marvelousHub.memberVerification={};
+    if(connectionMembers.length){
+      try{
+        const result=marvelousCheck(await c.from('marvelous_secure_keys')
+          .select('auth_user_id,bc_member_number').in('bc_member_number',connectionMembers));
+        for(const key of result||[])marvelousHub.memberVerification[Number(key.bc_member_number)]=key.auth_user_id;
+      }catch(err){
+        marvelousHub.memberVerification=null; // Unknown, never misleadingly labeled verified.
+        console.warn('[Marvelous Hub] Public directory unavailable:',String(err?.message||err).slice(0,110));
+      }
+    }
     const card=results[7].data;if(card){marvelousHub.signal=card.signal||'';marvelousHub.publicSignal=!!card.visible;marvelousHub.availability=!!card.available;marvelousHub.guestbook=!!card.allow_guestbook;}
     marvelousHub.lastSynced=new Date().toLocaleTimeString();}
+  // A deliberately small, validated, opt-in settings subset. BC's friend list
+  // and native permissions NEVER enter this snapshot. Never sync private chat
+  // histories, device positions, login tokens, or profile secrets implicitly.
+  const marvelousPreferenceKeys=['theme','fontSize','notifications','sounds','typing','panelScrollbars',
+    'bubbleShape','bubbleOpacity','quietHours','quietStart','quietEnd','conversationFocus',
+    'minimalist','showSubbycatRecentMessages','peerCacheDays','peerCacheCap'];
+  function marvelousPreferenceExport(){
+    return Object.fromEntries(marvelousPreferenceKeys.map(k=>[k,state.settings[k]]));
+  }
+  function marvelousPreferenceValidated(saved){
+    if(!saved||typeof saved!=='object'||Array.isArray(saved))throw Error('Settings snapshot is missing or invalid.');
+    const valid={};
+    for(const k of marvelousPreferenceKeys){
+      if(!Object.prototype.hasOwnProperty.call(saved,k))continue;
+      const value=saved[k],base=DEFAULT_SETTINGS[k];
+      if(typeof value!==typeof base)continue;
+      if(typeof value==='string'&&(value.length>64||!value.trim()))continue;
+      if(k==='bubbleOpacity'&&(!Number.isInteger(value)||value<40||value>100))continue;
+      if(k==='peerCacheDays'&&!PAW_PEER_DAYS.includes(Number(value)))continue;
+      if(k==='peerCacheCap'&&!PAW_PEER_CAPS.includes(Number(value)))continue;
+      if(['quietStart','quietEnd'].includes(k)&&!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value))continue;
+      if(k==='bubbleShape'&&!['rounded','square','soft'].includes(value))continue;
+      if(k==='theme'&&value.length>32)continue;
+      valid[k]=value;
+    }
+    return valid;
+  }
   async function marvelousHubPayload(namespace){
     switch(namespace){
-      case 'settings':return {settings:state.settings};
+      case 'settings':return {format:'PawLoungePreferences-v1',settings:marvelousPreferenceExport()};
       case 'memories':return {memories:state.roomMemories.map(({id,room,notes,tags,created,favorite})=>({id,room,notes,tags,created,favorite}))};
       case 'profiles':return {profile:state.profiles?.[me()]||{},petPersona:state.settings.petPersona};
       case 'favorites':return {circles:state.circles,roomFavorites:state.roomFavorites};
@@ -8710,7 +8752,16 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const row=marvelousCheck(await c.from('marvelous_cloud_records').select('encrypted_payload').eq('user_id',uid).eq('namespace',namespace).eq('record_key',recordKey).single());
     const data=await marvelousHubUncipher(namespace,recordKey,row.encrypted_payload,password);
     if(apply){
-      if(namespace!=='plushies')throw Error('In-place restore is supported only for Plushies & Essentials.');
+      if(namespace==='settings'){
+        const restored=marvelousPreferenceValidated(data?.settings);
+        const changed=Object.keys(restored).filter(k=>state.settings[k]!==restored[k]);
+        if(!changed.length){marvelousHub.status='Your addon preferences already match this snapshot.';return;}
+        if(!window.confirm('Apply '+changed.length+' PawLounge display/notification preferences from this encrypted snapshot? This will NOT modify BC friends, account keys, chat history, or in-game permissions.'))return;
+        Object.assign(state.settings,restored);saveSoon();
+        marvelousHub.status='Applied '+changed.length+' PawLounge preferences. BC friends and native settings were untouched.';
+        return;
+      }
+      if(namespace!=='plushies')throw Error('In-place restore is supported only for PawLounge settings and Plushies & Essentials.');
       const api=marvelousBridgeConnect();
       if(!api||typeof api.restoreBackupPayload!=='function')throw Error('Update Plushies to v3.5.104 to restore from cloud.');
       if(data?.format!=='SubbysPlushies-Structured-v1'||data.member!==me())throw Error('Not a matching structured Plushies backup.');
@@ -8769,6 +8820,17 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       sender_bc_member:item.sender_member,recipient_bc_member:item.recipient_member,envelope:item.envelope},item.recipient_uid===marvelousNotes.user.id);
     window.alert('Marvelous '+item.item_type+' from BC #'+item.sender_member+'\n\n'+plain);
   }
+  function marvelousInvitationBadge(p){
+    const incoming=p.requested_uid===marvelousNotes.user?.id;
+    const member=Number(incoming?p.requester_member:p.requested_member);
+    const expected=incoming?p.requester_uid:p.requested_uid;
+    const known=marvelousHub.memberVerification;
+    if(!known)return 'Verification temporarily unavailable';
+    const found=known[member];
+    if(!found)return 'Not currently verified — do not accept';
+    if(found!==expected)return 'Identity changed — do not accept';
+    return 'PawID verified BC #'+member;
+  }
   const marvelousHubShortDate=x=>escapeText(marvelousSafeDate(x));
   function marvelousHubVisibleNotifications(){
     return marvelousHub.notifs.filter(n=>(marvelousHub.notificationCategory==='all'||n.category===marvelousHub.notificationCategory)&&(!marvelousHub.notificationUnreadOnly||!n.read_at));
@@ -8785,9 +8847,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <label>Choose category<select class="field" id="marvhub-ns">${opts}</select></label>
       <label>Cloud encryption passphrase (12+ characters)<input type="password" class="field" id="marvhub-pass" autocomplete="off" placeholder="Never stored on the server"></label>
       <div class="flex"><button class="primary" data-action="marvhub-backup">Update latest backup</button><button class="secondary" data-action="marvhub-restore">Export latest</button><button class="secondary" data-action="marvhub-create-point">Create restore point</button></div>
-      <p class="muted">Each restore point is encrypted separately. Your passphrase is needed to export it, and restoring your data always requires your confirmation. Photos and older full chat archives are not included.</p></div>
+      <p class="muted">Settings snapshots include only selected PawLounge appearance, accessibility, and notification preferences. Native BC friends, private messages, session credentials, and permissions are never synced. Save and apply are manual, encrypted, and require your cloud passphrase. Photos and old chat archives are not included.</p></div>
       <div class="marv-feature-card"><b>Encrypted restore history (showing up to 60)</b>
-      ${h.rows.length?h.rows.map(r=>`<div class="flex"><span>${escapeText(r.namespace)} · ${escapeText(r.record_key==='current'?'Latest':r.record_key)} · ${marvelousHubShortDate(r.updated_at)}</span><button class="secondary" data-action="marvhub-restore-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Export</button>${r.namespace==='plushies'?`<button class="secondary" data-action="marvhub-apply-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Restore Plushies</button>`:''}${r.record_key!=='current'?`<button class="secondary" data-action="marvhub-delete-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Delete</button>`:''}</div>`).join(''):'<p class="muted">No encrypted backups yet.</p>'}</div>`;
+      ${h.rows.length?h.rows.map(r=>`<div class="flex"><span>${escapeText(r.namespace)} · ${escapeText(r.record_key==='current'?'Latest':r.record_key)} · ${marvelousHubShortDate(r.updated_at)}</span><button class="secondary" data-action="marvhub-restore-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Export</button>${r.namespace==='plushies'?`<button class="secondary" data-action="marvhub-apply-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Restore Plushies</button>`:''}${r.namespace==='settings'?`<button class="secondary" data-action="marvhub-apply-settings" data-key="${escapeText(r.record_key)}">Apply preferences</button>`:''}${r.record_key!=='current'?`<button class="secondary" data-action="marvhub-delete-point" data-ns="${escapeText(r.namespace)}" data-key="${escapeText(r.record_key)}">Delete</button>`:''}</div>`).join(''):'<p class="muted">No encrypted backups yet.</p>'}</div>`;
     else if(h.tab==='social')inner=`<div class="marv-feature-card"><b>Opt-in public Paw Signal & availability</b>
       <p class="muted">Public means any logged-in Marvelous user can query the status. For private friend-only statuses, continue using PawLounge’s native Paw Signals.</p>
       <label>Signal<input class="field" id="marvhub-signal" maxlength="120" value="${escapeText(h.signal)}"></label>
@@ -8799,7 +8861,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <label>BC MemberNumber<input id="marvhub-to" class="field" type="number" min="1" value="${escapeText(h.target)}" placeholder="Member #"></label>
       <div class="flex"><button class="secondary" data-action="marvhub-lookup">Look up opt-in status</button><button class="secondary" data-action="marvhub-invite">Invite member</button></div>
       ${h.lookupCard?`<p class="muted">BC #${h.lookupCard.member_number}: ${escapeText(h.lookupCard.signal||'No signal')} · ${h.lookupCard.available?'Available':'Not available'} ${h.lookupCard.signal_expires_at&&Date.parse(h.lookupCard.signal_expires_at)<Date.now()?'(expired)':''}</p>`:''}
-      ${h.connections.map(p=>`<div class="flex"><span>BC #${p.requester_uid===marvelousNotes.user.id?p.requested_member:p.requester_member} · ${p.accepted_at?'Connected':'Pending'}</span>${!p.accepted_at&&p.requested_uid===marvelousNotes.user.id?`<button data-action="marvhub-accept" data-value="${escapeText(p.id)}">Accept</button>`:''}</div>`).join('')}</div>`;
+      ${h.connections.map(p=>`<div class="flex"><span>BC #${p.requester_uid===marvelousNotes.user.id?p.requested_member:p.requester_member} · ${p.accepted_at?'Connected':'Pending'} · ${escapeText(marvelousInvitationBadge(p))}</span>${!p.accepted_at&&p.requested_uid===marvelousNotes.user.id&&h.memberVerification&&h.memberVerification[Number(p.requester_member)]===p.requester_uid?`<button data-action="marvhub-accept" data-value="${escapeText(p.id)}">Accept</button>`:''}</div>`).join('')}</div>`;
     else if(h.tab==='shared')inner=`<div class="marv-feature-card"><b>Encrypted guestbook, scrapbook & plushie bond</b>
       <p class="muted">Guestbooks require the recipient to opt in. Scrapbooks and plushie bonds require a mutual connection. All entries are signed and encrypted for the recipient.</p>
       <label>Recipient BC #<input class="field" id="marvhub-to" type="number" min="1" value="${escapeText(h.target)}"></label>
@@ -8814,9 +8876,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <button class="secondary" data-action="marvhub-group-send" data-value="${escapeText(g.id)}">Send group message</button></div>`).join('')}</div>
       <div class="marv-feature-card"><b>Shared entries (${h.shared.length})</b>
       ${h.shared.map(x=>`<div class="flex"><span>${escapeText(x.item_type)} · BC #${x.sender_uid===marvelousNotes.user.id?x.recipient_member:x.sender_member} · ${marvelousHubShortDate(x.created_at)}</span><button data-action="marvhub-open" data-value="${escapeText(x.id)}">Read</button></div>`).join('')||'<p class="muted">Nothing shared yet.</p>'}</div>`;
-    else inner=`<div class="marv-feature-card"><b>Device & session security</b><p class="muted">This list shows browsers you have registered. Removing one from the list does not sign it out; use Sign out on that browser when possible.</p>
-      <button class="secondary" data-action="marvhub-device">Register this browser</button><button class="secondary" data-action="marvhub-signout">Sign out this Marvelous session</button>
-      ${h.devices.map(d=>`<p>${escapeText(d.label)} · ${marvelousHubShortDate(d.last_seen)}</p>`).join('')}</div>
+    else inner=`<div class="marv-feature-card"><b>Trusted devices and sessions</b><p class="muted">Device labels are a convenience registry, NOT proof of device trust. Removing a label does not revoke its login. Use Sign out other sessions to revoke their refresh tokens; existing access tokens may remain valid until expiry.</p>
+      <div class="flex"><button class="secondary" data-action="marvhub-device">Register this browser</button><button class="secondary" data-action="marvhub-signout">Sign out this session</button><button class="secondary" data-action="marvhub-signout-others">Sign out other sessions</button></div>
+      ${h.devices.map(d=>`<div class="flex"><span>${escapeText(d.label)} · ${marvelousHubShortDate(d.last_seen)} · ${escapeText(d.device_id.slice(0,8))}</span><button class="secondary" data-action="marvhub-device-rename" data-value="${escapeText(d.device_id)}">Rename</button><button class="secondary" data-action="marvhub-device-remove" data-value="${escapeText(d.device_id)}">Remove label</button></div>`).join('')||'<p class="muted">No browser labels registered.</p>'}</div>
+      <div class="marv-feature-card"><b>Recover an existing mailbox</b><p class="muted">If you lose your browser login, open Paw Notes → Recover previous mailbox. Recovery requires the original encrypted key backup and passphrase, PawID whisper verification, and the separately deployed, tested recovery backend. Do not make or verify a replacement mailbox first. The transfer workflow is still pre-production until tested with disposable users.</p></div>
       <div class="marv-feature-card"><b>Unified notifications (${h.notifs.filter(n=>!n.read_at).length} unread in loaded history)</b>
       <p class="muted">Showing the latest 30 notifications. Filters are private to this browser and do not change delivery.</p>
       <label>Category<select class="field" id="marvhub-notification-category">${['all','note','invitation','guestbook','scrapbook','plushie','group'].map(c=>`<option value="${c}" ${h.notificationCategory===c?'selected':''}>${c==='all'?'All categories':c}</option>`).join('')}</select></label>
@@ -8843,6 +8906,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if(act==='marvhub-refresh'){await marvelousFetch();await marvelousHubFetch();}
       else if(act==='marvhub-backup')await marvelousHubCloudSave(ns,password);
       else if(act==='marvhub-create-point')await marvelousHubCloudSave(ns,password,'snapshot-'+Date.now());
+      else if(act==='marvhub-apply-settings'){
+        const row=marvelousHub.rows.find(r=>r.namespace==='settings'&&r.record_key===element.dataset.key);
+        if(!row)throw Error('Settings restore point not found. Refresh first.');
+        await marvelousHubCloudRestore('settings',password,row.record_key,true);
+      }
       else if(act==='marvhub-apply-point'){
         const row=marvelousHub.rows.find(r=>r.namespace==='plushies'&&r.record_key===element.dataset.key);
         if(!row)throw Error('No Plushies restore point found.');
@@ -8871,7 +8939,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       }
       else if(act==='marvhub-invite'){if(!to||to===me())throw Error('Enter a different valid BC MemberNumber.');await marvelousHubConnect(to);}
       else if(act==='marvhub-accept'){
-        marvelousHubReady();const c=await marvelousClient();marvelousCheck(await c.from('marvelous_connections').update({accepted_at:new Date().toISOString()}).eq('id',element.dataset.value).eq('requested_uid',uid));await marvelousHubFetch();
+        marvelousHubReady();const invitation=marvelousHub.connections.find(p=>p.id===element.dataset.value&&p.requested_uid===uid&&!p.accepted_at);
+        if(!invitation)throw Error('Invitation not found or already accepted. Refresh your invitations.');
+        const sender=await marvelousDirectory(Number(invitation.requester_member));
+        if(sender.auth_user_id!==invitation.requester_uid)throw Error('The inviter’s verified BC identity changed. Invitation was NOT accepted.');
+        if(!window.confirm('Accept the verified Marvelous invitation from BC #'+Number(invitation.requester_member)+'?'))return;
+        const c=await marvelousClient();marvelousCheck(await c.from('marvelous_connections').update({accepted_at:new Date().toISOString()}).eq('id',invitation.id).eq('requested_uid',uid).is('accepted_at',null));await marvelousHubFetch();
       }
       else if(act==='marvhub-send'){
         if(!to||to===me())throw Error('Enter the recipient’s BC MemberNumber.');
@@ -8902,6 +8975,28 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         if(marvelousHub.devices.some(d=>d.device_id===device_id))marvelousCheck(await c.from('marvelous_devices').update({label,last_seen:new Date().toISOString()}).eq('user_id',uid).eq('device_id',device_id));
         else marvelousCheck(await c.from('marvelous_devices').insert({user_id:uid,member_number:me(),device_id,label}));
         await marvelousHubFetch();
+      }
+      else if(act==='marvhub-device-rename'){
+        marvelousHubReady();const device=marvelousHub.devices.find(d=>d.device_id===element.dataset.value);
+        if(!device)throw Error('Registered device not found.');
+        const label=window.prompt('Device label (1–64 characters):',device.label);
+        if(label===null)return;
+        if(!label.trim()||label.trim().length>64)throw Error('Device label must be 1–64 characters.');
+        const c=await marvelousClient();marvelousCheck(await c.from('marvelous_devices').update({label:label.trim()}).eq('user_id',uid).eq('device_id',device.device_id));
+        marvelousHub.status='Device label updated (no session permissions changed).';await marvelousHubFetch();
+      }
+      else if(act==='marvhub-device-remove'){
+        marvelousHubReady();const device=marvelousHub.devices.find(d=>d.device_id===element.dataset.value);
+        if(!device)throw Error('Registered device not found.');
+        if(!window.confirm('Remove the '+device.label+' registry label? This will NOT revoke its authentication session.'))return;
+        const c=await marvelousClient();marvelousCheck(await c.from('marvelous_devices').delete().eq('user_id',uid).eq('device_id',device.device_id));
+        marvelousHub.status='Device label removed. No login was revoked.';await marvelousHubFetch();
+      }
+      else if(act==='marvhub-signout-others'){
+        marvelousHubReady();
+        if(!window.confirm('Revoke refresh tokens for OTHER Marvelous sessions? This keeps the current session, but other devices will need to recover/sign in again. Ensure you have a working encrypted login backup first.'))return;
+        const c=await marvelousClient();marvelousCheck(await c.auth.signOut({scope:'others'}));
+        marvelousHub.status='Other session refresh tokens revoked. Existing access tokens may work until expiration. Device labels are only metadata.';
       }
       else if(act==='marvhub-signout'){
         if(!window.confirm('Sign out of Marvelous on this browser? A BC verification challenge may be required to regain access.'))return;

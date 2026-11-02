@@ -1,6 +1,6 @@
 {
-  "version": "1.2.15",
+  "version": "1.2.16",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Fix Marvelous Hub verification wizard stuck on Checking your mailbox after a completed unverified Supabase session read; preserve all existing mailbox sessions and recovery data.",
+  "notes": "PawID-aware invitation verification; encrypted opt-in addon preference restore excluding BC friends; expanded device-label management and other-session sign-out; recovery and cleanup safety guidance.",
   "released": "2026-11-02"
 }
