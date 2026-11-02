@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.12
+// @version      1.2.13
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.12';
+  const VERSION = '1.2.13';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7404,9 +7404,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <label>Encrypted mailbox login backup (.json)<input class="field" type="file" id="kc-marv-recovery-file" accept=".json,application/json"></label>
       <label>Recovery-backup password<input class="field" type="password" id="kc-marv-recovery-password" autocomplete="off"></label>
       <p class="muted">A Paw Notes <b>encrypted-key backup</b> is not a login backup by itself. If you have an original login session, use its encrypted login backup. Otherwise use Legacy Recovery below (original key proof + trusted PawID approval).</p>
-      <p class="muted">When a legacy key backup is available, the dedicated trusted recovery server can restore an original anonymous mailbox after both signing-key proof and native PawID verification. Without an original signing key, only an administrator can review other recovery options.</p>
+      <p class="muted">When a legacy key backup is available, the trusted recovery server can transfer an original anonymous mailbox after both signing-key proof and native PawID verification. Without an original signing key, only an administrator can review other recovery options.</p>
       ${marvelousLegacyMarkup()}
-      <p class="muted">Recovery changes only the mailbox sign-in. Local PawLounge chats, profiles and plushies are not deleted. To read previously encrypted Paw Notes, restore or unlock the ORIGINAL key vault separately.</p></section>`;
+      <p class="muted">PawID legacy recovery transfers mailbox ownership; ordinary session-backup recovery only changes sign-in. Local PawLounge chats, profiles and plushies are not deleted. To read previously encrypted Paw Notes, restore or unlock the ORIGINAL key vault separately.</p></section>`;
   }
   async function marvelousExportLoginBackup(password){
     if(password.length<12)throw Error('Choose a separate recovery-backup password of at least 12 characters.');
@@ -7481,27 +7481,27 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   }
   // v1.2.12: Legacy encrypted-key recovery: old signing key + independently
   // witnessed PawID private whisper. Never upload a private key or passphrase.
-  // A server-owned Edge Function makes all authorization and account changes.
+  // A server-owned Edge Function atomically transfers ownership after verification.
   const MARVELOUS_LEGACY_RECOVERY_FN=MARVELOUS_URL+'/functions/v1/pawlounge-legacy-recovery';
   const marvelousLegacyRecovery={open:false,busy:false,id:'',nonce:'',code:'',approved:false,proof:false,
-    status:'',error:'',lastCheck:0};
+    status:'',error:'',lastCheck:0,preparedVault:null,preparedUid:''};
   const marvelousLegacyUid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
   function marvelousLegacyMarkup(){
     if(!marvelousLegacyRecovery.open)return '<button class="secondary" data-action="marv-legacy-toggle">🗝 Recover using older encrypted-key backup</button>';
     const r=marvelousLegacyRecovery;
     return `<section class="kc-marv-compose" aria-label="Legacy mailbox recovery"><h3>🗝 Legacy mailbox recovery</h3>
-      <p>Use your old <b>MarvelousKeyBackup-v1</b> file and its <b>original Paw Notes passphrase</b>. Your old signing key stays in this browser. PawID must independently confirm a private whisper from your BC account before any original mailbox can be reactivated.</p>
-      <p class="kc-marv-error">Never share your key backup, passphrase, or secret login credentials with PawID. A newly created mailbox is not merged with your old mailbox. Don't delete browser storage.</p>
+      <p>Use your old <b>MarvelousKeyBackup-v1</b> file and its <b>original Paw Notes passphrase</b>. Your old signing key stays in this browser. PawID must independently confirm a private whisper from your BC account before the original mailbox can be transferred to a clean temporary login.</p>
+      <p class="kc-marv-error">Never share your key backup, passphrase, or secret login credentials with PawID. Only an EMPTY temporary mailbox can receive the original records. Existing or verified mailboxes are never merged. Don't delete browser storage.</p>
       <label>Original encrypted key backup (.json)<input class="field" type="file" id="kc-marv-legacy-file" accept=".json,application/json"></label>
       <label>Original Paw Notes passphrase<input class="field" id="kc-marv-legacy-pass" type="password" autocomplete="off"></label>
       <button class="primary" data-action="marv-legacy-start" ${r.busy?'disabled':''}>1. Prove original key ownership</button>
       ${r.id?`<p>Recovery request: <code>${escapeText(r.id)}</code></p>
       <p>Private verification code: <code>${escapeText(r.code)}</code></p>
       <div class="marv-verify-actions"><button class="secondary" data-action="marv-legacy-whisper">2. Whisper PawID</button><button class="secondary" data-action="marv-legacy-check">3. Check approval</button></div>
-      ${r.approved?'<button class="primary" data-action="marv-legacy-finish">4. Restore original mailbox login</button>':''}`:''}
+      ${r.approved?'<button class="primary" data-action="marv-legacy-finish">4. Transfer original mailbox into current login</button>':''}`:''}
       ${r.status?`<p class="marv-verify-status" role="status">${escapeText(r.status)}</p>`:''}
       ${r.error?`<p class="kc-marv-error" role="alert">${escapeText(r.error)}</p>`:''}
-      <p class="muted">Requires the new <code>pawlounge-legacy-recovery</code> Edge Function, its SQL migration, and a trusted PawID verifier integration. If these are not deployed, recovery cannot finish. The original account must still exist and have the original registered signing key.</p>
+      <p class="muted">Requires the new <code>pawlounge-legacy-recovery</code> Edge Function, its SQL migration, and a trusted PawID verifier integration. If these are not deployed, recovery cannot finish. The old account must still exist and retain the original registered signing key. Transfer accepts ONLY an empty anonymous destination.</p>
       <button class="secondary" data-action="marv-legacy-toggle">Close recovery tools</button></section>`;
   }
   async function marvelousLegacyCall(action,payload={}){
@@ -7537,7 +7537,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(session?.user?.id===backup.auth_user_id)throw Error('Original mailbox login is already active. Use Paw Notes to unlock/restore your keys instead.');
     if(session){
       await marvelousFetch();
-      if(marvelousNotes.claim?.verified_at)throw Error('A separate verified mailbox is active. Contact the administrator for an account-switch review.');
+      if(marvelousNotes.claim||marvelousNotes.keys)throw Error('A new mailbox was already initialized here. Its data cannot be merged. Back up that mailbox if needed, disconnect the NEW unverified login using Recover existing account, then start legacy recovery into a fresh empty anonymous session.');
     }else{
       if(!window.confirm('A temporary anonymous Supabase session is needed to submit this legacy recovery request. No cloud mailbox or encryption keys will be created, and no old data will be changed. Continue?'))return;
       marvelousCheck(await client.auth.signInAnonymously());
@@ -7554,6 +7554,19 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const signature=marvelousB64(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},privateSign,marvelousUtf8(message)));
     const outcome=await marvelousLegacyCall('prove',{id:challenge.id,signature});
     if(!outcome.proof_accepted)throw Error('Original signing-key proof was rejected.');
+    // Rewrap ORIGINAL keys for the new Supabase UID. Server data never sees
+    // private keys or the passphrase. Save to disk only before final transfer.
+    const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const wrap=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},material,
+      {name:'AES-GCM',length:256},false,['encrypt']);
+    const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:marvelousUtf8('marvelous-vault:'+requesterUid)},
+      wrap,marvelousUtf8(JSON.stringify(opened)));
+    const prepared={v:1,salt:marvelousB64(salt),iv:marvelousB64(iv),ct:marvelousB64(cipher)};
+    const test=await marvelousDecodeVaultRecord(prepared,password,requesterUid);
+    if(!marvelousSamePublic(test.ecdhPublic,opened.ecdhPublic)||!marvelousSamePublic(test.signPublic,opened.signPublic))
+      throw Error('Recovery-key encryption self-test failed. Nothing was transferred.');
+    r.preparedVault=prepared;r.preparedUid=requesterUid;
     r.id=challenge.id;r.nonce=challenge.nonce;r.code=challenge.code;
     r.proof=true;r.approved=false;r.status='Original signing key confirmed by the server. Send the private PawID whisper next.';
     r.error='';
@@ -7573,7 +7586,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!r.id)throw Error('Begin recovery with your old key backup first.');
     const result=await marvelousLegacyCall('status',{id:r.id});
     r.approved=result.status==='approved';
-    r.status=result.status==='approved'?'Both proofs passed. You can now restore the ORIGINAL account login.':
+    r.status=result.status==='approved'?'Both proofs passed. You can transfer the original mailbox into this EMPTY temporary login.':
       result.status==='waiting_for_pawid'?'Key proof passed; waiting for trusted PawID verification.':
       result.status==='expired'?'Recovery request expired; start a new request.':
       result.status==='completed'?'Already consumed. If sign-in did not finish, start a fresh request.':
@@ -7583,23 +7596,29 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   async function marvelousLegacyFinish(){
     const r=marvelousLegacyRecovery,member=me();
     if(!r.id||!r.approved)throw Error('Both key proof and PawID approval are required before finishing.');
-    if(!window.confirm('Restore your ORIGINAL mailbox sign-in? The server will re-enable a login for the ORIGINAL account ID. Your current temporary login will be replaced, but its cloud records will NOT be merged or deleted. Continue?'))return;
-    const result=await marvelousLegacyCall('claim',{id:r.id});
-    if(typeof result.email!=='string'||typeof result.password!=='string'||!marvelousLegacyUid(result.old_uid))
-      throw Error('Recovery server did not issue valid credentials. Contact the service administrator.');
     const c=await marvelousClient();
-    const oldUid=result.old_uid;
-    // Credentials exist only in the local call stack, never logged or persisted separately.
-    const signed=marvelousCheck(await c.auth.signInWithPassword({email:result.email,password:result.password}));
-    if(signed?.user?.id!==oldUid)throw Error('Original account identity mismatch. Do not create another mailbox.');
+    const sess=marvelousCheck(await c.auth.getSession())?.session;
+    const destinationUid=sess?.user?.id;
+    if(!marvelousLegacyUid(destinationUid)||destinationUid!==r.preparedUid||!r.preparedVault)
+      throw Error('Recovery keys or destination login changed. Start the proof again with your original backup.');
+    if(localStorage.getItem('marvelous-e2ee-v1-'+member+'-'+destinationUid))
+      throw Error('This destination already contains an encryption vault. Do not overwrite it or merge mailboxes.');
+    if(!window.confirm('TRANSFER your original verified Paw Notes mailbox to this EMPTY anonymous login? This keeps its encrypted notes and original public keys. This is not a merge and it changes the Supabase owner ID for existing records. Continue?'))return;
+    const localPath='marvelous-e2ee-v1-'+member+'-'+destinationUid;
+    // Persist a prepared copy BEFORE the atomic database transfer. If the
+    // browser crashes, the original backup and its passphrase remain usable.
+    localStorage.setItem(localPath,JSON.stringify(r.preparedVault));
+    const result=await marvelousLegacyCall('claim',{id:r.id});
+    if(result.transferred!==true||result.new_uid!==destinationUid)
+      throw Error('The server did not confirm a completed ownership transfer.');
     await marvelousFetch();
-    if(me()!==member||marvelousNotes.user?.id!==oldUid||!marvelousNotes.claim?.verified_at||
-       numeric(marvelousNotes.claim?.claimed_member_number)!==member)
-      throw Error('Recovered account failed original BC identity verification. Do not send messages.');
-    r.status='✓ Original mailbox login recovered. Restore the original encrypted-key backup to read existing private notes.';
-    r.approved=false;r.id='';r.code='';r.nonce='';
+    if(me()!==member||marvelousNotes.user?.id!==destinationUid||!marvelousNotes.claim?.verified_at||
+       numeric(marvelousNotes.claim?.claimed_member_number)!==member||!marvelousNotes.keys)
+      throw Error('Server transfer completed, but mailbox reload failed. Keep your original backup and refresh this page.');
+    r.status='✓ Original Paw Notes mailbox transferred. Unlock its recovered keys with your ORIGINAL passphrase.';
+    r.approved=false;r.proof=false;r.id='';r.code='';r.nonce='';r.preparedVault=null;r.preparedUid='';
     marvelousUpdate();
-    notice('✓ Original mailbox recovered. Restore your old encrypted Paw Notes keys in Paw Notes.');
+    notice('✓ PawID-only recovery complete. Unlock original Paw Notes keys with your old passphrase.');
   }
   async function marvelousLegacyAction(act){
     const r=marvelousLegacyRecovery;
@@ -7619,7 +7638,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   window.PawLoungeLegacyRecoveryDiag=()=>({version:VERSION,open:marvelousLegacyRecovery.open,
     requested:!!marvelousLegacyRecovery.id,keyProofAccepted:marvelousLegacyRecovery.proof,
     pawIdApproved:marvelousLegacyRecovery.approved,readyToFinish:!!marvelousLegacyRecovery.approved,
-    note:'No passphrase, private key, recovery token or mailbox login credentials are exposed.'});
+    note:'No passphrase, private key, recovery token or mailbox login credentials are exposed. Domain-free transfer uses the existing anonymous login.'});
   function marvelousVerifyStep(){
     if(!marvelousNotes.initialized||marvelousNotes.busy&&!marvelousNotes.user)return 0;
     if(!marvelousNotes.user)return 1;

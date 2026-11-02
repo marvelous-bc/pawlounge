@@ -1,6 +1,6 @@
 {
-  "version": "1.2.12",
+  "version": "1.2.13",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Legacy Paw Notes key-backup recovery wizard: sign original key challenge, confirm via PawID, restore original account through server-only recovery function. No mailbox merges or key uploads. Requires Supabase migration and trusted verifier deployment.",
+  "notes": "PawID-only domain-free legacy mailbox recovery. Atomic owner transfer to empty anonymous session after original key challenge and trusted native PawID verification; preserves encrypted notes and rewraps local key vault. Requires new Supabase SQL and Edge Function.",
   "released": "2026-11-02"
 }
