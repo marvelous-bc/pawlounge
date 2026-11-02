@@ -1,6 +1,6 @@
 {
-  "version": "1.2.11",
+  "version": "1.2.12",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Shows Recover previous mailbox throughout account setup and PawID verification, including after an accidental new mailbox was created. Safely disconnects unverified local login before restoring a valid encrypted original-login backup; never deletes cloud mailboxes or encryption keys. Includes v1.2.10 login recovery.",
+  "notes": "Legacy Paw Notes key-backup recovery wizard: sign original key challenge, confirm via PawID, restore original account through server-only recovery function. No mailbox merges or key uploads. Requires Supabase migration and trusted verifier deployment.",
   "released": "2026-11-02"
 }
