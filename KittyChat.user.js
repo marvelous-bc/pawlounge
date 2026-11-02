@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.13
+// @version      1.2.14
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.13';
+  const VERSION = '1.2.14';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7650,7 +7650,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const progress=['Mailbox','Passphrase & keys','Verify with PawID','Verified'];
     const bars=`<div class="marv-verify-progress" aria-label="Verification progress">${progress.map((v,i)=>`<span class="${i===Math.max(0,step-1)?'current':''}">${i+1}. ${v}</span>`).join('')}</div>`;
     let body='';
-    if(step===0)body='<h3>Checking your mailbox…</h3><p>Reading your existing Marvelous status without changing it.</p>';
+    if(step===0)body='<h3>Checking your mailbox…</h3><p>Reading your existing Marvelous status without changing it. If the network is blocked, this check will stop with an error instead of spinning indefinitely.</p>';
+    else if(step===1&&x.error)body='<h3>Mailbox check could not finish</h3><p>Your saved login and encryption vault have NOT been deleted. Do not create a replacement account while the status is unknown. Close other BC tabs and retry, or check the console with <code>PawLoungeMailboxStartupDiag()</code>.</p><div class="marv-verify-actions"><button class="primary" data-action="marv-refresh">Retry mailbox check</button></div>';
     else if(step===1)body='<h3>Open your private mailbox</h3><p>If you have used Marvelous before, recover your existing account instead of creating a new one.</p><div class="marv-verify-actions"><button class="primary" data-action="marv-recovery-open">↻ Recover existing account</button><button class="secondary" data-action="marv-start">Create mailbox (first-time users only)</button></div>';
     else if(step===2&&!x.claim)body=`<h3>Protect your mailbox</h3><p>Choose and confirm your encryption passphrase. This protects your private keys; it is not sent to PawID or the room.</p>${x.user&&localStorage.getItem(marvelousVaultKey())?'<p class="muted">An existing encrypted key vault was found. Enter the ORIGINAL passphrase to reuse it.</p>':''}<label>Passphrase (12+ characters)<input id="kc-marv-pass" class="field" type="password" autocomplete="new-password" minlength="12"></label><label>Confirm passphrase<input id="kc-marv-pass-confirm" class="field" type="password" autocomplete="new-password" minlength="12"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-register">Continue securely</button></div>`;
     else if(step===2)body='<h3>Resume your existing mailbox</h3><p>Your identity was already started. Enter your original passphrase to finish the key setup without deleting existing data.</p><label>Original passphrase<input id="kc-marv-pass" class="field" type="password" autocomplete="off"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-resume">Continue setup</button></div>';
@@ -7742,7 +7743,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     // A missing locally persisted Supabase session is NOT a reason to create an
     // anonymous account or ask for a password. A new user sets up in Paw Notes.
     try{if(!localStorage.getItem('marvelous-mailbox-local-bc-'+id)){marvelousPrompt.checked=true;return;}}catch{return;}
-    if(marvelousPrompt.checking||Date.now()<marvelousPrompt.tryAgainAt)return;
+    if(marvelousPrompt.checking||marvelousNotes.busy||Date.now()<marvelousPrompt.tryAgainAt)return;
     marvelousPrompt.checking=true;
     void (async()=>{
       await marvelousEnsureCrypto();
@@ -7807,8 +7808,15 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         try{
           await new Promise((resolve,reject)=>{
             const script=document.createElement('script');script.src=url;script.async=true;
-            script.onload=()=>window.supabase?.createClient?resolve():reject(Error('Supabase SDK unavailable'));
-            script.onerror=()=>reject(Error('Network or CSP prevented Supabase SDK loading'));
+            let finished=false;
+            const done=error=>{
+              if(finished)return;
+              finished=true;clearTimeout(timer);script.onload=null;script.onerror=null;
+              if(error){script.remove();reject(error);}else resolve();
+            };
+            const timer=setTimeout(()=>done(Error('Supabase SDK CDN did not respond within 12 seconds')),12000);
+            script.onload=()=>done(window.supabase?.createClient?null:Error('Supabase SDK unavailable'));
+            script.onerror=()=>done(Error('Network or CSP prevented Supabase SDK loading'));
             document.head.appendChild(script);
           });
           return window.supabase;
@@ -7829,6 +7837,27 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     });
     return marvelousNotes.client;
   }
+  // Mailbox startup has bounded waits; stalled auth locks and blocked CDNs must
+  // not strand the wizard on "Checking your mailbox". A timeout does not sign
+  // anyone out, alter their saved Supabase tokens, or rotate encrypted keys.
+  function marvelousStartupWait(promise,stage,ms=20000){
+    let timer;
+    const timeout=new Promise((_,reject)=>{
+      timer=setTimeout(()=>reject(Error('Mailbox check timed out at '+stage+' after '+Math.round(ms/1000)+' seconds. Your local session and encryption keys were kept. Close other BC tabs, then retry.')),ms);
+    });
+    return Promise.race([Promise.resolve(promise),timeout]).finally(()=>clearTimeout(timer));
+  }
+  let marvelousFetchPending=null;
+  let marvelousStartupStage='not-started';
+  let marvelousStartupSince=0;
+  window.PawLoungeMailboxStartupDiag=()=>({
+    version:VERSION,initialized:marvelousNotes.initialized,busy:marvelousNotes.busy,
+    stage:marvelousStartupStage,elapsedMs:marvelousStartupSince?Date.now()-marvelousStartupSince:0,
+    sdkAvailable:!!window.supabase?.createClient,clientCreated:!!marvelousNotes.client,
+    userLoaded:!!marvelousNotes.user,verified:!!marvelousNotes.claim?.verified_at,
+    lastError:marvelousNotes.error||'',
+    note:'No authentication token, private key, passphrase, or message content is included.'
+  });
   function marvelousCheck(result){if(result.error)throw result.error;return result.data;}
   function marvelousAssertIdentity(){
     if(!marvelousNotes.user||!marvelousNotes.claim||!marvelousNotes.claim.verified_at ||
@@ -8026,15 +8055,28 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(!window.isSecureContext||!crypto?.subtle)throw Error('Browser Web Crypto is unavailable; secure Paw Notes cannot be used.');
   }
   async function marvelousFetch(){
-    const c=await marvelousClient(),bc=me(),epoch=marvelousNotes.epoch;
-    const session=marvelousCheck(await c.auth.getSession());
-    const user=session.session?marvelousCheck(await c.auth.getUser()).user:null;
+    // The background unlock prompt and verification wizard may open together.
+    // Share a single in-flight read to avoid competing SDK auth-lock requests.
+    if(marvelousFetchPending)return marvelousFetchPending;
+    const op=marvelousFetchImpl();
+    marvelousFetchPending=op;
+    try{return await op;}finally{if(marvelousFetchPending===op)marvelousFetchPending=null;}
+  }
+  async function marvelousFetchImpl(){
+    marvelousStartupSince=Date.now();marvelousStartupStage='load-sdk';
+    const c=await marvelousStartupWait(marvelousClient(),'SDK initialization',28000),bc=me(),epoch=marvelousNotes.epoch;
+    marvelousStartupStage='getSession';
+    const session=marvelousCheck(await marvelousStartupWait(c.auth.getSession(),'getSession'));
+    marvelousStartupStage=session.session?'getUser':'no-session';
+    const user=session.session?marvelousCheck(await marvelousStartupWait(c.auth.getUser(),'getUser')).user:null;
     if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account changed during mailbox sync.');
     if(marvelousNotes.user?.id && user?.id!==marvelousNotes.user.id){marvelousNotes.privateKeys=null;marvelousNotes.unlocked=false;marvelousNotes.decrypted.clear();}
     marvelousNotes.user=user||null;marvelousNotes.claim=null;marvelousNotes.keys=null;marvelousNotes.inbox=[];marvelousNotes.outbox=[];
-    if(!user)return;
-    marvelousNotes.claim=marvelousCheck(await c.from('marvelous_bc_claims').select('auth_user_id,claimed_member_number,challenge_code,created_at,verified_at').eq('auth_user_id',user.id).maybeSingle());
-    marvelousNotes.keys=marvelousCheck(await c.from('marvelous_secure_keys').select('auth_user_id,bc_member_number,ecdh_public_jwk,ecdsa_public_jwk,accept_notes,rotated_at').eq('auth_user_id',user.id).maybeSingle());
+    if(!user){marvelousStartupStage='no-session';return;}
+    marvelousStartupStage='read-claim';
+    marvelousNotes.claim=marvelousCheck(await marvelousStartupWait(c.from('marvelous_bc_claims').select('auth_user_id,claimed_member_number,challenge_code,created_at,verified_at').eq('auth_user_id',user.id).maybeSingle(),'read-claim'));
+    marvelousStartupStage='read-keys';
+    marvelousNotes.keys=marvelousCheck(await marvelousStartupWait(c.from('marvelous_secure_keys').select('auth_user_id,bc_member_number,ecdh_public_jwk,ecdsa_public_jwk,accept_notes,rotated_at').eq('auth_user_id',user.id).maybeSingle(),'read-keys'));
     if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account switched.');
     if(marvelousNotes.claim && numeric(marvelousNotes.claim.claimed_member_number)!==bc)
       throw Error('Mailbox identity mismatch; no messages loaded.');
@@ -8043,15 +8085,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         !marvelousSamePublic(marvelousNotes.privateKeys.signPublic,marvelousNotes.keys.ecdsa_public_jwk))){
       marvelousNotes.privateKeys=null;marvelousNotes.unlocked=false;marvelousNotes.decrypted.clear();
     }
-    if(!marvelousNotes.claim?.verified_at||!marvelousNotes.keys)return;
+    if(!marvelousNotes.claim?.verified_at||!marvelousNotes.keys){marvelousStartupStage='setup-required';return;}
     let inQuery=c.from('marvelous_secure_notes').select('id,sender_uid,recipient_uid,sender_bc_member,recipient_bc_member,envelope,sent_at,read_at').eq('recipient_uid',user.id);
     if(marvelousNotes.keys.rotated_at)inQuery=inQuery.gte('sent_at',marvelousNotes.keys.rotated_at);
-    marvelousNotes.inbox=marvelousCheck(await inQuery.order('sent_at',{ascending:false}).limit(50))||[];
+    marvelousStartupStage='read-inbox';
+    marvelousNotes.inbox=marvelousCheck(await marvelousStartupWait(inQuery.order('sent_at',{ascending:false}).limit(50),'read-inbox'))||[];
     let outQuery=c.from('marvelous_secure_notes').select('id,sender_uid,recipient_uid,sender_bc_member,recipient_bc_member,envelope,sent_at,read_at').eq('sender_uid',user.id);
     if(marvelousNotes.keys.rotated_at)outQuery=outQuery.gte('sent_at',marvelousNotes.keys.rotated_at);
-    marvelousNotes.outbox=marvelousCheck(await outQuery.order('sent_at',{ascending:false}).limit(50))||[];
+    marvelousStartupStage='read-outbox';
+    marvelousNotes.outbox=marvelousCheck(await marvelousStartupWait(outQuery.order('sent_at',{ascending:false}).limit(50),'read-outbox'))||[];
     if(epoch!==marvelousNotes.epoch||bc!==me())throw Error('BC account switched.');
     marvelousUpdateUnreadIndicator();
+    marvelousStartupStage='ready';
     if(marvelousNotes.privateKeys)void marvelousImportOfflineChats().catch(err=>console.warn('[PawLounge] Offline chat sync:',err));
   }
   async function marvelousDirectory(member){

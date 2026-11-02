@@ -1,6 +1,6 @@
 {
-  "version": "1.2.13",
+  "version": "1.2.14",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "PawID-only domain-free legacy mailbox recovery. Atomic owner transfer to empty anonymous session after original key challenge and trusted native PawID verification; preserves encrypted notes and rewraps local key vault. Requires new Supabase SQL and Edge Function.",
+  "notes": "Fix mailbox startup spinner: bounded SDK/auth/db reads, safe retry UI, status diagnostics, and shared in-flight fetch. No change to PawID-only recovery backend.",
   "released": "2026-11-02"
 }
