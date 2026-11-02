@@ -1,6 +1,6 @@
 {
-  "version": "1.2.14",
+  "version": "1.2.15",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Fix mailbox startup spinner: bounded SDK/auth/db reads, safe retry UI, status diagnostics, and shared in-flight fetch. No change to PawID-only recovery backend.",
+  "notes": "Fix Marvelous Hub verification wizard stuck on Checking your mailbox after a completed unverified Supabase session read; preserve all existing mailbox sessions and recovery data.",
   "released": "2026-11-02"
 }

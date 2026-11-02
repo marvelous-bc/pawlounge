@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.14
+// @version      1.2.15
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.14';
+  const VERSION = '1.2.15';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7640,7 +7640,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     pawIdApproved:marvelousLegacyRecovery.approved,readyToFinish:!!marvelousLegacyRecovery.approved,
     note:'No passphrase, private key, recovery token or mailbox login credentials are exposed. Domain-free transfer uses the existing anonymous login.'});
   function marvelousVerifyStep(){
-    if(!marvelousNotes.initialized||marvelousNotes.busy&&!marvelousNotes.user)return 0;
+    // The Marvelous Hub can read a session before Paw Notes is explicitly
+    // opened. Do not keep showing the loading step after a finished read.
+    // A completed, unverified session must show its recovery/setup choices.
+    const readComplete=['no-session','setup-required','ready'].includes(marvelousStartupStage);
+    if(!marvelousNotes.initialized&&!readComplete)return 0;
+    if(marvelousNotes.busy&&!marvelousNotes.user&&!readComplete)return 0;
     if(!marvelousNotes.user)return 1;
     if(!marvelousNotes.claim||!marvelousNotes.keys)return 2;
     return marvelousNotes.claim?.verified_at?4:3;
@@ -8611,6 +8616,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     try{await work();}catch(e){marvelousHub.error=String(e?.message||e).slice(0,350);console.warn('[Marvelous Hub]',e);}
     finally{marvelousHub.busy=false;marvelousHubRefresh();}}
   async function marvelousHubOpen(){if(marvelousHub.initialized)return;marvelousHub.initialized=true;
+    // The Hub itself performs the mailbox read. Mark onboarding initialized
+    // before that read so the wizard does not remain on step 0 afterward.
+    // This does not create an account, sign out, or change any saved vault.
+    marvelousNotes.initialized=true;
     await marvelousHubRun(async()=>{await marvelousEnsureCrypto();await marvelousFetch();
       if(marvelousNotes.claim?.verified_at)await marvelousHubFetch();});}
   async function marvelousHubFetch(){marvelousHubReady();const c=await marvelousClient(),uid=marvelousNotes.user.id;
