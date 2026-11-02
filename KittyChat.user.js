@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.9
+// @version      1.2.10
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.9';
+  const VERSION = '1.2.10';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7366,6 +7366,117 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     void searchRooms('pawid-verify-room');
     notice('Look for Subbycat’s place in the room results. Join the room with PawID (#264370).');
   }
+  // Mailbox recovery is separate from Paw Notes encryption-key recovery.
+  // An encrypted *key* backup does not contain a Supabase login session.
+  // A mailbox session backup is a sensitive bearer credential and is exported
+  // ONLY after authenticated login, encrypted with a separately chosen password.
+  const marvelousRecoveryUI={open:false};
+  const MARVELOUS_SESSION_BACKUP_FORMAT='PawLounge-Encrypted-Mailbox-Session-v1';
+  const MARVELOUS_SESSION_BACKUP_ITERATIONS=310000;
+  function marvelousLocalRecoveryHints(){
+    const bc=me(),storageKey='marvelous-mailbox-local-bc-'+bc;
+    let vaults=0,sessionStored=false;
+    try{
+      sessionStored=!!localStorage.getItem(storageKey);
+      const prefix='marvelous-e2ee-v1-'+bc+'-';
+      for(let i=0;i<localStorage.length;i++)if(localStorage.key(i)?.startsWith(prefix))vaults++;
+    }catch{}
+    return {bcMember:bc,sessionStored,vaultsOnThisOrigin:vaults,
+      signedIn:!!marvelousNotes.user,verified:!!marvelousNotes.claim?.verified_at,
+      note:'This checks only the current site origin. It never exposes tokens or passwords.'};
+  }
+  window.PawLoungeMailboxRecoveryDiag=marvelousLocalRecoveryHints;
+  function marvelousRecoveryMarkup(){
+    if(!marvelousRecoveryUI.open)return '';
+    const hints=marvelousLocalRecoveryHints();
+    if(marvelousNotes.user?.id && marvelousNotes.claim?.verified_at){
+      return `<section class="kc-marv-compose" aria-label="Back up existing mailbox login"><h3>🔐 Back up mailbox login for recovery</h3>
+        <p>This exports an <b>encrypted login-session backup</b> for another browser/device. Unlike an encrypted-key backup, it can restore the sign-in to this same verified account while its Supabase refresh token remains valid.</p>
+        <p class="kc-marv-error">Anyone who has this file and its password may access your private mailbox. Keep them separate. This does not back up your encryption keys; save those separately.</p>
+        <label>Separate recovery-backup password (12+ characters)<input class="field" type="password" id="kc-marv-recovery-export-password" autocomplete="new-password" minlength="12"></label>
+        <label>Confirm recovery-backup password<input class="field" type="password" id="kc-marv-recovery-export-confirm" autocomplete="new-password" minlength="12"></label>
+        <button class="secondary" data-action="marv-recovery-export">Export encrypted login backup</button></section>`;
+    }
+    return `<section class="kc-marv-compose" aria-label="Recover existing Marvelous mailbox"><h3>↻ Recover existing mailbox</h3>
+      <p>Already verified? <b>Do not create a second mailbox.</b> If you have a recovery login backup made on your original browser, restore it below. This preserves the existing server identity and does not replace your Paw Notes encryption keys.</p>
+      ${marvelousNotes.user?'<p class="kc-marv-error">A different mailbox login is currently active. To import the original account, first disconnect this login using the button below. This does not delete its server account or encryption keys.</p><button class="secondary" data-action="marv-recovery-abandon">Disconnect current login on this device</button>':''}
+      <p>Current site: ${hints.sessionStored?'a saved sign-in entry exists':'no saved sign-in entry'}; ${hints.vaultsOnThisOrigin} encrypted key vault${hints.vaultsOnThisOrigin===1?'':'s'} found.</p>
+      <label>Encrypted mailbox login backup (.json)<input class="field" type="file" id="kc-marv-recovery-file" accept=".json,application/json"></label>
+      <label>Recovery-backup password<input class="field" type="password" id="kc-marv-recovery-password" autocomplete="off"></label>
+      <p class="muted">A Paw Notes <b>encrypted-key backup</b> is not a login backup. If you only have that file, return to the original browser/domain where your mailbox is signed in, update PawLounge there and export its encrypted login backup.</p>
+      <p class="muted">If the original anonymous Supabase login is lost on every device and no encrypted login backup exists, this browser cannot securely recover it. A trusted server-side BC-identity recovery/relink is required. PawID verification alone cannot give an unrelated login access to the old account.</p></section>`;
+  }
+  async function marvelousExportLoginBackup(password){
+    if(password.length<12)throw Error('Choose a separate recovery-backup password of at least 12 characters.');
+    await marvelousEnsureCrypto();
+    const account=me(),client=await marvelousClient();
+    await marvelousFetch();
+    if(!marvelousNotes.claim?.verified_at||numeric(marvelousNotes.claim.claimed_member_number)!==account||!marvelousNotes.keys)
+      throw Error('Only the original verified BC mailbox can export a login recovery backup.');
+    const auth=marvelousCheck(await client.auth.getSession());
+    const session=auth?.session;
+    if(!session?.access_token||!session?.refresh_token||session.user?.id!==marvelousNotes.user?.id)
+      throw Error('Original mailbox session unavailable. Refresh the mailbox before backing up.');
+    const salt=crypto.getRandomValues(new Uint8Array(16));
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',iterations:MARVELOUS_SESSION_BACKUP_ITERATIONS,salt},material,{name:'AES-GCM',length:256},false,['encrypt']);
+    const plain=marvelousUtf8(JSON.stringify({v:1,bc_member:account,auth_user_id:session.user.id,
+      access_token:session.access_token,refresh_token:session.refresh_token}));
+    const data=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:marvelousUtf8('PawLounge-Mailbox-Session-v1:'+account)},key,plain));
+    // The file is encrypted; never log or render the session, including in diagnostics.
+    const backup={format:MARVELOUS_SESSION_BACKUP_FORMAT,bc_member:account,created:new Date().toISOString(),
+      kdf:'PBKDF2-SHA256',iterations:MARVELOUS_SESSION_BACKUP_ITERATIONS,cipher:'AES-256-GCM',
+      salt:marvelousB64(salt),iv:marvelousB64(iv),data:marvelousB64(data)};
+    download('PawLounge-ENCRYPTED-MAILBOX-LOGIN-BC-'+account+'.json','application/json',JSON.stringify(backup));
+    notice('Encrypted mailbox login backup exported. Keep it and its password private and separate. Back up Paw Notes keys too.');
+    return true;
+  }
+  async function marvelousRestoreLoginBackup(file,password){
+    const account=me();
+    if(!account||!file||file.size>128000)throw Error('Choose a small encrypted PawLounge mailbox login backup.');
+    if(!password)throw Error('Enter the password used to encrypt this login backup.');
+    await marvelousEnsureCrypto();
+    const backup=JSON.parse(await file.text());
+    if(backup?.format!==MARVELOUS_SESSION_BACKUP_FORMAT||numeric(backup.bc_member)!==account||
+      backup.kdf!=='PBKDF2-SHA256'||backup.iterations!==MARVELOUS_SESSION_BACKUP_ITERATIONS||backup.cipher!=='AES-256-GCM')
+      throw Error('This is not a compatible encrypted login backup for your current BC account. A key-only backup cannot restore sign-in.');
+    const salt=marvelousUnb64(backup.salt),iv=marvelousUnb64(backup.iv),ct=marvelousUnb64(backup.data);
+    if(salt.length!==16||iv.length!==12||ct.length<32||ct.length>20000)throw Error('Invalid or oversized encrypted login backup.');
+    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const key=await crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',iterations:MARVELOUS_SESSION_BACKUP_ITERATIONS,salt},material,{name:'AES-GCM',length:256},false,['decrypt']);
+    let saved;
+    try{saved=JSON.parse(marvelousTextDecoder.decode(await crypto.subtle.decrypt({name:'AES-GCM',iv,
+      additionalData:marvelousUtf8('PawLounge-Mailbox-Session-v1:'+account)},key,ct)));}
+    catch{throw Error('Incorrect recovery-backup password or damaged encrypted login file.');}
+    if(saved?.v!==1||numeric(saved.bc_member)!==account||typeof saved.auth_user_id!=='string'||
+       typeof saved.access_token!=='string'||saved.access_token.length>12000||!saved.access_token||
+       typeof saved.refresh_token!=='string'||saved.refresh_token.length>12000||!saved.refresh_token)
+      throw Error('Encrypted login backup content is invalid.');
+    const client=await marvelousClient();
+    const old=await client.auth.getSession();
+    if(old.error)throw old.error;
+    if(old.data?.session)throw Error('A mailbox session is already active. Do not replace it; refresh/check that mailbox first.');
+    if(me()!==account)throw Error('BC account changed during recovery. Nothing was imported.');
+    // setSession asks Supabase to validate/refresh the imported credentials.
+    const signed=marvelousCheck(await client.auth.setSession({access_token:saved.access_token,refresh_token:saved.refresh_token}));
+    if(!signed?.session||signed.session.user?.id!==saved.auth_user_id){
+      await client.auth.signOut({scope:'local'});
+      throw Error('The saved mailbox credentials are no longer valid. No new account was created.');
+    }
+    try{await marvelousFetch();}
+    catch(e){throw Error('Session restored, but mailbox identity could not be checked. Keep browser storage intact and refresh when connected: '+String(e?.message||e).slice(0,120));}
+    if(me()!==account||marvelousNotes.user?.id!==saved.auth_user_id||
+       numeric(marvelousNotes.claim?.claimed_member_number)!==account||!marvelousNotes.claim?.verified_at){
+      await client.auth.signOut({scope:'local'});
+      marvelousNotesReset();
+      throw Error('Backup does not authenticate the original verified BC mailbox. Sign-in refused; no account data was replaced.');
+    }
+    marvelousRecoveryUI.open=false;
+    marvelousUpdate();
+    notice('✓ Original verified mailbox sign-in restored. Unlock or restore your original Paw Notes encryption keys next.');
+    return true;
+  }
   function marvelousVerifyStep(){
     if(!marvelousNotes.initialized||marvelousNotes.busy&&!marvelousNotes.user)return 0;
     if(!marvelousNotes.user)return 1;
@@ -7378,8 +7489,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const bars=`<div class="marv-verify-progress" aria-label="Verification progress">${progress.map((v,i)=>`<span class="${i===Math.max(0,step-1)?'current':''}">${i+1}. ${v}</span>`).join('')}</div>`;
     let body='';
     if(step===0)body='<h3>Checking your mailbox…</h3><p>Reading your existing Marvelous status without changing it.</p>';
-    else if(step===1)body='<h3>Create your private mailbox</h3><p>No email address is required. Create a mailbox for your current BC character.</p><div class="marv-verify-actions"><button class="primary" data-action="marv-start">Create my mailbox</button></div>';
-    else if(step===2&&!x.claim)body=`<h3>Protect your mailbox</h3><p>Choose and confirm your encryption passphrase. This protects your private keys; it is not sent to PawID or the room.</p>${x.user&&localStorage.getItem(marvelousVaultKey())?'<p class="muted">An existing encrypted key vault was found. Enter the ORIGINAL passphrase to reuse it.</p>':''}<label>Passphrase (12+ characters)<input id="kc-marv-pass" class="field" type="password" autocomplete="new-password" minlength="12"></label><label>Confirm passphrase<input id="kc-marv-pass-confirm" class="field" type="password" autocomplete="new-password" minlength="12"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-register">Continue securely</button></div>`;
+    else if(step===1)body='<h3>Open your private mailbox</h3><p>If you have used Marvelous before, recover your existing account instead of creating a new one.</p><div class="marv-verify-actions"><button class="primary" data-action="marv-recovery-open">↻ Recover existing account</button><button class="secondary" data-action="marv-start">Create mailbox (first-time users only)</button></div>';
+    else if(step===2&&!x.claim)body=`<h3>Protect your mailbox</h3><p>Already have a verified account? <button class="secondary" data-action="marv-recovery-open">Recover existing account instead</button></p>${marvelousRecoveryMarkup()}<p>Choose and confirm your encryption passphrase. This protects your private keys; it is not sent to PawID or the room.</p>${x.user&&localStorage.getItem(marvelousVaultKey())?'<p class="muted">An existing encrypted key vault was found. Enter the ORIGINAL passphrase to reuse it.</p>':''}<label>Passphrase (12+ characters)<input id="kc-marv-pass" class="field" type="password" autocomplete="new-password" minlength="12"></label><label>Confirm passphrase<input id="kc-marv-pass-confirm" class="field" type="password" autocomplete="new-password" minlength="12"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-register">Continue securely</button></div>`;
     else if(step===2)body='<h3>Resume your existing mailbox</h3><p>Your identity was already started. Enter your original passphrase to finish the key setup without deleting existing data.</p><label>Original passphrase<input id="kc-marv-pass" class="field" type="password" autocomplete="off"></label><div class="marv-verify-actions"><button class="primary" data-action="marv-resume">Continue setup</button></div>';
     else if(step===3){
       body=`<h3>Verify your BC identity</h3><p>${here?'✓ PawID (#264370) is in this room.':'PawID (#264370) is not in your current room.'} Verification uses a <b>private whisper</b> that PawLounge sends directly to PawID. It will never publish your code to room chat.</p>
@@ -7388,7 +7499,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <details><summary>Advanced: show one-time verification code</summary><code>Marvelous verify: ${escapeText(x.claim.challenge_code||'')}</code><p class="muted">Only the private whisper sent by your BC character can establish ownership. Do not post this code publicly.</p></details>`;
     }else body='<h3>✓ Account verified!</h3><p>Your BC account was confirmed by PawID. No further verification is needed for this mailbox.</p><div class="marv-verify-actions"><button class="primary" data-tab="notes">Open Paw Notes</button></div>';
     const msg=x.error?`<p class="kc-marv-error" role="alert">${escapeText(x.error)}</p>`:'';
-    return `<section class="marv-verification-step" aria-label="Verify Marvelous account"><h2>🐾 Marvelous account setup</h2>${bars}${msg}${body}${marvelousVerifyUI.status?`<div class="marv-verify-status" role="status">${escapeText(marvelousVerifyUI.status)}</div>`:''}<p class="muted">BC #${me()} · Verification is one-time. Keep your passphrase and encrypted key backup safe.</p></section>`;
+    return `<section class="marv-verification-step" aria-label="Verify Marvelous account"><h2>🐾 Marvelous account setup</h2>${bars}${msg}${body}${step===1?marvelousRecoveryMarkup():''}${marvelousVerifyUI.status?`<div class="marv-verify-status" role="status">${escapeText(marvelousVerifyUI.status)}</div>`:''}<p class="muted">BC #${me()} · Verification is one-time. Keep your passphrase and encrypted key backup safe.</p></section>`;
   }
   function marvelousVerifyTick(){
     const id=me();if(!id||!ui.shadow)return;
@@ -7998,12 +8109,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const x=marvelousNotes,message=x.error?`<p class="kc-marv-error" role="alert">${escapeText(x.error)}</p>`:'';
     let inside='';
     if(!x.initialized||x.busy&&!x.user)inside='<p class="muted">Opening Marvelous mailbox…</p>';
-    else if(!x.user)inside='<p>No email needed. Your private mailbox sign-in is saved on this browser.</p><button class="primary" data-action="marv-start">Create my mailbox</button>';
+    else if(!x.user)inside='<p>Existing mailbox? Recover your original account before creating anything new.</p><button class="primary" data-action="marv-recovery-open">↻ Recover existing account</button> <button class="secondary" data-action="marv-start">Create mailbox (first-time users only)</button>'+marvelousRecoveryMarkup();
     else if(!x.claim){
       inside=`<p>Set up your private mailbox for BC <b>#${me()}</b>. You will confirm ownership with a one-time private whisper to PawID.</p>${localStorage.getItem(marvelousVaultKey())?'<p>An encrypted key vault already exists; enter its original passphrase to resume registration safely.</p>':''}
         <label>Create encryption-key passphrase (12+ characters)<input type="password" class="field" id="kc-marv-pass" autocomplete="new-password" minlength="12"></label>
         <label>Confirm encryption passphrase<input type="password" class="field" id="kc-marv-pass-confirm" autocomplete="new-password" minlength="12"></label>
-        <button class="primary" data-action="marv-register">Set up my private mailbox</button>`;
+        <button class="primary" data-action="marv-register">Set up my private mailbox</button><button class="secondary" data-action="marv-recovery-open">Recover existing account instead</button>${marvelousRecoveryMarkup()}`;
     }else if(numeric(x.claim.claimed_member_number)!==me()){
       inside='<p class="kc-marv-error">Account mismatch. Mailbox locked; do not use this BC account with these credentials.</p>';
     }else if(!x.keys){
@@ -8020,8 +8131,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
           `<p>If your original Paw Notes keys cannot be unlocked, you can replace them without losing BC verification. <b>Old encrypted Paw Notes will become unreadable</b>; contacts must confirm your new key fingerprint.</p><label>New Paw Notes passphrase (12+ characters)<input class="field" type="password" id="kc-marv-reset-pass" autocomplete="new-password" minlength="12"></label><button class="secondary" data-action="marv-reset-keys">Reset Paw Notes encryption</button>`}
         </section>`:''}
         <section class="kc-marv-compose"><h3>Contact key verification</h3><p class="muted">If a friend has reset their encryption keys, verify their new fingerprint with them through native BC before accepting it here.</p><label>BC MemberNumber<input class="field" id="kc-marv-key-member" inputmode="numeric" placeholder="123456"></label><button class="secondary" data-action="marv-review-contact-key">Review updated key</button></section>
-        <div class="kc-marv-actions"><button class="secondary" data-action="marv-backup">Save encrypted key backup</button><button class="secondary" data-action="marv-refresh">↻ Refresh</button><button class="secondary" data-action="marv-switch" ${x.view==='inbox'?'disabled':''}>📥 Inbox</button><button class="secondary" data-action="marv-outbox" ${x.view==='outbox'?'disabled':''}>📤 Sent</button></div>
-        ${x.privateKeys?`<section class="kc-marv-compose"><h3>✉️ Leave encrypted Paw Note</h3><label>Recipient's BC member number<input id="kc-marv-to" class="field" inputmode="numeric" placeholder="123456" value="${escapeText(x.draftTo)}"></label><label>Your private message<textarea id="kc-marv-body" class="field" rows="4" maxlength="2000">${escapeText(x.draftBody)}</textarea></label><label>Message expiration<select class="field" id="marv-message-ttl"><option value="30d" ${x.ttl==='30d'?'selected':''}>30 days</option><option value="7d" ${x.ttl==='7d'?'selected':''}>7 days</option><option value="1d" ${x.ttl==='1d'?'selected':''}>1 day</option></select></label><label>Schedule for later (optional; requires trusted scheduler)<input type="datetime-local" class="field" id="marv-send-at" value="${escapeText(x.sendAt||'')}"></label><button class="primary" data-action="marv-send">Encrypt & send</button></section>`:''}
+        <div class="kc-marv-actions"><button class="secondary" data-action="marv-backup">Save encrypted key backup</button><button class="secondary" data-action="marv-recovery-open">🔐 Back up mailbox login</button><button class="secondary" data-action="marv-refresh">↻ Refresh</button><button class="secondary" data-action="marv-switch" ${x.view==='inbox'?'disabled':''}>📥 Inbox</button><button class="secondary" data-action="marv-outbox" ${x.view==='outbox'?'disabled':''}>📤 Sent</button></div>
+        ${marvelousRecoveryMarkup()}${x.privateKeys?`<section class="kc-marv-compose"><h3>✉️ Leave encrypted Paw Note</h3><label>Recipient's BC member number<input id="kc-marv-to" class="field" inputmode="numeric" placeholder="123456" value="${escapeText(x.draftTo)}"></label><label>Your private message<textarea id="kc-marv-body" class="field" rows="4" maxlength="2000">${escapeText(x.draftBody)}</textarea></label><label>Message expiration<select class="field" id="marv-message-ttl"><option value="30d" ${x.ttl==='30d'?'selected':''}>30 days</option><option value="7d" ${x.ttl==='7d'?'selected':''}>7 days</option><option value="1d" ${x.ttl==='1d'?'selected':''}>1 day</option></select></label><label>Schedule for later (optional; requires trusted scheduler)<input type="datetime-local" class="field" id="marv-send-at" value="${escapeText(x.sendAt||'')}"></label><button class="primary" data-action="marv-send">Encrypt & send</button></section>`:''}
         <h3>${x.view==='inbox'?'📥 Secure inbox':'📤 Secure sent notes'}</h3>${marvelousNoteList(x.view==='inbox'?x.inbox:x.outbox,x.view==='inbox')}`;
     }
     const guide=!x.claim?.verified_at?`<section class="marv-feature-card" aria-label="How PawID verification works">
@@ -8034,10 +8145,39 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     if(x.privateKeys)void marvelousDecryptVisible();
   }
   async function marvelousAction(act,element){
+    if(act==='marv-recovery-abandon'){
+      if(!marvelousNotes.user)return;
+      if(marvelousNotes.claim?.verified_at)throw Error('Verified mailboxes must not be disconnected from the recovery screen.');
+      if(!window.confirm('Disconnect this unverified mailbox login from this browser? It will not delete the server account or encryption keys, but this anonymous login may be impossible to access again without a login backup.'))return;
+      return marvelousRun(async()=>{
+        const c=await marvelousClient();
+        marvelousCheck(await c.auth.signOut({scope:'local'}));
+        marvelousNotesReset();
+        await marvelousFetch();
+        marvelousRecoveryUI.open=true;
+      });
+    }
+    if(act==='marv-recovery-open'){
+      marvelousRecoveryUI.open=!marvelousRecoveryUI.open;
+      if(state.tab==='marvelous')renderMarvelousHub();
+      else marvelousUpdate();
+      return;
+    }
+    if(act==='marv-recovery-export'){
+      const pass=String(ui.shadow?.getElementById('kc-marv-recovery-export-password')?.value||'');
+      const confirm=String(ui.shadow?.getElementById('kc-marv-recovery-export-confirm')?.value||'');
+      if(pass!==confirm){marvelousNotes.error='Recovery backup passwords do not match.';marvelousUpdate();return;}
+      return marvelousRun(()=>marvelousExportLoginBackup(pass));
+    }
     if(act==='marv-switch'||act==='marv-outbox'){marvelousNotes.view=act==='marv-switch'?'inbox':'outbox';marvelousUpdate();return;}
     if(act==='marv-start')return marvelousRun(async()=>{
       await marvelousEnsureCrypto();const c=await marvelousClient(),res=await c.auth.getSession();if(res.error)throw res.error;
-      if(!res.data.session)marvelousCheck(await c.auth.signInAnonymously());
+      if(!res.data.session){
+        const h=marvelousLocalRecoveryHints();
+        if(h.vaultsOnThisOrigin>0)throw Error('Existing Paw Notes vault detected. Recover your previous mailbox login first; creating another anonymous login will not restore your old notes.');
+        if(!window.confirm('Only create a mailbox if this BC character has NEVER registered with Marvelous. Existing accounts must use Recover existing account. Continue creating a NEW login?'))return;
+        marvelousCheck(await c.auth.signInAnonymously());
+      }
       await marvelousFetch();
     });
     if(act==='marv-refresh')return marvelousRun(async()=>{await marvelousFetch();if(marvelousNotes.claim?.verified_at&&marvelousVerifyUI.wizardOpenedAt){marvelousVerifyUI.completedAt=Date.now();marvelousHub.initialized=false;void marvelousHubOpen();}});
@@ -8086,6 +8226,11 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
         await marvelousEnsureCrypto();const c=await marvelousClient(),uid=marvelousNotes.user?.id;
         if(!uid)throw Error('Sign into a mailbox session first.');
         if(marvelousNotes.claim)throw Error('MemberNumber already claimed; cannot create a second identity here.');
+        // Query the public directory before generating any new key material.
+        // A second anonymous login is NOT a way to recover an existing claim.
+        const previouslyRegistered=marvelousCheck(await c.from('marvelous_secure_keys').select('auth_user_id').eq('bc_member_number',me()).maybeSingle());
+        if(previouslyRegistered?.auth_user_id&&previouslyRegistered.auth_user_id!==uid)
+          throw Error('An existing verified mailbox is already registered for your BC number. Recover that account instead of creating new encryption keys.');
         if(localStorage.getItem(marvelousVaultKey())){
           await marvelousUnlockVault(pass);
         }else{
@@ -10808,6 +10953,12 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function changeUI(e) {
     const t = e.target;
     if(t.id==='marv-memory-favorites'){marvelousRoomMemoryFilters.favoritesOnly=!!t.checked;renderRoomMemories();return;}
+    if(t.id==='kc-marv-recovery-file'){
+      const file=t.files?.[0],password=String(ui.shadow?.getElementById('kc-marv-recovery-password')?.value||'');
+      t.value='';
+      if(file)void marvelousRun(()=>marvelousRestoreLoginBackup(file,password));
+      return;
+    }
     if(t.id==='kc-marv-keyfile'){
       const file=t.files?.[0],password=String(ui.shadow?.getElementById('kc-marv-pass')?.value||'');
       if(file)void marvelousRun(()=>marvelousRestoreVault(file,password));
