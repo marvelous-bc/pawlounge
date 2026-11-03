@@ -1,8 +1,8 @@
 {
   "name": "PawLounge",
-  "version": "1.2.18",
+  "version": "1.2.19",
   "file": "KittyChat.user.js",
   "url": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
   "scriptUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Legacy PawID recovery: safely reuse a matching original-key vault after failed transfer; verify signing and decryption private keys; never overwrite a different vault."
+  "notes": "Resumable PawID mailbox recovery: authenticated restart of unexpired original-key proofs and approvals; no extra verification or new temporary account required; safe staged-vault reuse."
 }

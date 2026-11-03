@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.18
+// @version      1.2.19
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.18';
+  const VERSION = '1.2.19';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7494,7 +7494,9 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <p class="kc-marv-error">Never share your key backup, passphrase, or secret login credentials with PawID. Only an EMPTY temporary mailbox can receive the original records. Existing or verified mailboxes are never merged. Don't delete browser storage.</p>
       <label>Original encrypted key backup (.json)<input class="field" type="file" id="kc-marv-legacy-file" accept=".json,application/json"></label>
       <label>Original Paw Notes passphrase<input class="field" id="kc-marv-legacy-pass" type="password" autocomplete="off"></label>
-      <button class="primary" data-action="marv-legacy-start" ${r.busy?'disabled':''}>1. Prove original key ownership</button>
+      <button class="primary" data-action="marv-legacy-start" ${r.busy?'disabled':''}>1. Prove original key ownership / start</button>
+      <button class="secondary" data-action="marv-legacy-resume" ${r.busy?'disabled':''}>↻ Resume pending recovery (no new PawID verification)</button>
+      <p class="muted">Resuming uses your SAME temporary Supabase login and an unexpired request. If the original keys are already staged in this browser, only your original Paw Notes passphrase is needed. Otherwise select your original encrypted-key backup above. No login backup or new account is required.</p>
       ${r.id?`<p>Recovery request: <code>${escapeText(r.id)}</code></p>
       <p>Private verification code: <code>${escapeText(r.code)}</code></p>
       <div class="marv-verify-actions"><button class="secondary" data-action="marv-legacy-whisper">2. Whisper PawID</button><button class="secondary" data-action="marv-legacy-check">3. Check approval</button></div>
@@ -7556,6 +7558,115 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     await marvelousLegacyVerifyPrivatePair(opened);
     return true;
   }
+  // Resume is server-authoritative, not derived from a locally stored one-time
+  // code. A fresh browser load can find its own *unexpired* request by the
+  // authenticated temporary Supabase session. We never persist a secret key,
+  // passphrase, or recovery code to enable this.
+  async function marvelousLegacyRegisteredOriginal(client,oldUid,member,originalPublic){
+    const registered=marvelousCheck(await client.from('marvelous_secure_keys')
+      .select('auth_user_id,bc_member_number,ecdh_public_jwk,ecdsa_public_jwk')
+      .eq('auth_user_id',oldUid).eq('bc_member_number',member).maybeSingle());
+    if(!registered||registered.auth_user_id!==oldUid||numeric(registered.bc_member_number)!==member||
+      !marvelousSamePublic(registered.ecdh_public_jwk,originalPublic.ecdhPublic)||
+      !marvelousSamePublic(registered.ecdsa_public_jwk,originalPublic.signPublic))
+      throw Error('The recovered private keys do not match BOTH public keys of the original mailbox. Nothing was changed.');
+    return registered;
+  }
+  async function marvelousLegacyPrepareVault(opened,password,destinationUid){
+    const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
+    const wrap=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},material,
+      {name:'AES-GCM',length:256},false,['encrypt']);
+    const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:marvelousUtf8('marvelous-vault:'+destinationUid)},
+      wrap,marvelousUtf8(JSON.stringify(opened)));
+    const prepared={v:1,salt:marvelousB64(salt),iv:marvelousB64(iv),ct:marvelousB64(cipher)};
+    const test=await marvelousDecodeVaultRecord(prepared,password,destinationUid);
+    if(!marvelousSamePublic(test.ecdhPublic,opened.ecdhPublic)||!marvelousSamePublic(test.signPublic,opened.signPublic))
+      throw Error('Recovery-key encryption self-test failed. No data was transferred.');
+    await marvelousLegacyVerifyPrivatePair(test);
+    return prepared;
+  }
+  async function marvelousLegacyAttachChallenge(challenge,opened,password,oldUid,destinationUid,bc,client,originalPublic,preparedVault=null){
+    if(!marvelousLegacyUid(challenge?.id)||!marvelousLegacyUid(oldUid)||
+       typeof challenge.nonce!=='string'||!/^[A-Z2-9]{8}$/.test(challenge.code)||
+       (challenge.old_uid&&challenge.old_uid!==oldUid)||
+       (challenge.requester_uid&&challenge.requester_uid!==destinationUid)||
+       (challenge.bc_member&&Number(challenge.bc_member)!==bc))
+      throw Error('Recovery server returned an invalid or different request. Nothing was transferred.');
+    let status=String(challenge.status||'waiting_for_key');
+    if(!['waiting_for_key','waiting_for_pawid','approved'].includes(status))
+      throw Error('Recovery request is not active. Its expiry or completion must be respected.');
+    if(status==='waiting_for_key'){
+      const privateSign=await crypto.subtle.importKey('pkcs8',marvelousUnb64(opened.sign),
+        {name:'ECDSA',namedCurve:'P-256'},false,['sign']);
+      const message=marvelousLegacyMessage(challenge,oldUid,destinationUid,bc);
+      const signature=marvelousB64(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},privateSign,marvelousUtf8(message)));
+      const outcome=await marvelousLegacyCall('prove',{id:challenge.id,signature});
+      if(!outcome.proof_accepted)throw Error('Original signing-key proof was rejected.');
+      status='waiting_for_pawid';
+    }
+    // Prepare only in memory. When a previous failed transfer already staged
+    // an authentic original-key vault, do not rewrite that browser record.
+    const readyVault=preparedVault||await marvelousLegacyPrepareVault(opened,password,destinationUid);
+    // Recheck destination after awaits so a changed authentication identity
+    // cannot be used to stage a vault under a different user's UUID.
+    const active=marvelousCheck(await client.auth.getSession())?.session?.user?.id;
+    if(active!==destinationUid||me()!==bc)
+      throw Error('Recovery account or BC character changed. No vault was written.');
+    const r=marvelousLegacyRecovery;
+    Object.assign(r,{id:challenge.id,nonce:challenge.nonce,code:challenge.code,
+      preparedVault:readyVault,preparedUid:destinationUid,originalPublic,originalUid:oldUid,
+      proof:true,approved:status==='approved',error:'',lastCheck:Date.now(),
+      status:status==='approved'?'✓ Existing approved request resumed. Both proofs remain valid; you may finish the transfer.':
+        challenge.resumed?'✓ Existing key proof resumed. Whisper PawID only if it has not already approved.':
+        'Original signing key confirmed by the server. Send the private PawID whisper next.'});
+  }
+  async function marvelousLegacyResume(file,password){
+    const bc=me();
+    if(!bc)throw Error('Log into the correct BC character first.');
+    if(!password)throw Error('Enter the ORIGINAL Paw Notes passphrase to resume safely.');
+    await marvelousEnsureCrypto();
+    const client=await marvelousClient();
+    const session=marvelousCheck(await client.auth.getSession())?.session;
+    const destinationUid=session?.user?.id;
+    if(!marvelousLegacyUid(destinationUid))
+      throw Error('The original temporary recovery login is missing. Do NOT create a new mailbox or clear this browser. Restore that login first.');
+    const pending=await marvelousLegacyCall('resume',{member:bc});
+    if(!pending?.found){
+      marvelousLegacyRecovery.status='No unexpired recovery exists for this temporary login. If your request expired, start a new one using the same login.';
+      marvelousLegacyRecovery.error='';
+      return;
+    }
+    if(!marvelousLegacyUid(pending.old_uid)||pending.old_uid===destinationUid||
+       pending.requester_uid!==destinationUid||Number(pending.bc_member)!==bc)
+      throw Error('Recovery identity mismatch. Your mailbox and keys were left unchanged.');
+    const originalUid=pending.old_uid;
+    let opened,stagedVault=null;
+    if(file){
+      if(file.size>65536)throw Error('Original key backup must be under 64 KB.');
+      const backup=JSON.parse(await file.text());
+      if(backup?.format!=='MarvelousKeyBackup-v1'||numeric(backup.bc_member)!==bc||
+         backup.auth_user_id!==originalUid||!backup.vault)
+        throw Error('This encrypted-key backup does not belong to the pending ORIGINAL mailbox.');
+      opened=await marvelousDecodeVaultRecord(backup.vault,password,originalUid);
+    }else{
+      const raw=localStorage.getItem('marvelous-e2ee-v1-'+bc+'-'+destinationUid);
+      if(!raw)throw Error('No prepared original-key vault exists on this browser. Select your ORIGINAL encrypted-key backup and enter its passphrase, then click Resume.');
+      try{stagedVault=JSON.parse(raw);}catch{throw Error('The staged vault is unreadable. Do not delete it; select your original key backup instead.');}
+      opened=await marvelousDecodeVaultRecord(stagedVault,password,destinationUid);
+    }
+    const originalPublic=await marvelousLegacyVerifyPrivatePair(opened);
+    await marvelousLegacyRegisteredOriginal(client,originalUid,bc,originalPublic);
+    // Explicitly never overwrite a different destination vault, even while
+    // resuming. A key-backup based attempt also has to match a staged vault.
+    const path='marvelous-e2ee-v1-'+bc+'-'+destinationUid;
+    const existing=localStorage.getItem(path);
+    if(existing){
+      await marvelousLegacyValidateExistingVault(existing,password,destinationUid,originalPublic);
+      stagedVault=JSON.parse(existing);
+    }
+    await marvelousLegacyAttachChallenge(pending,opened,password,originalUid,destinationUid,bc,client,originalPublic,stagedVault);
+  }
   async function marvelousLegacyStart(file,password){
     const r=marvelousLegacyRecovery,bc=me();
     if(!bc||!file||file.size>65536)throw Error('Choose the original encrypted-key JSON backup (under 64 KB).');
@@ -7568,16 +7679,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     // Local decryption and signing: backup/passphrase are never sent to Supabase.
     const opened=await marvelousDecodeVaultRecord(backup.vault,password,backup.auth_user_id);
     const originalPublic=await marvelousLegacyVerifyPrivatePair(opened);
-    const privateSign=await crypto.subtle.importKey('pkcs8',marvelousUnb64(opened.sign),
-      {name:'ECDSA',namedCurve:'P-256'},false,['sign']);
     let client=await marvelousClient();
-    const registeredOriginal=marvelousCheck(await client.from('marvelous_secure_keys')
-      .select('auth_user_id,bc_member_number,ecdh_public_jwk,ecdsa_public_jwk')
-      .eq('auth_user_id',backup.auth_user_id).eq('bc_member_number',bc).maybeSingle());
-    if(!registeredOriginal ||
-       !marvelousSamePublic(registeredOriginal.ecdh_public_jwk,originalPublic.ecdhPublic)||
-       !marvelousSamePublic(registeredOriginal.ecdsa_public_jwk,originalPublic.signPublic))
-      throw Error('The original backup does not match BOTH keys registered to the original mailbox. Recovery stopped without changes.');
+    await marvelousLegacyRegisteredOriginal(client,backup.auth_user_id,bc,originalPublic);
     let session=marvelousCheck(await client.auth.getSession())?.session;
     if(session?.user?.id===backup.auth_user_id)throw Error('Original mailbox login is already active. Use Paw Notes to unlock/restore your keys instead.');
     if(session){
@@ -7591,33 +7694,18 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const requesterUid=session?.user?.id;
     if(!marvelousLegacyUid(requesterUid)||requesterUid===backup.auth_user_id)
       throw Error('Invalid recovery session. No identity was changed.');
-    // Fail closed unless the backend confirms ownership with the historical key.
-    const challenge=await marvelousLegacyCall('start',{member:bc,old_uid:backup.auth_user_id});
-    if(!marvelousLegacyUid(challenge.id)||typeof challenge.nonce!=='string'||
-      !/^[A-Z2-9]{8}$/.test(challenge.code))throw Error('Recovery server response is invalid.');
-    const message=marvelousLegacyMessage(challenge,backup.auth_user_id,requesterUid,bc);
-    const signature=marvelousB64(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},privateSign,marvelousUtf8(message)));
-    const outcome=await marvelousLegacyCall('prove',{id:challenge.id,signature});
-    if(!outcome.proof_accepted)throw Error('Original signing-key proof was rejected.');
-    // Rewrap ORIGINAL keys for the new Supabase UID. Server data never sees
-    // private keys or the passphrase. Save to disk only before final transfer.
-    const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
-    const material=await crypto.subtle.importKey('raw',marvelousUtf8(password),'PBKDF2',false,['deriveKey']);
-    const wrap=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'},material,
-      {name:'AES-GCM',length:256},false,['encrypt']);
-    const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:marvelousUtf8('marvelous-vault:'+requesterUid)},
-      wrap,marvelousUtf8(JSON.stringify(opened)));
-    const prepared={v:1,salt:marvelousB64(salt),iv:marvelousB64(iv),ct:marvelousB64(cipher)};
-    const test=await marvelousDecodeVaultRecord(prepared,password,requesterUid);
-    if(!marvelousSamePublic(test.ecdhPublic,opened.ecdhPublic)||!marvelousSamePublic(test.signPublic,opened.signPublic))
-      throw Error('Recovery-key encryption self-test failed. Nothing was transferred.');
-    await marvelousLegacyVerifyPrivatePair(test);
-    r.preparedVault=prepared;r.preparedUid=requesterUid;
-    r.originalPublic=originalPublic;r.originalUid=backup.auth_user_id;
-    r.id=challenge.id;r.nonce=challenge.nonce;r.code=challenge.code;
-    r.proof=true;r.approved=false;r.status='Original signing key confirmed by the server. Send the private PawID whisper next.';
-    r.error='';
-    // Immediately discard the decrypted key, file, and passphrase when proof ends.
+    // Use an existing server-approved request before spending another
+    // attempt or sending another PawID whisper. Do not store request secrets.
+    const pending=await marvelousLegacyCall('resume',{member:bc,old_uid:backup.auth_user_id});
+    const challenge=pending.found?pending:await marvelousLegacyCall('start',{member:bc,old_uid:backup.auth_user_id});
+    const path='marvelous-e2ee-v1-'+bc+'-'+requesterUid;
+    const existing=localStorage.getItem(path);
+    let stagedVault=null;
+    if(existing){
+      await marvelousLegacyValidateExistingVault(existing,password,requesterUid,originalPublic);
+      stagedVault=JSON.parse(existing);
+    }
+    await marvelousLegacyAttachChallenge(challenge,opened,password,backup.auth_user_id,requesterUid,bc,client,originalPublic,stagedVault);
   }
   function marvelousLegacyWhisper(){
     const r=marvelousLegacyRecovery,target=Number(MARVELOUS_VERIFIER_BC_MEMBER);
@@ -7688,6 +7776,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     r.busy=true;r.error='';marvelousUpdate();
     try{
       if(act==='marv-legacy-start')await marvelousLegacyStart(file,password);
+      else if(act==='marv-legacy-resume')await marvelousLegacyResume(file,password);
       else if(act==='marv-legacy-whisper')marvelousLegacyWhisper();
       else if(act==='marv-legacy-check')await marvelousLegacyCheck();
       else if(act==='marv-legacy-finish')await marvelousLegacyFinish(password);
@@ -7697,7 +7786,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   window.PawLoungeLegacyRecoveryDiag=()=>({version:VERSION,open:marvelousLegacyRecovery.open,
     requested:!!marvelousLegacyRecovery.id,keyProofAccepted:marvelousLegacyRecovery.proof,
     pawIdApproved:marvelousLegacyRecovery.approved,readyToFinish:!!marvelousLegacyRecovery.approved,
-    note:'No passphrase, private key, recovery token or mailbox login credentials are exposed. Domain-free transfer uses the existing anonymous login.'});
+    note:'An unexpired server-approved request can be resumed using the original authenticated temporary login. No passphrase, private key, recovery code or login credential is persisted for resumption.'});
   function marvelousVerifyStep(){
     // The Marvelous Hub can read a session before Paw Notes is explicitly
     // opened. Do not keep showing the loading step after a finished read.
