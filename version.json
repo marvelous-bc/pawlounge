@@ -1,8 +1,8 @@
 {
   "name": "PawLounge",
-  "version": "1.2.19",
+  "version": "1.2.20",
   "file": "KittyChat.user.js",
   "url": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
   "scriptUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Resumable PawID mailbox recovery: authenticated restart of unexpired original-key proofs and approvals; no extra verification or new temporary account required; safe staged-vault reuse."
+  "notes": "Expired recovery renewal: same anonymous account + request ID, fresh original-key and PawID proof, maximum 3 reissues, 2-hour window after PawID approval; unexpired requests still resume without new verification."
 }

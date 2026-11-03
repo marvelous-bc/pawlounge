@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.19
+// @version      1.2.20
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.19';
+  const VERSION = '1.2.20';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -7484,7 +7484,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   // A server-owned Edge Function atomically transfers ownership after verification.
   const MARVELOUS_LEGACY_RECOVERY_FN=MARVELOUS_URL+'/functions/v1/pawlounge-legacy-recovery';
   const marvelousLegacyRecovery={open:false,busy:false,id:'',nonce:'',code:'',approved:false,proof:false,
-    status:'',error:'',lastCheck:0,preparedVault:null,preparedUid:'',originalPublic:null,originalUid:''};
+    status:'',error:'',lastCheck:0,preparedVault:null,preparedUid:'',originalPublic:null,originalUid:'',expired:false,expiredOldUid:''};
   const marvelousLegacyUid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
   function marvelousLegacyMarkup(){
     if(!marvelousLegacyRecovery.open)return '<button class="secondary" data-action="marv-legacy-toggle">🗝 Recover using older encrypted-key backup</button>';
@@ -7496,7 +7496,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       <label>Original Paw Notes passphrase<input class="field" id="kc-marv-legacy-pass" type="password" autocomplete="off"></label>
       <button class="primary" data-action="marv-legacy-start" ${r.busy?'disabled':''}>1. Prove original key ownership / start</button>
       <button class="secondary" data-action="marv-legacy-resume" ${r.busy?'disabled':''}>↻ Resume pending recovery (no new PawID verification)</button>
-      <p class="muted">Resuming uses your SAME temporary Supabase login and an unexpired request. If the original keys are already staged in this browser, only your original Paw Notes passphrase is needed. Otherwise select your original encrypted-key backup above. No login backup or new account is required.</p>
+      ${r.expired?`<button class="primary" data-action="marv-legacy-renew" ${r.busy?'disabled':''}>↻ Renew expired request (fresh key proof + PawID)</button>`:''}
+      <p class="muted">Resume works without repeating valid proofs. If a request has EXPIRED, renew its original request ID using the SAME temporary login; renewal issues a NEW challenge and requires a NEW PawID whisper. It does not consume one of the five daily NEW-request slots. If the original keys are staged here, only the original passphrase is needed; otherwise select the original encrypted-key backup. Never clear browser storage.</p>
       ${r.id?`<p>Recovery request: <code>${escapeText(r.id)}</code></p>
       <p>Private verification code: <code>${escapeText(r.code)}</code></p>
       <div class="marv-verify-actions"><button class="secondary" data-action="marv-legacy-whisper">2. Whisper PawID</button><button class="secondary" data-action="marv-legacy-check">3. Check approval</button></div>
@@ -7616,12 +7617,13 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     const r=marvelousLegacyRecovery;
     Object.assign(r,{id:challenge.id,nonce:challenge.nonce,code:challenge.code,
       preparedVault:readyVault,preparedUid:destinationUid,originalPublic,originalUid:oldUid,
-      proof:true,approved:status==='approved',error:'',lastCheck:Date.now(),
+      proof:true,approved:status==='approved',error:'',lastCheck:Date.now(),expired:false,expiredOldUid:'',
       status:status==='approved'?'✓ Existing approved request resumed. Both proofs remain valid; you may finish the transfer.':
+        challenge.renewed?'✓ Expired request renewed with fresh key proof. Whisper PawID using the NEW code.':
         challenge.resumed?'✓ Existing key proof resumed. Whisper PawID only if it has not already approved.':
         'Original signing key confirmed by the server. Send the private PawID whisper next.'});
   }
-  async function marvelousLegacyResume(file,password){
+  async function marvelousLegacyResume(file,password,renewExpired=false){
     const bc=me();
     if(!bc)throw Error('Log into the correct BC character first.');
     if(!password)throw Error('Enter the ORIGINAL Paw Notes passphrase to resume safely.');
@@ -7633,9 +7635,23 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       throw Error('The original temporary recovery login is missing. Do NOT create a new mailbox or clear this browser. Restore that login first.');
     const pending=await marvelousLegacyCall('resume',{member:bc});
     if(!pending?.found){
-      marvelousLegacyRecovery.status='No unexpired recovery exists for this temporary login. If your request expired, start a new one using the same login.';
-      marvelousLegacyRecovery.error='';
-      return;
+      if(pending?.expired && marvelousLegacyUid(pending.old_uid) &&
+         pending.requester_uid===destinationUid && Number(pending.bc_member)===bc){
+        marvelousLegacyRecovery.expired=true;
+        marvelousLegacyRecovery.expiredOldUid=pending.old_uid;
+        if(!pending.can_renew){
+          marvelousLegacyRecovery.status='This recovery has used its limited renewals. Your original mailbox is safe; wait for the rolling new-request limit to reset.';
+          return;
+        }
+        if(!renewExpired){
+          marvelousLegacyRecovery.status='Your previous recovery expired. Click Renew expired request to prove the original key again and receive a NEW PawID code. No new temporary login or request row is needed.';
+          return;
+        }
+      }else{
+        marvelousLegacyRecovery.expired=false;
+        marvelousLegacyRecovery.status='No recovery request belongs to the CURRENT temporary login. Verify this browser still uses the same Supabase account; do not create or reset an account.';
+        return;
+      }
     }
     if(!marvelousLegacyUid(pending.old_uid)||pending.old_uid===destinationUid||
        pending.requester_uid!==destinationUid||Number(pending.bc_member)!==bc)
@@ -7665,7 +7681,10 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       await marvelousLegacyValidateExistingVault(existing,password,destinationUid,originalPublic);
       stagedVault=JSON.parse(existing);
     }
-    await marvelousLegacyAttachChallenge(pending,opened,password,originalUid,destinationUid,bc,client,originalPublic,stagedVault);
+    const challenge=renewExpired && !pending.found
+      ? await marvelousLegacyCall('renew',{member:bc,old_uid:originalUid})
+      : pending;
+    await marvelousLegacyAttachChallenge(challenge,opened,password,originalUid,destinationUid,bc,client,originalPublic,stagedVault);
   }
   async function marvelousLegacyStart(file,password){
     const r=marvelousLegacyRecovery,bc=me();
@@ -7777,6 +7796,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     try{
       if(act==='marv-legacy-start')await marvelousLegacyStart(file,password);
       else if(act==='marv-legacy-resume')await marvelousLegacyResume(file,password);
+      else if(act==='marv-legacy-renew')await marvelousLegacyResume(file,password,true);
       else if(act==='marv-legacy-whisper')marvelousLegacyWhisper();
       else if(act==='marv-legacy-check')await marvelousLegacyCheck();
       else if(act==='marv-legacy-finish')await marvelousLegacyFinish(password);
@@ -7786,7 +7806,8 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   window.PawLoungeLegacyRecoveryDiag=()=>({version:VERSION,open:marvelousLegacyRecovery.open,
     requested:!!marvelousLegacyRecovery.id,keyProofAccepted:marvelousLegacyRecovery.proof,
     pawIdApproved:marvelousLegacyRecovery.approved,readyToFinish:!!marvelousLegacyRecovery.approved,
-    note:'An unexpired server-approved request can be resumed using the original authenticated temporary login. No passphrase, private key, recovery code or login credential is persisted for resumption.'});
+    expiredRequest:marvelousLegacyRecovery.expired,
+    note:'Unexpired requests resume without repeated proof. Expired requests may be reissued a bounded number of times for the SAME temporary account; reissue clears both proofs. No key or login credential is persisted for resumption.'});
   function marvelousVerifyStep(){
     // The Marvelous Hub can read a session before Paw Notes is explicitly
     // opened. Do not keep showing the loading step after a finished read.
