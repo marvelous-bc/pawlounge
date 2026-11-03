@@ -1,6 +1,8 @@
 {
-  "version": "1.2.17",
-  "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "PawLounge loaded toast with floating hearts after successful launcher readiness; shared notification stack with Essentials; automatic dismissal.",
-  "released": "2026-11-02"
+  "name": "PawLounge",
+  "version": "1.2.18",
+  "file": "KittyChat.user.js",
+  "url": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
+  "scriptUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
+  "notes": "Legacy PawID recovery: safely reuse a matching original-key vault after failed transfer; verify signing and decryption private keys; never overwrite a different vault."
 }
