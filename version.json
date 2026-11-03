@@ -1,6 +1,6 @@
 {
-  "version": "1.2.16",
+  "version": "1.2.17",
   "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "PawID-aware invitation verification; encrypted opt-in addon preference restore excluding BC friends; expanded device-label management and other-session sign-out; recovery and cleanup safety guidance.",
+  "notes": "PawLounge loaded toast with floating hearts after successful launcher readiness; shared notification stack with Essentials; automatic dismissal.",
   "released": "2026-11-02"
 }

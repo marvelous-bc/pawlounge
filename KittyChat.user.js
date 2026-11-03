@@ -3,7 +3,7 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.16
+// @version      1.2.17
 // @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -17,7 +17,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.16';
+  const VERSION = '1.2.17';
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -11486,6 +11486,111 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   window.MarvelousBridgeDiag=()=>({version:VERSION,connected:marvelousBridge.attached,plushiesVersion:marvelousBridge.api?.version||null,lowCpu:marvelousBridge.lowCpu,safeMode:marvelousBridge.safeMode,localNotifications:marvelousBridge.events.length,focusEnabled:marvelousFocusRuntime.enabled});
   window.PawLounge = window.KittyChat;
   window.PawLoungeBootDiag = () => window.KittyChatBootDiag();
+  // Lightweight shared-ready notification. Injected only after the addon is interactive.
+  // No observers, canvas redraws, images, external requests, or repeating timers.
+  function showBcAddonReadyToast(key, label) {
+    try {
+      if (!document.body || !key || !label) return;
+      const onceKey = '__bcAddonReadyToastsShown';
+      let shown = window[onceKey];
+      if (!(shown instanceof Set)) shown = window[onceKey] = new Set();
+      if (shown.has(key)) return;
+      const styleId = 'bc-addon-ready-toast-styles';
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = `
+          #bc-addon-ready-toast-stack {
+            position:fixed; bottom:calc(18px + env(safe-area-inset-bottom, 0px));
+            right:calc(18px + env(safe-area-inset-right, 0px));
+            width:min(294px,calc(100vw - 36px)); display:flex; flex-direction:column;
+            align-items:stretch; gap:10px; pointer-events:none; z-index:2147483646;
+          }
+          #bc-addon-ready-toast-stack .bc-addon-ready-toast {
+            position:relative; isolation:isolate; box-sizing:border-box;
+            border:1px solid rgba(255,155,214,.55); border-radius:15px;
+            padding:13px 17px 14px 43px; min-height:54px;
+            background:linear-gradient(110deg,rgba(49,24,60,.97),rgba(84,33,76,.97));
+            box-shadow:0 7px 22px rgba(11,5,23,.32), inset 0 1px rgba(255,255,255,.11);
+            color:#ffe9f7; font:600 14px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;
+            letter-spacing:.08px; white-space:normal; overflow:visible;
+            animation:bc-addon-ready-toast-life 4400ms ease-in-out both;
+          }
+          #bc-addon-ready-toast-stack .bc-addon-ready-toast-icon {
+            position:absolute; left:13px; top:50%; transform:translateY(-50%);
+            color:#ff94c5; font-size:20px; line-height:1;
+          }
+          #bc-addon-ready-toast-stack .bc-addon-ready-toast-text { position:relative; z-index:2; }
+          #bc-addon-ready-toast-stack .bc-addon-ready-heart {
+            position:absolute; bottom:19px; left:var(--heart-left); z-index:1;
+            color:var(--heart-color); font-size:var(--heart-size); font-weight:400;
+            line-height:1; opacity:0; pointer-events:none;
+            text-shadow:0 1px 4px rgba(255,92,173,.20);
+            animation:bc-addon-ready-heart-float var(--heart-duration) ease-out var(--heart-delay) both;
+          }
+          @keyframes bc-addon-ready-toast-life {
+            0% { opacity:0; transform:translateY(12px) scale(.97); }
+            14%,75% { opacity:1; transform:translateY(0) scale(1); }
+            100% { opacity:0; transform:translateY(-16px) scale(.99); }
+          }
+          @keyframes bc-addon-ready-heart-float {
+            0% { opacity:0; transform:translate(0,7px) scale(.65) rotate(-7deg); }
+            20% { opacity:.90; }
+            85% { opacity:.45; }
+            100% { opacity:0; transform:translate(var(--heart-drift),-90px) scale(1.25) rotate(13deg); }
+          }
+          @media (prefers-reduced-motion:reduce) {
+            #bc-addon-ready-toast-stack .bc-addon-ready-toast,
+            #bc-addon-ready-toast-stack .bc-addon-ready-heart { animation:none!important; }
+            #bc-addon-ready-toast-stack .bc-addon-ready-heart { display:none; }
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+      let stack = document.getElementById('bc-addon-ready-toast-stack');
+      if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'bc-addon-ready-toast-stack';
+        stack.setAttribute('aria-live', 'polite');
+        stack.setAttribute('aria-atomic', 'false');
+        document.body.appendChild(stack);
+      }
+      const toast = document.createElement('div');
+      toast.className = 'bc-addon-ready-toast';
+      toast.setAttribute('role', 'status');
+      const icon = document.createElement('span');
+      icon.className = 'bc-addon-ready-toast-icon';
+      icon.textContent = '♥';
+      icon.setAttribute('aria-hidden', 'true');
+      const text = document.createElement('span');
+      text.className = 'bc-addon-ready-toast-text';
+      text.textContent = label;
+      toast.append(icon, text);
+      const offsets = [7, 19, 32, 46, 60, 75, 87];
+      for (let i = 0; i < offsets.length; i++) {
+        const heart = document.createElement('span');
+        heart.className = 'bc-addon-ready-heart';
+        heart.textContent = i % 3 ? '♡' : '♥';
+        heart.setAttribute('aria-hidden', 'true');
+        heart.style.setProperty('--heart-left', offsets[i] + '%');
+        heart.style.setProperty('--heart-drift', ((i % 2 ? -1 : 1) * (9 + 3 * i)) + 'px');
+        heart.style.setProperty('--heart-delay', (250 + i * 160) + 'ms');
+        heart.style.setProperty('--heart-duration', (2100 + (i % 3) * 300) + 'ms');
+        heart.style.setProperty('--heart-size', (13 + (i % 3) * 3) + 'px');
+        heart.style.setProperty('--heart-color', i % 2 ? '#ffc3e2' : '#ff82bd');
+        toast.appendChild(heart);
+      }
+      stack.appendChild(toast);
+      shown.add(key);
+      window.setTimeout(() => {
+        try {
+          toast.remove();
+          if (!stack.childElementCount) stack.remove();
+        } catch (_) {}
+      }, 4600);
+    } catch (_) { /* A cosmetic notice must never affect addon startup. */ }
+  }
+
   // A failure during BC startup or DOM construction must never abort all future retries.
   function safeTick() {
     try {
@@ -11494,6 +11599,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       marvelousBridgeTick();pawPresenceTick();expireFriendStatusIfNeeded();marvelousFocusTick();marvelousBackgroundTick();
       BOOT.attempts = state.bootAttempts;
       markBoot(ui.fab?.isConnected ? (me() ? 'ready' : 'waiting-for-login') : 'waiting-for-dom');
+      if (ui.fab?.isConnected && me()) showBcAddonReadyToast('pawlounge', 'PawLounge loaded');
       state.bootError = '';
       const errorTag = document.getElementById('kittychat-startup-error');
       if (errorTag) errorTag.remove();
