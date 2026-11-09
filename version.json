@@ -1,8 +1,5 @@
 {
-  "name": "PawLounge",
-  "version": "1.2.20",
-  "file": "KittyChat.user.js",
-  "url": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "scriptUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
-  "notes": "Expired recovery renewal: same anonymous account + request ID, fresh original-key and PawID proof, maximum 3 reissues, 2-hour window after PawID approval; unexpired requests still resume without new verification."
+  "version": "1.2.22",
+  "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/PawLounge.user.js",
+  "notes": "v1.2.22: Cute scrapbook-style aesthetic moodboards, 72 categorized stickers, rotate/duplicate/resize tools, invitation-based live collaboration, and a room-specific board editable by BC room admins. Room board sync is peer-to-peer while compatible clients are connected; local image uploads stay private. Compatible with Essentials 3.9.55."
 }
