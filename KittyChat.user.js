@@ -3,8 +3,8 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.20
-// @description  A cozy social companion for Bondage Club, with private notes, friend circles, memories, and customizable chat.
+// @version      1.2.22
+// @description  PawLounge 1.2.22: cute collaborative moodboards and room-admin shared boards.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
 // @match        https://*.bondageprojects.com/R*
@@ -17,7 +17,743 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.20';
+  const VERSION = '1.2.22';
+  // Aesthetic Moodboards v2: shared editor in Essentials and PawLounge.
+  // Personal boards are local; invited collaboration and room boards use bounded
+  // native BC Hidden messages, with sender/admin checks and no uploaded image bytes.
+  // Two addons on one page reuse the same global instance rather than duplicate UI.
+  function installPawAestheticMoodboards() {
+    if (window.PawAestheticMoodboards?.protocol === 'paw-aesthetic-v2') return window.PawAestheticMoodboards;
+    const DB_NAME = 'paw-aesthetic-boards-v1', STORE = 'accounts', ROOMS='rooms';
+    const MAX_BOARDS = 12, MAX_ITEMS = 48;
+    const uid = () => Number(window.Player?.MemberNumber || 0);
+    const id = () => 'mb' + Date.now().toString(36) + Math.random().toString(36).slice(2, 11);
+    const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Number(n) || 0));
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const color = (s, fallback='#D5B6C8') => /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
+    const safeImg = s => typeof s === 'string' && s.length <= 750000 &&
+      (/^https:\/\/[^\s<>"']{1,1500}$/i.test(s) || /^data:image\/(?:jpeg|png|webp);base64,[a-zA-Z0-9+/=]+$/.test(s));
+    const THEMES = {charcoal:'#202025', rose:'#E9B7C9', lavender:'#C6BCDF', cream:'#F2E3D5', forest:'#55695E', blush:'#F6D8DE', starlight:'#403454', cloud:'#E0EBF3'};
+    const STICKERS={
+      Kittens:['🐱','😺','😻','😽','🐈','🐈‍⬛','🐾','🧶','🎀','🐟','🍼','🧸'],
+      Hearts:['💗','💖','💘','💕','💝','❤️','🩷','💜','🤍','💟','♡','♥'],
+      Garden:['🌸','🌷','🌹','🌺','🌻','🪷','🌿','🍄','🦋','🐝','🍓','🍒'],
+      Dreamy:['🌙','⭐','🌟','✨','☁️','🌈','🪐','🔮','🕯️','🫧','💫','❄️'],
+      Cozy:['🧁','🍰','🍪','☕','🍵','🧋','🧸','🪄','🎁','💌','📖','🎨'],
+      Gothic:['🖤','🦇','🕸️','🕷️','🥀','💀','🪦','🗝️','🔗','⛓️','🌑','⚰️']
+    };
+    const defaultBoard = () => ({id:id(), name:'My first moodboard', theme:'charcoal', created:Date.now(), updated:Date.now(), items:[]});
+    const state = {account:0, boards:[], current:'', selected:'', root:null, style:null, dbPromise:null,
+      saveTimer:null, queue:Promise.resolve(), roomQueue:Promise.resolve(), working:false, error:'', drag:null, opening:false, source:'',
+      mode:'personal',roomBoard:null,roomKey:'',roomCache:new Map(),roomSaveTimer:null,roomSyncTimer:null,lastRoomRequest:0,
+      stickerPicker:false,stickerGroup:'Kittens',pendingInvite:null,collab:null,inviteToast:null,
+      wireHook:'',wireMod:null,wireChunks:new Map(),wireRecent:new Map(),wireQueue:Promise.resolve(),
+      wireSent:0,wireReceived:0,wireRejected:0,wireErrors:0,lastWireError:'',lastRoomReply:0};
+    function db() {
+      if (!state.dbPromise) state.dbPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) return reject(Error('IndexedDB is unavailable in this browser'));
+        const req = indexedDB.open(DB_NAME, 2);
+        req.onupgradeneeded = () => {const x=req.result; if(!x.objectStoreNames.contains(STORE))x.createObjectStore(STORE,{keyPath:'account'});
+          if(!x.objectStoreNames.contains(ROOMS))x.createObjectStore(ROOMS,{keyPath:'key'});};
+        req.onsuccess = () => {const x=req.result;x.onversionchange=()=>x.close();resolve(x);};
+        req.onerror = () => reject(req.error || Error('Moodboard storage unavailable'));
+        req.onblocked = () => reject(Error('Close other tabs using an outdated moodboard database'));
+      }).catch(e=>{state.dbPromise=null;throw e;});
+      return state.dbPromise;
+    }
+    async function read(account) {
+      const database=await db();
+      return new Promise((resolve,reject)=>{
+        const tx=database.transaction(STORE,'readonly');const r=tx.objectStore(STORE).get(account);
+        r.onsuccess=()=>resolve(r.result?.boards || []);r.onerror=()=>reject(r.error);
+      });
+    }
+    function save() {
+      if (!state.account || !state.boards.length) return state.queue;
+      const account=state.account, boards=JSON.parse(JSON.stringify(state.boards));
+      state.queue=state.queue.catch(()=>{}).then(async()=>{
+        const database=await db();
+        await new Promise((resolve,reject)=>{
+          const tx=database.transaction(STORE,'readwrite');
+          tx.objectStore(STORE).put({account, boards, updated:Date.now()});
+          tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error || Error('Moodboard save failed'));
+          tx.onabort=()=>reject(tx.error || Error('Moodboard write aborted'));
+        });
+        state.error='';
+      }).catch(e=>{state.error='Could not save board: '+String(e?.message||e);
+        console.warn('[Moodboards]',state.error); showStatus(state.error,true);});
+      return state.queue;
+    }
+    function scheduleSave() {
+      if (state.saveTimer) clearTimeout(state.saveTimer);
+      state.saveTimer=setTimeout(()=>{state.saveTimer=null;void save();},200);
+    }
+    function current() {
+      if(state.mode==='room')return state.roomBoard;
+      if(state.mode==='collab'&&state.collab?.role==='guest')return state.collab.board;
+      return state.boards.find(b=>b.id===state.current) || state.boards[0];
+    }
+    function roomKey(){
+      if(window.CurrentScreen!=='ChatRoom'||!window.ChatRoomData?.Name)return '';
+      const d=window.ChatRoomData, space=String(d.Space||'MainHall').slice(0,80), name=String(d.Name||'').slice(0,100);
+      return `${space}::${name}::${String(d.ID||d.RoomID||'').slice(0,40)}`;
+    }
+    function roomAdmins(){return Array.isArray(window.ChatRoomData?.Admin)?window.ChatRoomData.Admin.map(Number).filter(Number.isSafeInteger):[];}
+    function isAdmin(member=uid()){
+      if(!roomKey())return false;
+      if(member===uid()&&typeof window.ChatRoomPlayerIsAdmin==='function'){
+        try{if(window.ChatRoomPlayerIsAdmin())return true;}catch{}
+      }
+      return roomAdmins().includes(Number(member));
+    }
+    function canEdit(){
+      if(state.mode==='room')return !!state.roomKey&&state.roomKey===roomKey()&&isAdmin();
+      if(state.mode==='collab')return !!state.collab?.board&&(state.collab.role==='owner'||(state.collab.role==='guest'&&state.collab.ready));
+      return true;
+    }
+    function touch(){
+      if(!canEdit())return false;
+      const b=current();if(!b)return false;
+      b.updated=Date.now();
+      if(state.mode==='room'){
+        saveRoom(); scheduleWireState('room');
+      } else if(state.mode==='collab'){
+        if(state.collab?.role==='owner') {scheduleSave();scheduleWireState('collab');}
+        else scheduleWireState('edit');
+      } else {
+        scheduleSave();
+        // If the personal canvas is reopened while hosting a live session,
+        // keep invited editors synchronized with edits to that same board.
+        if(state.collab?.role==='owner' && state.collab.room===roomKey() &&
+           state.collab.boardId===b.id) scheduleWireState('collab');
+      }
+      return true;
+    }
+    async function loadRoom(key){
+      if(state.roomCache.has(key))return state.roomCache.get(key);
+      const database=await db();
+      const row=await new Promise((resolve,reject)=>{const r=database.transaction(ROOMS,'readonly').objectStore(ROOMS).get(`${uid()}|${key}`);
+        r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+      const board=row?.board ? normalizeWireBoard(row.board,true) : null;
+      if(board)state.roomCache.set(key,board);
+      return board;
+    }
+    function saveRoom(){
+      if(!state.roomBoard||!state.roomKey||!state.account)return;
+      const key=`${state.account}|${state.roomKey}`, board=JSON.parse(JSON.stringify(state.roomBoard));
+      state.roomCache.set(state.roomKey,board);
+      state.roomQueue=state.roomQueue.catch(()=>{}).then(async()=>{
+        const database=await db();
+        await new Promise((resolve,reject)=>{const tx=database.transaction(ROOMS,'readwrite');
+          tx.objectStore(ROOMS).put({key,board,updated:Date.now()});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
+      }).catch(e=>{state.error='Room board cache not saved: '+String(e?.message||e);showStatus(state.error,true);});
+    }
+    // Never transmit uploaded base64 images or credentials. A remote board uses HTTPS references only.
+    function shareableBoard(b){
+      if(!b)return null;
+      return {...b,items:b.items.map(i=>i.type==='photo'&&!/^https:\/\//i.test(i.src||'')
+        ? {id:i.id,type:'note',x:i.x,y:i.y,w:i.w,h:i.h,text:'📷 Private picture (use HTTPS link to share)',angle:0}
+        : i).filter(i=>i.type!=='photo'||/^https:\/\//i.test(i.src||''))};
+    }
+    function normalizeWireBoard(b,allowData=false){
+      if(!b||typeof b!=='object'||!Array.isArray(b.items))return null;
+      const items=[];
+      for(const raw of b.items.slice(0,MAX_ITEMS)){
+        const i=checkImportItem(raw);if(!i)continue;
+        if(raw.type==='photo'&&!allowData&&!/^https:\/\//i.test(raw.src||''))continue;
+        i.id=/^[a-zA-Z0-9_-]{6,60}$/.test(String(raw.id||''))?raw.id:id();
+        i.angle=clamp(raw.angle,-20,20);items.push(i);
+      }
+      return {id:String(b.id||id()).slice(0,70),name:String(b.name||'Room inspiration').slice(0,65),
+        theme:Object.hasOwn(THEMES,b.theme)?b.theme:'charcoal',created:Number(b.created)||Date.now(),
+        updated:Number(b.updated)||Date.now(),items};
+    }
+    const WIRE_PREFIX='PawMB2:',WIRE_SLICE=860,WIRE_MAX_BYTES=28000,WIRE_MAX_PARTS=48;
+    function rosterHas(member){return Number.isSafeInteger(member)&&Array.isArray(window.ChatRoomCharacter)&&
+      window.ChatRoomCharacter.some(c=>Number(c?.MemberNumber)===member);}
+    function wireReady(){return !!state.wireHook&&!!roomKey()&&window.ServerIsConnected!==false&&typeof window.ServerSend==='function';}
+    function encodeWire(data){const bytes=new TextEncoder().encode(JSON.stringify(data));
+      if(bytes.length>WIRE_MAX_BYTES)throw Error('Board is too large to share in-room; remove a few items.');
+      let out='';for(let x=0;x<bytes.length;x+=8192)out+=String.fromCharCode(...bytes.subarray(x,x+8192));
+      return btoa(out);}
+    function decodeWire(raw){const binary=atob(raw),bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
+      return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}
+    function sendWire(payload,target=0){
+      if(!wireReady())return false;
+      let raw;try{raw=encodeWire({...payload,v:2,r:roomKey()});}catch(e){showStatus(String(e?.message||e),true);return false;}
+      const count=Math.ceil(raw.length/WIRE_SLICE);
+      if(!count||count>WIRE_MAX_PARTS){showStatus('Too many pieces to synchronize.',true);return false;}
+      const packet=id();const to=Number(target)||0,room=roomKey(),account=uid();
+      state.wireQueue=state.wireQueue.catch(()=>{}).then(async()=>{
+        for(let i=0;i<count;i++){
+          if(roomKey()!==room||uid()!==account||window.ServerIsConnected===false)break;
+          const content=`${WIRE_PREFIX}${packet}|${i}|${count}|${raw.slice(i*WIRE_SLICE,(i+1)*WIRE_SLICE)}`;
+          window.ServerSend('ChatRoomChat',{Type:'Hidden',Content:content,...(to?{Target:to}:{})});
+          state.wireSent++;if(i<count-1)await new Promise(resolve=>setTimeout(resolve,105));
+        }
+      }).catch(e=>{state.wireErrors++;state.lastWireError=String(e?.message||e);showStatus('Room sharing could not send: '+state.lastWireError,true);});
+      return true;
+    }
+    function scheduleWireState(kind){
+      if(state.roomSyncTimer)clearTimeout(state.roomSyncTimer);
+      state.roomSyncTimer=setTimeout(()=>{
+        state.roomSyncTimer=null;const b=current();if(!b)return;
+        if(kind==='room'){
+          if(state.roomKey===roomKey()&&isAdmin())sendWire({t:'room-state',b:shareableBoard(b)});
+        }else if(state.collab&&state.collab.room===roomKey()){
+          const c=state.collab, copy=shareableBoard(b);
+          if(kind==='edit'&&c.role==='guest')sendWire({t:'collab-edit',session:c.session,b:copy},c.owner);
+          if(kind==='collab'&&c.role==='owner')for(const member of c.allowed)sendWire({t:'collab-state',session:c.session,b:copy},member);
+        }
+      },650);
+    }
+    function roomRequest(){
+      const now=Date.now();if(!roomKey()||now-state.lastRoomRequest<5000||!wireReady())return;
+      state.lastRoomRequest=now;sendWire({t:'room-req'});
+    }
+    async function openRoom(){
+      const key=roomKey();if(!key){showStatus('Enter a BC chatroom to use its shared board.',true);return false;}
+      if(state.roomSyncTimer){clearTimeout(state.roomSyncTimer);state.roomSyncTimer=null;}
+      state.mode='room';state.roomKey=key;
+      const cached=await loadRoom(key);
+      if(roomKey()!==key||state.mode!=='room'||state.roomKey!==key)return false;
+      state.roomBoard=cached||
+        {id:id(),name:'Room inspiration',theme:'blush',created:Date.now(),updated:0,items:[]};
+      state.selected='';render();roomRequest();return true;
+    }
+    function wireReceived(data,senderCharacter=null){
+      if(data?.Type!=='Hidden'||typeof data.Content!=='string'||!data.Content.startsWith(WIRE_PREFIX))return false;
+      const sender=Number(data.Sender??data.MemberNumber??senderCharacter?.MemberNumber),to=Number(data.Target??0);
+      if(!rosterHas(sender)||sender===uid()||(to&&to!==uid())){state.wireRejected++;return true;}
+      const match=/^PawMB2:([a-zA-Z0-9_-]{6,60})\|(\d+)\|(\d+)\|([a-zA-Z0-9+/=]+)$/.exec(data.Content);
+      if(!match){state.wireRejected++;return true;}
+      const count=Number(match[3]),index=Number(match[2]);
+      if(count<1||count>WIRE_MAX_PARTS||index<0||index>=count||match[4].length>WIRE_SLICE){state.wireRejected++;return true;}
+      const key=sender+':'+match[1],now=Date.now();
+      for(const [k,v] of state.wireChunks)if(now-v.at>25000)state.wireChunks.delete(k);
+      for(const [k,v] of state.wireRecent)if(now-v>25000)state.wireRecent.delete(k);
+      if(state.wireRecent.has(key))return true;
+      let partial=state.wireChunks.get(key);
+      if(!partial){if(state.wireChunks.size>24){state.wireRejected++;return true;}
+        partial={sender,count,at:now,parts:Array(count).fill(null)};state.wireChunks.set(key,partial);}
+      if(partial.count!==count)return true;
+      partial.parts[index]=match[4];
+      if(partial.parts.some(part=>part===null))return true;
+      state.wireChunks.delete(key);state.wireRecent.set(key,now);
+      try{const p=decodeWire(partial.parts.join(''));
+        if(p?.v!==2||p.r!==roomKey())return true;
+        state.wireReceived++;handleWire(p,sender);
+      }catch(e){state.wireRejected++;state.lastWireError=String(e?.message||e);}
+      return true;
+    }
+    function handleWire(p,sender){
+      if(p.t==='room-req'){
+        if(!isAdmin()||Date.now()-state.lastRoomReply<2200)return;
+        state.lastRoomReply=Date.now();
+        if(state.roomKey===roomKey()&&state.roomBoard)sendWire({t:'room-state',b:shareableBoard(state.roomBoard)},sender);
+        else void loadRoom(roomKey()).then(b=>{if(roomKey()===p.r&&isAdmin()&&b)sendWire({t:'room-state',b:shareableBoard(b)},sender);});
+        return;
+      }
+      if(p.t==='room-state'){
+        // This is the boundary: only BC's actual room admins can publish a room board.
+        if(!isAdmin(sender)) {state.wireRejected++;return;}
+        const b=normalizeWireBoard(p.b);if(!b)return;
+        const key=roomKey(),cached=state.roomCache.get(key);
+        if(cached&&b.updated<cached.updated)return;
+        state.roomCache.set(key,b);
+        if(state.mode==='room'&&state.roomKey===key){state.roomBoard=b;state.selected='';render();}
+        const saveKey=`${uid()}|${key}`;
+        state.roomQueue=state.roomQueue.catch(()=>{}).then(async()=>{
+          const database=await db();await new Promise((resolve,reject)=>{
+            const tx=database.transaction(ROOMS,'readwrite');tx.objectStore(ROOMS).put({key:saveKey,board:b,updated:Date.now()});
+            tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});}).catch(()=>{});
+        return;
+      }
+      if(p.t==='invite'){
+        if(!/^[a-zA-Z0-9_-]{6,60}$/.test(p.session)||!rosterHas(sender))return;
+        state.pendingInvite={owner:sender,session:p.session,boardId:String(p.boardId||'').slice(0,70),
+          boardName:String(p.name||'Aesthetic board').slice(0,65),room:roomKey()};
+        if(state.root)render();else showInviteToast();return;
+      }
+      if(p.t==='accept'||p.t==='decline'){
+        const c=state.collab;if(c?.role!=='owner'||c.session!==p.session||c.room!==roomKey()||!c.invited.has(sender))return;
+        if(p.t==='decline'){c.invited.delete(sender);if(state.root)render();return;}
+        c.allowed.add(sender);c.invited.delete(sender);
+        sendWire({t:'collab-state',session:c.session,b:shareableBoard(current())},sender);
+        if(state.root)render();return;
+      }
+      if(p.t==='collab-state'){
+        const c=state.collab;if(!c||c.role!=='guest'||sender!==c.owner||c.session!==p.session||c.room!==roomKey())return;
+        const b=normalizeWireBoard(p.b);if(!b)return;c.board=b;c.ready=true;if(state.mode==='collab'){state.selected='';render();}return;
+      }
+      if(p.t==='collab-edit'){
+        const c=state.collab;if(!c||c.role!=='owner'||c.session!==p.session||c.room!==roomKey()||!c.allowed.has(sender)){
+          state.wireRejected++;return;
+        }
+        const b=normalizeWireBoard(p.b);if(!b||b.id!==c.boardId)return;
+        const local=state.boards.find(x=>x.id===c.boardId);if(!local)return;
+        Object.assign(local,{items:b.items,theme:b.theme,name:b.name,updated:Date.now()});scheduleSave();
+        if(state.mode==='collab'&&state.current===c.boardId){state.selected='';render();}
+        for(const member of c.allowed)sendWire({t:'collab-state',session:c.session,b:shareableBoard(local)},member);
+        return;
+      }
+      if(p.t==='leave'){
+        const c=state.collab;if(c?.session!==p.session)return;
+        if(c.role==='owner'){c.allowed.delete(sender);c.invited.delete(sender);}
+        else if(sender===c.owner){state.collab=null;state.mode='personal';}
+        if(state.root)render();
+      }
+    }
+    function showInviteToast(){
+      state.inviteToast?.remove();if(!document.body)return;
+      const toast=document.createElement('button');toast.className='pawmb-invite-toast';
+      toast.textContent=`🎀 Moodboard invitation from #${state.pendingInvite.owner} — open to respond`;
+      toast.addEventListener('click',()=>{toast.remove();void open('invitation');});document.body.append(toast);
+      state.inviteToast=toast;
+    }
+    function initWire(){
+      if(state.wireHook)return true;
+      if(typeof window.ChatRoomRegisterMessageHandler==='function'){
+        try{window.ChatRoomRegisterMessageHandler({Description:'Paw moodboards room sync',Priority:-90,
+          Callback:(data,sender)=>{try{wireReceived(data,sender);}catch{}return false;}});
+          state.wireHook='BC native message handler';return true;}catch(e){state.lastWireError=String(e?.message||e);}
+      }
+      const sdk=window.bcModSdk||window.bcModSDK;
+      if(typeof sdk?.registerMod==='function'&&typeof window.ChatRoomMessage==='function'){
+        try{state.wireMod=sdk.registerMod({name:'PawMoodboardsSync',fullName:'Paw Aesthetic Moodboards Sync',
+            version:'2.0.0',repository:'https://github.com/marvelous-bc/pawlounge'});
+          state.wireMod.hookFunction('ChatRoomMessage',-500,(args,next)=>{try{wireReceived(args[0]);}catch{}return next(args);});
+          state.wireHook='ModSDK ChatRoomMessage';return true;
+        }catch(e){state.lastWireError=String(e?.message||e);}
+      }
+      return false;
+    }
+    for(const delay of [2000,6000,14000,30000])setTimeout(()=>{if(!state.wireHook)initWire();},delay);
+    initWire();
+
+    function showStatus(msg,bad=false) {
+      const el=state.root?.querySelector('.pawmb-status');if(!el)return;
+      el.textContent=msg;el.style.color=bad?'#FFC0B7':'#D3D9DE';
+    }
+    function ensureStyle() {
+      if (document.getElementById('pawmb-v1-styles')) return;
+      const style=document.createElement('style');style.id='pawmb-v1-styles';
+      style.textContent=`
+      #pawmb-root{position:fixed;inset:0;z-index:2147483647;background:rgba(7,7,13,.80);display:grid;place-items:center;padding:12px;box-sizing:border-box;font:14px/1.4 system-ui,Arial,sans-serif;color:#FFFFF0}
+      #pawmb-root *{box-sizing:border-box}#pawmb-root .pawmb-dialog{display:flex;flex-direction:column;gap:9px;width:min(1080px,98vw);max-height:96dvh;overflow:hidden;background:#121212;border:1px solid #8E718A;border-radius:18px;box-shadow:0 16px 55px #000b;padding:13px}
+      #pawmb-root .pawmb-header,#pawmb-root .pawmb-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}#pawmb-root .pawmb-header h2{font:700 18px/1.2 system-ui;margin:0;color:#FFFFF0}#pawmb-root .pawmb-header p{margin:0;color:#D6C4D2;font-size:12px}#pawmb-root .pawmb-grow{flex:1}
+      #pawmb-root button,#pawmb-root select,#pawmb-root input:not([type=file]){font:inherit;color:#FFFFF0;background:#342936;border:1px solid #92728A;border-radius:9px;min-height:34px;padding:5px 9px}#pawmb-root button{cursor:pointer}#pawmb-root button:hover{background:#49364B}#pawmb-root button:focus-visible,#pawmb-root input:focus-visible{outline:2px solid #CEB0FA;outline-offset:2px}
+      #pawmb-root .pawmb-primary{background:#56347D;border-color:#9572CA}#pawmb-root .pawmb-danger{color:#FFCCC5;border-color:#924F52}#pawmb-root .pawmb-body{display:grid;grid-template-columns:160px minmax(0,1fr);gap:10px;min-height:0;overflow:auto}
+      #pawmb-root .pawmb-side{display:flex;flex-direction:column;gap:6px;min-width:0;overflow:auto}#pawmb-root .pawmb-board-tab{width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere}#pawmb-root .pawmb-board-tab[aria-current=true]{background:#68438B;border-color:#B28FD0}
+      #pawmb-root .pawmb-boardwrap{min-width:0;display:flex;flex-direction:column;gap:6px}#pawmb-root .pawmb-stage{position:relative;isolation:isolate;width:min(100%,820px);aspect-ratio:4/3;overflow:hidden;border:2px solid #A38D9A;border-radius:12px;background:var(--mb-bg,#202025);background-image:radial-gradient(circle at 24% 21%,#ffffff12,transparent 42%),radial-gradient(circle at 82% 76%,#00000024,transparent 38%);box-shadow:inset 0 0 0 6px #00000016;touch-action:pan-y}
+      #pawmb-root .pawmb-item{position:absolute;overflow:visible;touch-action:none;cursor:grab;user-select:none;min-width:22px;min-height:22px;border-radius:5px;box-shadow:0 3px 15px #0004;transform:rotate(var(--angle,0deg))}#pawmb-root .pawmb-item[aria-selected=true]{outline:2px dashed #F6D583;outline-offset:3px;z-index:90!important}#pawmb-root .pawmb-item:active{cursor:grabbing}#pawmb-root .pawmb-item img{width:100%;height:100%;object-fit:cover;display:block;border-radius:5px;pointer-events:none}
+      #pawmb-root .pawmb-note{background:#FFF4C9;color:#312B35;padding:9px;white-space:pre-wrap;overflow:hidden;word-break:break-word;font-size:clamp(10px,1.55vw,18px);font-weight:550}#pawmb-root .pawmb-swatch{border:4px solid #ffffffc4}#pawmb-root .pawmb-swatch span{position:absolute;bottom:3px;left:5px;padding:2px 4px;border-radius:3px;background:#121212c9;color:#fff;font-size:11px}#pawmb-root .pawmb-sticker{display:flex;align-items:center;justify-content:center;font-size:clamp(22px,4vw,70px);background:transparent;box-shadow:none}
+      #pawmb-root .pawmb-resizer{position:absolute;right:-6px;bottom:-6px;width:17px;height:17px;border-radius:4px;background:#FFE4B5;border:2px solid #56347D;cursor:nwse-resize;touch-action:none}#pawmb-root .pawmb-footer{font-size:11px;color:#D3C2D5;display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between}#pawmb-root .pawmb-status{min-height:16px}#pawmb-root .pawmb-sep{height:1px;background:#42333E;margin:1px 0}#pawmb-root .pawmb-hint{font-size:12px;color:#C9BBCB;margin:2px 0}
+      @media(max-width:620px){#pawmb-root{padding:2px}#pawmb-root .pawmb-dialog{width:100vw;max-height:100dvh;padding:8px;border-radius:10px}#pawmb-root .pawmb-body{grid-template-columns:1fr}#pawmb-root .pawmb-side{flex-direction:row;max-height:48px;overflow:auto}#pawmb-root .pawmb-board-tab{min-width:118px;width:auto}#pawmb-root .pawmb-toolbar button{min-height:35px;padding:4px 6px}#pawmb-root .pawmb-header p{display:none}}
+      /* v2 cozy scrapbook: soft paper, washitape, stitched edges, gentle decorative sparkle. */
+      #pawmb-root{background:radial-gradient(ellipse at 50% 8%,#69416988,transparent 72%),rgba(13,9,20,.90)}
+      #pawmb-root .pawmb-dialog{background:linear-gradient(155deg,#2A202F,#18151E 70%);border:2px solid #D9A8C4;border-radius:25px;box-shadow:0 24px 70px #000a,0 0 0 4px #ffffff08;padding:14px}
+      #pawmb-root .pawmb-header{padding:5px 8px 11px;border-bottom:1px dashed #CDA9CA66}
+      #pawmb-root .pawmb-header h2{font-size:21px;color:#FFE9F2;text-shadow:0 1px 2px #5a2e51}
+      #pawmb-root .pawmb-header p{color:#D9C5D7}
+      #pawmb-root button,#pawmb-root select{border-radius:12px;background:#49364D;border-color:#94789E;transition:background .15s,border-color .15s,transform .15s}
+      #pawmb-root button:hover:not(:disabled){background:#694874;border-color:#D8B5E9}
+      #pawmb-root button:disabled{opacity:.46;cursor:not-allowed}
+      #pawmb-root .pawmb-primary{background:#80538F;border-color:#E5B6D5;color:#FFFFF0;font-weight:700}
+      #pawmb-root .pawmb-header .pawmb-close{background:#312236}
+      #pawmb-root .pawmb-board-tab{background:#382C3B;border-left:4px solid #D9ADC8;font-weight:650}
+      #pawmb-root .pawmb-board-tab[aria-current=true]{background:#825D88;border-color:#FFCAE5}
+      #pawmb-root .pawmb-stage{border:8px solid #E7CCDB;border-radius:16px;box-shadow:inset 0 0 0 2px #fff9,0 9px 29px #0005;
+        background-image:radial-gradient(circle at 24% 17%,#ffffff24,transparent 40%),radial-gradient(#ffffff12 1.2px,transparent 1.2px),radial-gradient(circle at 84% 74%,#00000019,transparent 48%);
+        background-size:auto,22px 22px,auto}
+      #pawmb-root .pawmb-stage:after{content:'✦';position:absolute;right:12px;bottom:3px;opacity:.3;font-size:28px;pointer-events:none;color:#FFF5FA}
+      #pawmb-root .pawmb-photo{background:#FFFAF1;border:7px solid #FFFAF1;border-bottom-width:20px;border-radius:5px;box-shadow:1px 4px 13px #0006}
+      #pawmb-root .pawmb-photo:before{content:'';position:absolute;top:-12px;left:39%;width:25%;height:14px;background:#FFC2D8b8;transform:rotate(-7deg);z-index:2;pointer-events:none}
+      #pawmb-root .pawmb-note{background:linear-gradient(140deg,#FFF8D4,#FFECC0);border:1px solid #E7D7AF;border-radius:7px 7px 17px 7px;box-shadow:1px 3px 9px #0004}
+      #pawmb-root .pawmb-note:before{content:'♡';position:absolute;right:6px;top:4px;font-size:15px;color:#D995A0;opacity:.7;pointer-events:none}
+      #pawmb-root .pawmb-swatch{border:5px solid #FFFBF5;border-radius:9px;box-shadow:1px 3px 9px #0004}
+      #pawmb-root .pawmb-sticker{text-shadow:0 3px 5px #0003}
+      #pawmb-root .pawmb-resizer{z-index:5}
+      #pawmb-root .pawmb-hint{color:#E8D1E0}
+      #pawmb-root .pawmb-notice{padding:9px 11px;border-radius:12px;border:1px solid #977A9D;background:#3E2D46;color:#FFF2FB;font-size:12px}
+      #pawmb-root .pawmb-notice strong{color:#FFD6EA}
+      #pawmb-root .pawmb-picker{padding:8px 10px;border:1px solid #A67FA0;background:#30243A;border-radius:15px}
+      #pawmb-root .pawmb-picker-head,#pawmb-root .pawmb-sticker-cats{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+      #pawmb-root .pawmb-sticker-cats button{font-size:11px;padding:3px 7px;min-height:29px}
+      #pawmb-root .pawmb-sticker-cats button[aria-pressed=true]{background:#875497;border-color:#F4BCE4}
+      #pawmb-root .pawmb-sticker-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(43px,1fr));gap:4px;margin-top:8px;max-height:125px;overflow:auto}
+      #pawmb-root .pawmb-sticker-grid button{padding:2px;min-height:44px;font-size:26px;background:#60466A80}
+      #pawmb-root .pawmb-member-options{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+      #pawmb-root .pawmb-member-options select{flex:1;max-width:260px}
+      #pawmb-root .pawmb-mode-switch{display:flex;gap:6px;flex-wrap:wrap}
+      #pawmb-root .pawmb-mode-switch button[aria-pressed=true]{background:#8B5797;border:1px solid #EABBDD}
+      .pawmb-invite-toast{position:fixed;bottom:20px;right:20px;z-index:2147483646;padding:15px!important;
+        max-width:310px!important;border:2px solid #E6B6D3!important;border-radius:17px!important;
+        background:#422B4E!important;color:#FFF4FF!important;box-shadow:0 8px 25px #0008;cursor:pointer}
+      @media(max-width:620px){#pawmb-root .pawmb-dialog{border-radius:10px}#pawmb-root .pawmb-picker{padding:5px}#pawmb-root .pawmb-sticker-grid{max-height:88px}}
+      @media(prefers-reduced-motion:reduce){#pawmb-root *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+      `;
+      (document.head||document.documentElement).appendChild(style);
+    }
+    function render() {
+      if (!state.root) return;
+      if (uid()!==state.account) {close();return;}
+      if(state.mode==='room'&&state.roomKey!==roomKey()){
+        state.mode='personal';state.roomKey='';state.roomBoard=null;state.selected='';
+      }
+      if(state.mode==='collab'&&state.collab?.room!==roomKey()){
+        state.collab=null;state.mode='personal';state.selected='';
+      }
+      const b=current();if(!b)return;
+      const editable=canEdit(),room=state.mode==='room',collab=state.mode==='collab';
+      const opts=Object.entries(THEMES).map(([k])=>`<option value="${k}" ${b.theme===k?'selected':''}>${k[0].toUpperCase()+k.slice(1)}</option>`).join('');
+      const tabs=state.mode==='personal'||(collab&&state.collab?.role==='owner')
+        ?state.boards.map(x=>`<button class="pawmb-board-tab" data-mb="choose" data-id="${esc(x.id)}" aria-current="${x.id===b.id}" ${collab?'disabled':''}>♡ ${esc(x.name)}</button>`).join('')
+        : `<div class="pawmb-notice">${room?'🏡 Room board':'💌 Invited board'}<p class="pawmb-hint">${room?'One board per BC room.':'Temporary live collaboration.'}</p></div>`;
+      const items=b.items.map((item,index)=>{
+        const picked=editable&&state.selected===item.id;
+        const common=`class="pawmb-item pawmb-${item.type}" data-item="${esc(item.id)}" tabindex="${editable?'0':'-1'}" role="${editable?'button':'img'}" aria-label="${editable?'Select':'View'} ${esc(item.type)}" aria-selected="${picked}" style="left:${item.x}%;top:${item.y}%;width:${item.w}%;height:${item.h}%;z-index:${index+1};--angle:${item.angle||0}deg;${item.type==='swatch'?'background:'+color(item.hex)+';':''}"`;
+        let content='';
+        if(item.type==='photo')content=`<img src="${esc(item.src)}" alt="${esc(item.label||'Board inspiration')}" draggable="false" referrerpolicy="no-referrer" loading="lazy"/>`;
+        if(item.type==='note')content=esc(item.text);
+        if(item.type==='swatch')content=`<span>${esc(item.hex)}</span>`;
+        if(item.type==='sticker')content=esc(item.text);
+        return `<div ${common}>${content}${picked?'<span class="pawmb-resizer" role="button" aria-label="Resize selected item"></span>':''}</div>`;
+      }).join('');
+      const closedRoom=!roomKey();
+      const personal=state.mode==='personal';
+      const modeControls=`<div class="pawmb-mode-switch" role="group" aria-label="Board type">
+        <button data-mb="mode-personal" aria-pressed="${personal}">🎀 My boards</button>
+        <button data-mb="mode-room" aria-pressed="${room}" ${closedRoom?'disabled':''}>🏠 Room board</button>
+        ${collab?'<button data-mb="mode-collab" aria-pressed="true">💌 Collaboration</button>':''}
+      </div>`;
+      const controls=personal?`<button class="pawmb-primary" data-mb="board-new">+ Board</button><button data-mb="board-rename">Rename</button><button class="pawmb-danger" data-mb="board-delete">Delete</button>`
+        :room?`<button data-mb="board-rename" ${editable?'':'disabled'}>Rename room board</button><button class="pawmb-danger" data-mb="room-clear" ${editable?'':'disabled'}>Clear board</button>`
+        :`<span class="pawmb-notice">${state.collab?.role==='owner'?'You are hosting':'Guest editor'} · ${esc(b.name)}</span>`;
+      const members=Array.isArray(window.ChatRoomCharacter)?window.ChatRoomCharacter.filter(c=>Number(c?.MemberNumber)>0&&Number(c.MemberNumber)!==uid()).slice(0,20):[];
+      const memberOptions=members.map(c=>`<option value="${Number(c.MemberNumber)}">${esc(String(c.Nickname||c.Name||'Player').slice(0,52))} (#${Number(c.MemberNumber)})</option>`).join('');
+      const c=state.collab;
+      const collaboration=personal?`<div class="pawmb-member-options"><button data-mb="collab-start" ${closedRoom?'disabled':''}>💌 Collaborate</button><span class="pawmb-hint">Invite someone in this room to edit your selected personal board.</span></div>`
+        :collab&&c?.role==='owner'?`<div class="pawmb-member-options"><label for="pawmb-peer">Invite an editor</label><select id="pawmb-peer">${memberOptions||'<option value="">No players available</option>'}</select><button data-mb="collab-invite" ${!memberOptions?'disabled':''}>💌 Send invite</button><button data-mb="collab-leave">End collaboration</button><span class="pawmb-hint">Editing: ${[...c.allowed].map(x=>'#'+x).join(', ')||'Waiting for invitees'}</span></div>`
+        :collab?`<div class="pawmb-member-options"><span class="pawmb-hint">Live board shared by #${c?.owner||'?'} · ${c?.ready?'Ready to edit':'Awaiting owner sync'}</span><button data-mb="collab-leave">Leave collaboration</button></div>`
+        :'';
+      const invite=state.pendingInvite&&state.pendingInvite.room===roomKey()?`<div class="pawmb-notice" role="status"><strong>💌 Board invitation</strong> from BC #${state.pendingInvite.owner}: ${esc(state.pendingInvite.boardName)} <button data-mb="invite-accept">Accept</button> <button data-mb="invite-decline">Decline</button></div>`:'';
+      const stickerGroups=Object.keys(STICKERS);
+      const picker=state.stickerPicker&&editable?`<div class="pawmb-picker" aria-label="Choose a sticker from the collection">
+          <div class="pawmb-picker-head"><strong>🎀 Pick a sticker</strong><span class="pawmb-grow"></span><button data-mb="sticker-close">✕</button></div>
+          <div class="pawmb-sticker-cats">${stickerGroups.map(g=>`<button data-mb="sticker-group" data-group="${g}" aria-pressed="${state.stickerGroup===g}">${g}</button>`).join('')}</div>
+          <div class="pawmb-sticker-grid">${STICKERS[state.stickerGroup].map(emoji=>`<button data-mb="sticker-pick" data-sticker="${esc(emoji)}" title="Add ${esc(emoji)} sticker">${emoji}</button>`).join('')}</div>
+        </div>`:'';
+      const editControls=`<div class="pawmb-toolbar"><button data-mb="photo-upload" ${editable?'':'disabled'}>🖼 Picture</button><button data-mb="photo-url" ${editable?'':'disabled'}>🔗 Image URL</button><button data-mb="note" ${editable?'':'disabled'}>💌 Note</button><button data-mb="swatch" ${editable?'':'disabled'}>🎨 Swatch</button><button data-mb="sticker" ${editable?'':'disabled'}>🎀 Stickers ▾</button><button data-mb="outfit-palette" ${editable?'':'disabled'} title="Read colors from your worn BC outfit">👗 Outfit colors</button><span class="pawmb-grow"></span><button data-mb="rotate-left" ${editable&&state.selected?'':'disabled'} title="Rotate left">↶</button><button data-mb="rotate-right" ${editable&&state.selected?'':'disabled'} title="Rotate right">↷</button><button data-mb="duplicate" ${editable&&state.selected?'':'disabled'}>⧉ Duplicate</button><button data-mb="edit" ${editable&&state.selected?'':'disabled'}>Edit</button><button data-mb="front" ${editable&&state.selected?'':'disabled'}>Front</button><button class="pawmb-danger" data-mb="remove" ${editable&&state.selected?'':'disabled'}>✕</button></div>`;
+      const privilege=room?editable?'Room admin · Editing allowed':'Room guest · View only':collab?editable?'Invited editor':'Waiting for host':'Private · Only you';
+      state.root.innerHTML=`<section class="pawmb-dialog" role="dialog" aria-modal="true" aria-label="Aesthetic moodboards">
+        <div class="pawmb-header"><div><h2>🎀 My Little Moodboard <span aria-hidden="true">✦</span></h2><p>Scrapbook your favorite aesthetics · Essentials ♡ PawLounge</p></div><div class="pawmb-grow"></div><button class="pawmb-close" data-mb="close" aria-label="Close moodboards">✕ Close</button></div>
+        ${modeControls}${invite}
+        <div class="pawmb-toolbar">${controls}<label for="pawmb-theme">🌈 Paper</label><select id="pawmb-theme" data-mb-change="theme" ${editable?'':'disabled'}>${opts}</select><span class="pawmb-grow"></span><button data-mb="export-json" ${personal?'':'disabled'} title="Private personal-board backup">Save JSON</button><button data-mb="import-json" ${personal?'':'disabled'}>Load JSON</button><button data-mb="export-png">📸 PNG</button></div>
+        ${collaboration}${editControls}${picker}
+        <div class="pawmb-body"><aside class="pawmb-side" aria-label="Your boards">${tabs}</aside><div class="pawmb-boardwrap"><div class="pawmb-stage" style="--mb-bg:${THEMES[b.theme]||THEMES.charcoal}" aria-label="Moodboard canvas">${items}</div><p class="pawmb-hint">${editable?'Drag to arrange ✦ Resize from the corner ✦ Arrow keys to nudge':'♡ Read-only room board: ask an admin to change it.'} · Uploaded pictures remain local; sharing sends HTTPS links only.</p></div></div>
+        <div class="pawmb-footer"><span>${b.items.length}/${MAX_ITEMS} items · ${privilege} · BC #${state.account}</span><span class="pawmb-status" role="status">${esc(state.error|| (wireReady()?'Live room sync ready':'Local boards ready · Room sync needs the BC message listener'))}</span></div>
+        <input type="file" accept="image/png,image/jpeg,image/webp" hidden id="pawmb-photo-file"/>
+        <input type="file" accept="application/json,.json" hidden id="pawmb-import-file"/>
+      </section>`;
+    }
+    function place(type, extras={}) {
+      const b=current();if(!canEdit())return false;if(!b || b.items.length>=MAX_ITEMS){showStatus('Board is full (48 items maximum)',true);return false;}
+      const d={photo:[33,38],note:[29,27],swatch:[18,23],sticker:[15,22]}[type]||[24,26];
+      const step=b.items.length%7;
+      b.items.push({id:id(),type,x:clamp(9+step*8,1,98-d[0]),y:clamp(8+step*7,1,98-d[1]),w:d[0],h:d[1],angle:0,...extras});
+      state.selected=b.items.at(-1).id;touch();render();return true;
+    }
+    async function fileToData(file) {
+      if(!file || !/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>12000000)throw Error('Use a PNG, JPEG or WebP image under 12 MB');
+      const url=URL.createObjectURL(file);
+      try {
+        const image=await new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Image could not be decoded'));im.src=url;});
+        const scale=Math.min(1,880/Math.max(image.naturalWidth,image.naturalHeight));
+        const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+        if(canvas.width*canvas.height>900000)throw Error('Image exceeds size limit');
+        const context=canvas.getContext('2d',{alpha:false});if(!context)throw Error('Canvas unavailable');
+        context.fillStyle='#FFFFFF';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
+        let data=canvas.toDataURL('image/jpeg',.76);if(data.length>700000)data=canvas.toDataURL('image/jpeg',.54);
+        if(data.length>700000)throw Error('Image remains too large. Resize it before importing.');
+        return data;
+      } finally {URL.revokeObjectURL(url);}
+    }
+    function selectItem(target) {
+      const item=target?.closest?.('[data-item]');if(!item)return null;
+      state.selected=item.dataset.item;return current()?.items.find(x=>x.id===state.selected)||null;
+    }
+    async function pngExport() {
+      const b=current(),canvas=document.createElement('canvas');canvas.width=1000;canvas.height=750;
+      const ctx=canvas.getContext('2d');if(!ctx)throw Error('Canvas unsupported');
+      ctx.fillStyle=THEMES[b.theme]||THEMES.charcoal;ctx.fillRect(0,0,1000,750);
+      let skipped=0;
+      for(const item of b.items){
+        const x=item.x*10,y=item.y*7.5,w=item.w*10,h=item.h*7.5;
+        ctx.save();ctx.translate(x+w/2,y+h/2);ctx.rotate((item.angle||0)*Math.PI/180);ctx.translate(-w/2,-h/2);
+        if(item.type==='photo'){
+          try {
+            const image=new Image();image.crossOrigin='anonymous';image.referrerPolicy='no-referrer';
+            await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(Error('Image unavailable'));image.src=item.src;});
+            ctx.drawImage(image,0,0,w,h);
+          }catch{skipped++;ctx.fillStyle='#555';ctx.fillRect(0,0,w,h);}
+        }else if(item.type==='swatch'){ctx.fillStyle=item.hex;ctx.fillRect(0,0,w,h);}
+        else if(item.type==='sticker'){ctx.font=`${Math.max(20,Math.floor(h*.64))}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(item.text,w/2,h/2);}
+        else if(item.type==='note'){
+          ctx.fillStyle='#FFF4C9';ctx.fillRect(0,0,w,h);ctx.fillStyle='#312B35';ctx.font='19px sans-serif';ctx.textBaseline='top';
+          const words=String(item.text||'').split(/\s+/);let line='',py=12;
+          for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>w-18&&line){ctx.fillText(line,9,py);py+=25;line=word;}else line=next;if(py>h-25)break;}
+          if(py<=h-25)ctx.fillText(line,9,py);
+        }
+        ctx.restore();
+      }
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+      if(!blob)throw Error('PNG could not be generated');
+      download(blob,slug(b.name)+'.png');
+      showStatus(skipped?`Exported PNG; ${skipped} external picture(s) blocked by cross-origin restrictions.`:'PNG saved.');
+    }
+    function slug(s){return String(s||'moodboard').replace(/[^a-z\d-]+/gi,'-').slice(0,45)||'moodboard';}
+    function download(blob,filename){const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),15000);}
+    function checkImportItem(it) {
+      if(!it||!['photo','note','swatch','sticker'].includes(it.type))return null;
+      const obj={id:id(),type:it.type,x:clamp(it.x,0,88),y:clamp(it.y,0,88),w:clamp(it.w,5,80),h:clamp(it.h,6,80),angle:0};
+      obj.x=clamp(obj.x,0,100-obj.w);obj.y=clamp(obj.y,0,100-obj.h);
+      if(it.type==='photo') {if(!safeImg(it.src))return null;obj.src=it.src;obj.label=String(it.label||'Inspiration').slice(0,80);}
+      if(it.type==='note'||it.type==='sticker')obj.text=String(it.text||'').slice(0,it.type==='note'?350:12);
+      if(it.type==='swatch')obj.hex=color(it.hex);
+      return obj;
+    }
+    async function importJSON(file) {
+      if(state.mode!=='personal')throw Error('Import into a private board, not a room board.');
+      if(!file||file.size>13000000)throw Error('Backup exceeds 13 MB');
+      const payload=JSON.parse(await file.text());
+      if(payload?.format!=='PawAestheticMoodboards-v1'||!Array.isArray(payload.boards))throw Error('Not a supported Moodboard backup');
+      let added=0;
+      for(const b of payload.boards.slice(0,MAX_BOARDS)){
+        if(state.boards.length>=MAX_BOARDS)break;
+        if(!b||!Array.isArray(b.items))continue;
+        state.boards.push({id:id(),name:String(b.name||'Imported board').slice(0,65),theme:Object.hasOwn(THEMES,b.theme)?b.theme:'charcoal',created:Date.now(),updated:Date.now(),items:b.items.slice(0,MAX_ITEMS).map(checkImportItem).filter(Boolean)});
+        added++;
+      }
+      if(!added)throw Error('No importable boards or board limit reached');
+      state.current=state.boards.at(-1).id;state.selected='';touch();render();showStatus(`${added} board(s) imported into this BC account.`);
+    }
+    function onClick(event) {
+      const btn=event.target.closest('[data-mb]');if(!btn)return;
+      const act=btn.dataset.mb,b=current();
+      if(act==='close'){close();return;}
+      if(act==='mode-personal'){state.mode='personal';state.selected='';state.stickerPicker=false;render();return;}
+      if(act==='mode-room'){void openRoom();return;}
+      if(act==='mode-collab'){if(state.collab){state.mode='collab';state.selected='';render();}return;}
+      if(act==='invite-accept'||act==='invite-decline'){
+        const inv=state.pendingInvite;if(!inv||inv.room!==roomKey())return;
+        state.pendingInvite=null;state.inviteToast?.remove();state.inviteToast=null;
+        if(act==='invite-decline'){sendWire({t:'decline',session:inv.session},inv.owner);render();return;}
+        if(state.collab?.role==='owner')return showStatus('End your current collaboration before joining another.',true);
+        state.collab={role:'guest',owner:inv.owner,boardId:inv.boardId,session:inv.session,room:inv.room,
+          board:{id:inv.boardId||id(),name:inv.boardName,theme:'blush',created:Date.now(),updated:0,items:[]},ready:false};
+        state.mode='collab';state.selected='';render();sendWire({t:'accept',session:inv.session},inv.owner);return;
+      }
+      if(act==='collab-start'){
+        if(!roomKey()||!wireReady())return showStatus('Join a connected BC room to invite editors.',true);
+        if(!b||state.mode!=='personal')return;
+        state.collab={role:'owner',owner:uid(),session:id(),boardId:b.id,room:roomKey(),allowed:new Set(),invited:new Set(),board:b,ready:true};
+        state.mode='collab';state.selected='';render();return;
+      }
+      if(act==='collab-invite'){
+        const c=state.collab,member=Number(state.root?.querySelector('#pawmb-peer')?.value);
+        if(!c||c.role!=='owner'||!rosterHas(member)||member===uid())return;
+        if(c.allowed.size+c.invited.size>=8)return showStatus('Maximum eight collaborators per session.',true);
+        if(c.allowed.has(member)||c.invited.has(member))return showStatus('Already invited or editing.');
+        if(sendWire({t:'invite',session:c.session,boardId:c.boardId,name:current().name},member)){
+          c.invited.add(member);showStatus(`Invitation sent to BC #${member}.`);
+        }return;
+      }
+      if(act==='collab-leave'){
+        const c=state.collab;if(c?.room===roomKey()){
+          if(c.role==='owner')for(const member of [...c.allowed,...c.invited])sendWire({t:'leave',session:c.session},member);
+          else sendWire({t:'leave',session:c.session},c.owner);
+        }
+        state.collab=null;state.mode='personal';state.selected='';render();return;
+      }
+      if(act==='sticker'){if(!canEdit())return;state.stickerPicker=!state.stickerPicker;render();return;}
+      if(act==='sticker-close'){state.stickerPicker=false;render();return;}
+      if(act==='sticker-group'){if(Object.hasOwn(STICKERS,btn.dataset.group)){state.stickerGroup=btn.dataset.group;render();}return;}
+      if(act==='sticker-pick'){if(canEdit()&&STICKERS[state.stickerGroup]?.includes(btn.dataset.sticker)){
+          const chosen=current()?.items.find(x=>x.id===state.selected);
+          if(chosen?.type==='sticker'){chosen.text=btn.dataset.sticker;touch();render();}
+          else place('sticker',{text:btn.dataset.sticker});
+        }return;}
+      if(act==='export-png'){void pngExport().catch(e=>showStatus(String(e.message||e),true));return;}
+      if(act==='export-json'){
+        if(state.mode!=='personal')return;
+        download(new Blob([JSON.stringify({format:'PawAestheticMoodboards-v1',exported:new Date().toISOString(),boards:state.boards},null,2)],{type:'application/json'}),'Paw-Aesthetic-Moodboards.json');
+        showStatus('Private JSON backup saved. Share only with people you trust.');return;
+      }
+      if(act==='import-json'){if(state.mode==='personal')state.root.querySelector('#pawmb-import-file')?.click();return;}
+      if(act==='choose'){
+        if(state.mode!=='personal'||state.collab?.role==='owner')return;
+        if(state.boards.some(x=>x.id===btn.dataset.id)){state.current=btn.dataset.id;state.selected='';render();}return;
+      }
+      if(!canEdit())return showStatus('Only room admins can edit this room board.',true);
+      if(act==='board-new'){
+        if(state.mode!=='personal')return;
+        if(state.boards.length>=MAX_BOARDS)return showStatus('12 boards maximum.',true);
+        const name=prompt('Name the new moodboard:','New inspiration board');if(name===null)return;
+        const fresh=defaultBoard();fresh.name=name.trim().slice(0,65)||'Untitled moodboard';state.boards.push(fresh);state.current=fresh.id;state.selected='';touch();render();return;
+      }
+      if(act==='board-rename'){
+        const name=prompt('Rename moodboard:',b.name);if(name===null)return;b.name=name.trim().slice(0,65)||b.name;touch();render();return;
+      }
+      if(act==='room-clear'){
+        if(state.mode!=='room'||!isAdmin())return;
+        if(!confirm('Clear all items from this room board for everyone?'))return;
+        b.items=[];state.selected='';touch();render();return;
+      }
+      if(act==='board-delete'){
+        if(state.mode!=='personal'||!confirm(`Delete "${b.name}" and its contents?`))return;
+        state.boards=state.boards.filter(x=>x.id!==b.id);if(!state.boards.length)state.boards=[defaultBoard()];
+        state.current=state.boards[0].id;state.selected='';touch();render();return;
+      }
+      if(act==='photo-upload'){state.root.querySelector('#pawmb-photo-file')?.click();return;}
+      if(act==='photo-url'){
+        const u=prompt('HTTPS image URL (can be shared with collaborators):','https://');if(u===null)return;
+        if(!/^https:\/\/[^\s<>"']{1,1500}$/i.test(u))return showStatus('Only HTTPS image URLs supported.',true);
+        place('photo',{src:u,label:'Inspiration'});return;
+      }
+      if(act==='note'){
+        const value=prompt('Add a sweet little note (up to 350 characters):','My aesthetic...');
+        if(value!==null&&value.trim())place('note',{text:value.trim().slice(0,350)});return;
+      }
+      if(act==='swatch'){
+        const hex=prompt('Hex color for your palette:', '#8A2EFF');
+        if(hex!==null){if(!/^#[0-9a-fA-F]{6}$/.test(hex))return showStatus('Enter a six-digit hex color.',true);place('swatch',{hex});}return;
+      }
+      if(act==='outfit-palette'){
+        const worn=Array.isArray(window.Player?.Appearance)?window.Player.Appearance:[];
+        const colors=[...new Set(worn.flatMap(item=>{const value=item?.Color;return Array.isArray(value)?value:[value];})
+          .filter(v=>typeof v==='string'&&/^#[0-9a-fA-F]{6}$/.test(v)).map(v=>v.toUpperCase()))];
+        const room=Math.max(0,MAX_ITEMS-b.items.length),selectedColors=colors.slice(0,Math.min(room,10));
+        if(!selectedColors.length){showStatus(room?'No hex outfit colors found.':'Board is full.',true);return;}
+        for(const hex of selectedColors){const step=b.items.length%7;b.items.push({id:id(),type:'swatch',x:clamp(9+step*8,1,80),y:clamp(8+step*7,1,72),w:18,h:23,angle:0,hex});}
+        state.selected=b.items.at(-1).id;touch();render();showStatus(`Added ${selectedColors.length} outfit color swatches.`);return;
+      }
+      const item=b.items.find(it=>it.id===state.selected);
+      if(!item)return;
+      if(act==='remove'){b.items=b.items.filter(it=>it.id!==item.id);state.selected='';touch();render();return;}
+      if(act==='front'){b.items=b.items.filter(it=>it.id!==item.id);b.items.push(item);touch();render();return;}
+      if(act==='rotate-left'||act==='rotate-right'){item.angle=clamp((item.angle||0)+(act==='rotate-left'?-8:8),-20,20);touch();render();return;}
+      if(act==='duplicate'){
+        if(b.items.length>=MAX_ITEMS)return showStatus('Board is full.',true);
+        const copy={...item,id:id(),x:clamp(item.x+4,0,100-item.w),y:clamp(item.y+4,0,100-item.h)};
+        b.items.push(copy);state.selected=copy.id;touch();render();return;
+      }
+      if(act==='edit'){
+        if(item.type==='note'){
+          const value=prompt('Edit note:',item.text);if(value!==null)item.text=value.slice(0,350);
+        }else if(item.type==='sticker'){
+          state.stickerPicker=true;state.stickerGroup=Object.keys(STICKERS).find(k=>STICKERS[k].includes(item.text))||'Kittens';
+          showStatus('Choose another sticker from the collection, or remove this one.');render();return;
+        }else if(item.type==='swatch'){
+          const value=prompt('Change swatch hex:',item.hex);if(value!==null&&/^#[0-9a-fA-F]{6}$/.test(value))item.hex=value;
+        }else if(item.type==='photo'){
+          const value=prompt('Edit image caption:',item.label||'Inspiration');if(value!==null)item.label=value.slice(0,80);
+        }
+        touch();render();return;
+      }
+    }
+    function onChange(event) {
+      if(event.target.dataset.mbChange==='theme'){if(!canEdit())return;const b=current();if(Object.hasOwn(THEMES,event.target.value)){b.theme=event.target.value;touch();render();}return;}
+      if(event.target.id==='pawmb-photo-file'){
+        const file=event.target.files?.[0];if(!file||!canEdit())return;
+        void fileToData(file).then(src=>{if(state.root&&uid()===state.account&&canEdit())place('photo',{src,label:file.name.slice(0,80)});}).catch(e=>showStatus(String(e.message||e),true));
+      }
+      if(event.target.id==='pawmb-import-file'){
+        const file=event.target.files?.[0];if(!file)return;
+        void importJSON(file).catch(e=>showStatus(String(e.message||e),true));
+      }
+    }
+    function onPointerDown(event) {
+      if(event.button!==0 && event.pointerType!=='touch')return;
+      if(!canEdit())return;const el=event.target.closest('[data-item]');if(!el)return;
+      const item=selectItem(el);if(!item)return;
+      const stage=state.root?.querySelector('.pawmb-stage');if(!stage)return;
+      const rect=stage.getBoundingClientRect(),resize=!!event.target.closest('.pawmb-resizer');
+      state.drag={pointer:event.pointerId,id:item.id,resize,startX:event.clientX,startY:event.clientY,rect,
+        x:item.x,y:item.y,w:item.w,h:item.h,element:el,moved:false};
+      try{el.setPointerCapture(event.pointerId);}catch{}
+      event.preventDefault();
+      // Change selection without redrawing/losing pointer capture until release.
+      state.root.querySelectorAll('[data-item]').forEach(node=>node.setAttribute('aria-selected',String(node===el)));
+    }
+    function onPointerMove(event) {
+      const d=state.drag;if(!d||d.pointer!==event.pointerId||!canEdit())return;
+      const item=current()?.items.find(it=>it.id===d.id);if(!item)return;
+      const dx=(event.clientX-d.startX)/d.rect.width*100,dy=(event.clientY-d.startY)/d.rect.height*100;
+      if(Math.abs(dx)+Math.abs(dy)>.2)d.moved=true;
+      if(d.resize){item.w=clamp(d.w+dx,8,Math.min(85,100-d.x));item.h=clamp(d.h+dy,8,Math.min(85,100-d.y));}
+      else {item.x=clamp(d.x+dx,0,100-d.w);item.y=clamp(d.y+dy,0,100-d.h);}
+      Object.assign(d.element.style,{left:item.x+'%',top:item.y+'%',width:item.w+'%',height:item.h+'%'});
+    }
+    function onPointerUp(event) {
+      const d=state.drag;if(!d||d.pointer!==event.pointerId)return;
+      state.drag=null;
+      if(d.moved&&canEdit())touch();render();
+    }
+    function onKey(event) {
+      if(event.key==='Escape'){event.stopPropagation();close();return;}
+      const el=event.target.closest('[data-item]');if(!canEdit()||!el||!event.key.startsWith('Arrow'))return;
+      const item=selectItem(el);if(!item)return;event.preventDefault();event.stopPropagation();
+      const n=event.shiftKey?3:1;
+      if(event.key==='ArrowLeft')item.x=clamp(item.x-n,0,100-item.w);
+      else if(event.key==='ArrowRight')item.x=clamp(item.x+n,0,100-item.w);
+      else if(event.key==='ArrowUp')item.y=clamp(item.y-n,0,100-item.h);
+      else if(event.key==='ArrowDown')item.y=clamp(item.y+n,0,100-item.h);
+      touch();render();state.root?.querySelector(`[data-item="${item.id}"]`)?.focus();
+    }
+    async function open(source='plugin') {
+      const member=uid();if(!member){console.warn('[Moodboards] Sign into Bondage Club before opening boards');return false;}
+      if(state.opening)return false;state.opening=true;
+      try {
+        if(!document.body)return false;initWire();
+        if(state.account!==member){
+          if(state.saveTimer){clearTimeout(state.saveTimer);state.saveTimer=null;await save();}
+          await state.queue;
+          state.boards=await read(member);state.account=member;state.current=state.boards[0]?.id||'';
+          state.selected='';state.mode='personal';state.roomBoard=null;state.roomKey='';state.roomCache.clear();state.collab=null;state.pendingInvite=null;
+          if(!state.boards.length){state.boards=[defaultBoard()];state.current=state.boards[0].id;scheduleSave();}
+        }
+        if(!state.root){ensureStyle();state.root=document.createElement('div');state.root.id='pawmb-root';document.body.append(state.root);
+          state.root.addEventListener('click',onClick);state.root.addEventListener('change',onChange);
+          state.root.addEventListener('pointerdown',onPointerDown);state.root.addEventListener('pointermove',onPointerMove);
+          state.root.addEventListener('pointerup',onPointerUp);state.root.addEventListener('pointercancel',onPointerUp);
+          state.root.addEventListener('keydown',onKey);
+          state.root.addEventListener('click',event=>{if(event.target===state.root)close();});
+        }
+        state.source=source;render();state.root.querySelector('[data-mb="close"]')?.focus();return true;
+      } catch(e){state.error=String(e?.message||e);console.warn('[Moodboards] Opening failed:',e);if(state.root)showStatus(state.error,true);return false;}
+      finally{state.opening=false;}
+    }
+    function close(){if(state.saveTimer){clearTimeout(state.saveTimer);state.saveTimer=null;void save();}
+      state.drag=null;state.stickerPicker=false;state.root?.remove();state.root=null;}
+    const api=Object.freeze({protocol:'paw-aesthetic-v2',version:'2.0.0',open,close,openRoom,
+      status:()=>({account:state.account,currentAccount:uid(),boards:state.account===uid()?state.boards.length:0,
+        items:state.account===uid()?state.boards.reduce((n,b)=>n+b.items.length,0):0,editorOpen:!!state.root,
+        mode:state.mode,room:roomKey(),roomAdmin:isAdmin(),roomItems:state.roomBoard?.items.length||0,
+        collaboration:state.collab?{role:state.collab.role,owner:state.collab.owner,editors:state.collab.allowed?.size||0}:null,
+        pendingInvite:!!state.pendingInvite,transport:state.wireHook||'unavailable',
+        packetsSent:state.wireSent,packetsReceived:state.wireReceived,packetsRejected:state.wireRejected,
+        errors:state.wireErrors,lastWireError:state.lastWireError,
+        storage:'Account-scoped IndexedDB; room boards cached locally + synchronized to connected room clients',
+        sharing:'Invite-only personal collaboration and admin-only shared room boards; no uploaded image bytes',error:state.error}),
+      addSwatch:(hex)=>{if(!state.root||!canEdit()||!/^#[0-9a-fA-F]{6}$/.test(hex))return false;return place('swatch',{hex});},
+      addNote:(text)=>{if(!state.root||!canEdit())return false;return place('note',{text:String(text).slice(0,350)});},
+      addImage:(url,label='Inspiration')=>{if(!state.root||!canEdit()||!safeImg(url))return false;return place('photo',{src:url,label:String(label).slice(0,80)});}});
+    window.PawAestheticMoodboards=api;
+    return api;
+  }
+  try { installPawAestheticMoodboards(); } catch (e) { console.warn('[Aesthetic moodboards] Optional editor unavailable:',e); }
+
   // Emergency bootstrap: published BEFORE any early return, module setup or BC hooks.
   // If a previous Kittychat version is present, users still get a real diagnostic.
   const BOOT = { version: VERSION, phase: 'entry', error: '', conflict: '', started: Date.now(), attempts: 0 };
@@ -6398,6 +7134,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
           <button class="railtab" data-tab="groups" title="Group Dens and invitations" aria-label="Groups"><span class="ic" aria-hidden="true">👥</span><span class="tx">Groups</span></button>
           <button class="railtab" data-tab="catchup" title="Catch-up & invitations"><span class="ic">📬</span><span class="tx">Catch Up</span></button>
           <button class="railtab" data-tab="moments" title="Memories, books, and saved moments" aria-label="Memories"><span class="ic" aria-hidden="true">📚</span><span class="tx">Memories</span></button>
+          <button class="railtab" data-tab="moodboards" title="Cute aesthetic moodboards and shared room boards"><span class="ic" aria-hidden="true">🎨</span><span class="tx">Boards</span></button>
           <button class="railtab" data-tab="notes" title="Private Paw Notes · send and receive messages"><span class="ic">✉️</span><span class="tx">Paw Notes</span></button>
           <button class="railtab" data-tab="personality" title="Pet personality studio"><span class="ic">🐾</span><span class="tx">Pet Self</span></button>
           <button class="railtab" data-tab="rooms"><span class="ic">${asset('ui-house.svg','','⌂')}</span><span class="tx">Rooms</span></button>
@@ -9199,6 +9936,21 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   window.MarvelousHubDiag=()=>({version:VERSION,owner:me(),verified:!!marvelousNotes.claim?.verified_at,restorePoints:marvelousHub.rows.filter(r=>r.record_key!=='current').length,loaded:marvelousHub.initialized,
     cloudRecords:marvelousHub.rows.length,notifications:marvelousHub.notifs.length,error:marvelousHub.error});
 
+  function renderAestheticMoodboardsTab() {
+    if (!ui.body) return;
+    const board=window.PawAestheticMoodboards?.status?.() || {};
+    ui.body.innerHTML=`<section class="kc-marv-page" style="color:#FFFFF0;overflow:auto;max-width:850px;">
+      <h2 style="margin:0 0 8px">🎨 Aesthetic Moodboards</h2>
+      <p>Collect character aesthetics, outfit inspiration, color swatches, pictures, stickers and handwritten notes in a freeform canvas.</p>
+      <div style="border:1px solid #B88FB0;background:#241D27;padding:18px;border-radius:17px;">
+        <h3 style="margin-top:0">🎀 Your cozy creative space</h3>
+        <p>Rearrange and resize your inspiration pieces. Your private boards open from Essentials too. Share by invitation, or view your room's admin-managed inspiration board.</p>
+        <button class="primary" data-action="open-aesthetic-moodboards" style="padding:11px 18px">Open Cute Moodboards</button>
+        <p class="muted" style="margin:10px 0 0">${board.account===me()?board.boards:0} board(s) loaded · Local IndexedDB storage · Export PNG or JSON</p>
+      </div>
+      <p class="muted" style="font-size:12px">Your own boards stay private by default. Invite players in your current BC room to collaborate, or open the room board (only room admins can edit). Shared boards use BC hidden messages, not cloud storage. Local uploaded images never transmit; HTTPS image URLs load from their hosts.</p>
+    </section>`;
+  }
   function render() {
     if (!ui.body) return;
     if (state.tab === 'friends') state.tab = 'chats'; // Migrate old Pals tab state.
@@ -9209,7 +9961,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     ui.shadow.querySelectorAll('.railtab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.tab));
     ui.menu.style.display = state.tab === 'chats' || state.tab === 'groups' ? 'flex' : 'none';
     ui.menu.classList.toggle('compact-open',!!state.compactOpen && (state.tab==='chats'||state.tab==='groups'));
-    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles' || state.tab==='notes' || state.tab==='marvelous' || state.tab==='memories' || state.tab==='personality');
+    ui.shadow.querySelector('.workspace')?.classList.toggle('wide', state.tab === 'rooms' || state.tab === 'settings' || state.tab === 'stickers' || state.tab==='moments' || state.tab==='pawbooks' || state.tab==='catchup' || state.tab==='circles' || state.tab==='notes' || state.tab==='marvelous' || state.tab==='memories' || state.tab==='personality' || state.tab==='moodboards');
     if (state.tab === 'chats' || state.tab === 'groups') {
       if (state.tab==='chats') {
         ensureDefaultSelection();
@@ -9232,6 +9984,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     else if (state.tab === 'rooms') renderRooms();
     else if (state.tab === 'stickers') renderStickersLibrary();
     else if (state.tab === 'moments') renderMemorySection();
+    else if (state.tab === 'moodboards') renderAestheticMoodboardsTab();
     else if (state.tab === 'catchup') renderCatchUp();
     else if (state.tab === 'notes') {renderMarvelousNotes();marvelousEnterTab();}
     else if (state.tab === 'marvelous') {renderMarvelousHub();void marvelousHubOpen();}
@@ -11204,6 +11957,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
   function clickUI(e) {
     const target = e.target?.closest?.('[data-action],[data-tab],[data-contact],[data-quick],[data-sticker],[data-join],[data-react],[data-filter],[data-group],[data-group-accept],[data-group-decline],[data-facepop],[data-reply-msg],[data-save-moment],[data-book-save-message],[data-reaction-id],[data-jumpreply],[data-role-toggle],[data-kick-group-member],[data-roomstar],[data-favvisit],[data-momentshare],[data-momentdelete],[data-paw-circle-delete],[data-paw-circle-toggle],[data-paw-album],[data-paw-album-invite],[data-paw-album-rename],[data-paw-album-leave],[data-paw-album-moment],[data-paw-album-accept],[data-paw-album-decline],[data-paw-invite-accept],[data-paw-invite-decline],[data-paw-cancel-schedule],[data-paw-cover],[data-paw-pages],[data-paw-card-react],[data-paw-card-comment],[data-paw-card-move],[data-paw-vote],[data-paw-role],[data-outbox-retry],[data-outbox-cancel],[data-book-new-page],[data-book-edit],[data-book-note],[data-book-seal],[data-book-snapshot],[data-book-tag],[data-book-role],[data-book-group],[data-book-export],[data-book-activity],[data-book-timeline],[data-book-gift],[data-book-sync]');
     if (!target) return;
+    if(target.dataset.action==='open-aesthetic-moodboards'){void window.PawAestheticMoodboards?.open('pawlounge');return;}
     if(target.dataset.action==='marv-verify-open'){marvelousVerifyOpen();return;}
     if(target.dataset.action==='marv-verify-dismiss'){
       marvelousVerifyUI.dismissed=true;marvelousVerifyUI.autoQueued=false;
@@ -11595,6 +12349,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       archivePending: historyArchive.queue?.length ?? null,
       view: state.tab, window: { ...(state.windowRect || {}) },
       liveAvatars: ui.shadow?.querySelectorAll('.kc-bc-mugshot:not(.is-painted)').length || 0 }),
+    moodboards: () => window.PawAestheticMoodboards?.open('pawlounge'),
     toggle: () => toggle(),
     open: () => { safeTick(); toggle(true); }, close: () => toggle(false),
     select: id => { if (!me()) return false; const n = numeric(id); if (!n) return false; selectChat(n); toggle(true); return true; },
