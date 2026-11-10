@@ -3,13 +3,14 @@
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.22
-// @description  PawLounge 1.2.22: cute collaborative moodboards and room-admin shared boards.
+// @version      1.2.23
+// @description  PawLounge 1.2.23: R134 beta resilient BC hooks, diagnostics, and existing moodboards.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
 // @match        https://*.bondageprojects.com/R*
 // @match        https://*.bondage-europe.com/R*
 // @match        https://*.bondageeurope.com/R*
+// @match        https://*.bondage-asia.com/club/*
 // @inject-into  page
 // @run-at       document-end
 // @grant        none
@@ -17,7 +18,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.22';
+  const VERSION = '1.2.23';
   // Aesthetic Moodboards v2: shared editor in Essentials and PawLounge.
   // Personal boards are local; invited collaboration and room boards use bounded
   // native BC Hidden messages, with sender/admin checks and no uploaded image bytes.
@@ -3584,72 +3585,114 @@
     return true;
   }
 
+  // R134 beta: each native hook is optional and can appear after account login.
+  // A missing/renamed BC API must not disable unrelated messaging features.
+  const pawNativeHooks = { installed: Object.create(null), errors: Object.create(null),
+    sdk: 'waiting', attempts: 0, lastProbe: 0 };
   function hookBC() {
     registerNativeWhisperHandler();
-    if (state.mod) return;
-    if (typeof window.ServerSend !== 'function' || typeof window.ServerAccountBeep !== 'function' || typeof window.ChatRoomMessage !== 'function') return;
-    const sdk = window.bcModSdk;
-    if (sdk && typeof sdk.registerMod === 'function') {
+    pawNativeHooks.lastProbe = Date.now();
+    const sdk = window.bcModSdk || window.bcModSDK;
+    if (!state.mod) {
+      if (!sdk || typeof sdk.registerMod !== 'function') {
+        pawNativeHooks.sdk = 'unavailable';
+        if (!hookBC.waitNoticeLogged) {
+          hookBC.waitNoticeLogged = true;
+          console.info('[PawLounge] Waiting for BC ModSDK before installing native hooks.');
+        }
+        return;
+      }
       try {
-        const mod = sdk.registerMod({ name: 'kittychat', fullName: 'PawLounge', version: VERSION,
+        state.mod = sdk.registerMod({ name: 'kittychat', fullName: 'PawLounge', version: VERSION,
           repository: 'https://github.com/marvelous-bc/pawlounge' });
-        mod.hookFunction('ServerAccountBeep', 1, (args, next) => {
-          try {
-            const data=args[0];
-            // Known Kittychat group envelopes are handled only in Kittychat, not BC's normal beep window.
-            if (data && !data.BeepType && kcDecode(data.Message) && receiveGroupBeep(data,numeric(data.MemberNumber))) return;
-            receiveBeep(data);
-          } catch (e) { console.warn('[Kittychat] receive:',e); }
-          return inMutedNativePacket('beep', args[0], () => next(args));
-        });
-        // Observe native BC's online-friend results using the same ModSDK
-        // chain as the other PawLounge features (no direct overwrite).
-        // Failure to install this optional hook only disables remote status
-        // labels; native BC login and the rest of PawLounge keep working.
-        if (typeof window.ServerAccountQueryResult === 'function') {
-          try {
-            mod.hookFunction('ServerAccountQueryResult', 1, (args, next) => {
-              try { pawObserveNativePresence(args[0]); }
-              catch (err) { console.warn('[PawLounge] Online presence observation failed:', err); }
-              return next(args);
-            });
-            pawOnlinePresence.modSdkHookInstalled=true;
-          } catch (err) { console.warn('[PawLounge] ModSDK online presence hook unavailable:', err); }
+        pawNativeHooks.sdk = 'registered';
+        log('Connected with BC Mod SDK');
+      } catch (err) {
+        pawNativeHooks.sdk = 'registration-failed';
+        pawNativeHooks.errors.register = String(err?.message || err);
+        if (!hookBC.registerWarned) {
+          hookBC.registerWarned = true;
+          console.warn('[PawLounge] ModSDK registration unavailable; retrying without replacing BC functions:',err);
         }
-        mod.hookFunction('ServerSend', 1, (args, next) => { try { onOutgoing(args[0], args[1]); } catch (e) { console.warn('[Kittychat] send:',e); } return next(args); });
-        mod.hookFunction('ChatRoomMessage', 1, (args, next) => { try { captureNativeRoomMessage(args[0]); } catch (e) { console.warn('[Kittychat] whisper:',e); } return inMutedNativePacket('whisper', args[0], () => next(args)); });
-        // Handle /pawverify via ModSDK as a secondary path for BC send methods
-        // that bypass Enter keydown. Never send the command into public chat.
-        if(typeof window.ChatRoomSendChat==='function'){
-          try{mod.hookFunction('ChatRoomSendChat',1,(args,next)=>{
-            const field=document.getElementById('InputChat');
-            if(window.CurrentScreen==='ChatRoom'&&field&&/^\/pawverify\s*$/i.test(String(field.value||''))){
-              field.value='';marvelousVerifyOpen();return;
-            }
-            return next(args);
-          });}catch(err){console.warn('[PawLounge] /pawverify fallback hook unavailable:',err);}
-        }
-        // Optional BC hooks are independent: a renamed API must not break
-        // the existing messenger hooks or prevent Kittychat from loading.
-        if (typeof window.ServerShowBeep === 'function') {
-          try { mod.hookFunction('ServerShowBeep', 1, (args, next) => next(nativeSilentBeepArgs(args))); }
-          catch (e) { console.warn('[Kittychat] Native beep silence hook unavailable:',e); }
-        }
-        if (typeof window.NotificationRaise === 'function') {
-          try { mod.hookFunction('NotificationRaise', 1, (args, next) => suppressNativeMessageNotification(args) ? undefined : next(args)); }
-          catch (e) { console.warn('[Kittychat] Native notification silence hook unavailable:',e); }
-        }
-        state.mod = mod; log('Connected with BC Mod SDK'); return;
-      } catch (err) { console.warn('[Kittychat] Mod SDK registration failed; using chainable wrappers:',err); }
+        return;
+      }
     }
-    // ModSDK may be initialized later by BCX or the mod manager. Do not
-    // replace native BC functions as a fallback: wait for SDK, then retry on
-    // the existing startup tick. Native BC remains untouched in the meantime.
-    if (!hookBC.waitNoticeLogged) {
-      hookBC.waitNoticeLogged=true;
-      console.info('[PawLounge] ModSDK not available yet; waiting to register compatible BC hooks.');
+    const mod = state.mod;
+    if (typeof mod?.hookFunction !== 'function') {
+      pawNativeHooks.sdk = 'missing-hookFunction';
+      return;
     }
+    function install(name, handler) {
+      if (pawNativeHooks.installed[name] || typeof window[name] !== 'function') return false;
+      pawNativeHooks.attempts++;
+      try {
+        mod.hookFunction(name, 1, handler);
+        pawNativeHooks.installed[name] = true;
+        delete pawNativeHooks.errors[name];
+        return true;
+      } catch (err) {
+        const detail = String(err?.message || err);
+        if (pawNativeHooks.errors[name] !== detail)
+          console.warn(`[PawLounge] Native ${name} hook unavailable; other hooks remain active:`,err);
+        pawNativeHooks.errors[name] = detail;
+        return false;
+      }
+    }
+    install('ServerAccountBeep', (args, next) => {
+      try {
+        const data = args[0];
+        if (data && !data.BeepType && kcDecode(data.Message) &&
+            receiveGroupBeep(data, numeric(data.MemberNumber))) return;
+        receiveBeep(data);
+      } catch (e) { console.warn('[PawLounge] Receive beep failed:',e); }
+      return inMutedNativePacket('beep', args[0], () => next(args));
+    });
+    if (install('ServerAccountQueryResult', (args, next) => {
+      try { pawObserveNativePresence(args[0]); }
+      catch (err) { console.warn('[PawLounge] Presence observation failed:',err); }
+      return next(args);
+    })) pawOnlinePresence.modSdkHookInstalled = true;
+    install('ServerSend', (args, next) => {
+      try { onOutgoing(args[0], args[1]); }
+      catch (e) { console.warn('[PawLounge] Outgoing packet observation failed:',e); }
+      return next(args);
+    });
+    install('ChatRoomMessage', (args, next) => {
+      try { captureNativeRoomMessage(args[0]); }
+      catch (e) { console.warn('[PawLounge] Whisper observation failed:',e); }
+      return inMutedNativePacket('whisper', args[0], () => next(args));
+    });
+    install('ChatRoomSendChat', (args, next) => {
+      const field = document.getElementById('InputChat');
+      if (window.CurrentScreen === 'ChatRoom' && field && /^\/pawverify\s*$/i.test(String(field.value || ''))) {
+        field.value = ''; marvelousVerifyOpen(); return;
+      }
+      return next(args);
+    });
+    install('ServerShowBeep', (args, next) => next(nativeSilentBeepArgs(args)));
+    install('NotificationRaise', (args, next) =>
+      suppressNativeMessageNotification(args) ? undefined : next(args));
   }
+  window.PawLoungeR134Diag = () => {
+    const required = ['ServerAccountBeep', 'ServerSend', 'ChatRoomMessage'];
+    const optional = ['ServerAccountQueryResult', 'ChatRoomSendChat', 'ServerShowBeep', 'NotificationRaise'];
+    const reported = Object.fromEntries([...required, ...optional].map(name =>
+      [name, { available: typeof window[name] === 'function',
+        hooked: !!pawNativeHooks.installed[name],
+        error: pawNativeHooks.errors[name] || null }]));
+    return { addonVersion: VERSION,
+      gameVersion: String(window.GameVersion || window.location?.pathname?.match(/\/R\d+(?:[-_]?Beta\d*)?/i)?.[0]?.slice(1) || 'unknown'),
+      targetRelease: 'R134 beta candidate',
+      screen: window.CurrentScreen || null,
+      sdk: pawNativeHooks.sdk,
+      registrationAttempts: pawNativeHooks.attempts,
+      hooks: reported,
+      coreHookReady: required.every(name => pawNativeHooks.installed[name]),
+      bridge: {essentialsVersion:window.SubbysPlushies?.version || null,
+        connected: !!marvelousBridge.attached},
+      uiPresent: !!ui.host?.isConnected,
+    };
+  };
   function sendText(text, target = state.selected) {
     const member=numeric(target),chat=ensure(member);
     text=trim(text,2000);
@@ -12342,7 +12385,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     state.started = true;
   }
   window.KittyChat = Object.freeze({ version: VERSION,
-    nativeMuteDiagnostics: id => ({ version: VERSION, member: numeric(id), muted: isMutedNativeContact(id), bcSoundHooks: !!state.mod, serverShowBeepAvailable: typeof window.ServerShowBeep === 'function', notificationRaiseAvailable: typeof window.NotificationRaise === 'function', silenced: {...mutedNativeAudioStats} }),
+    nativeMuteDiagnostics: id => ({ version: VERSION, member: numeric(id), muted: isMutedNativeContact(id), bcSoundHooks: !!(pawNativeHooks.installed.ServerShowBeep || pawNativeHooks.installed.NotificationRaise), serverShowBeepAvailable: typeof window.ServerShowBeep === 'function', notificationRaiseAvailable: typeof window.NotificationRaise === 'function', silenced: {...mutedNativeAudioStats} }),
     presenceDiagnostics: () => ({ version: VERSION, modSdkHookInstalled: pawOnlinePresence.modSdkHookInstalled, lastNativeResponse: pawOnlinePresence.seenAt || null, knownOnlineCount: pawOnlinePresence.ids.size, lastQuery: pawOnlinePresence.lastQuery || null }),
     performanceDiagnostics: () => ({ ...motionRuntime,
       portraitQueued: portraitRuntime.queued,
@@ -12405,7 +12448,7 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
       if (state.open && state.tab==='settings') renderSettings();
       return true;
     },
-    diagnostics: () => ({ version:VERSION, account:state.myId, mugshotMode:'BC live canvas / WCE bce-past-profiles readonly snapshot / kitten; only temporary in-memory rendering, no persistent mugshot storage', hooked:!!state.mod,
+    diagnostics: () => ({ version:VERSION, account:state.myId, mugshotMode:'BC live canvas / WCE bce-past-profiles readonly snapshot / kitten; only temporary in-memory rendering, no persistent mugshot storage', hooked:!!(pawNativeHooks.installed.ServerSend || pawNativeHooks.installed.ChatRoomMessage),
       conversations:Object.keys(state.chats).length, nativeMessages:true, groups:Object.keys(state.groups).length, windowRect:state.windowRect, theme:state.settings.theme, hasUI:!!ui.host, bootError:state.bootError, bootAttempts:state.bootAttempts }) });
   window.MarvelousBridgeDiag=()=>({version:VERSION,connected:marvelousBridge.attached,plushiesVersion:marvelousBridge.api?.version||null,lowCpu:marvelousBridge.lowCpu,safeMode:marvelousBridge.safeMode,localNotifications:marvelousBridge.events.length,focusEnabled:marvelousFocusRuntime.enabled});
   window.PawLounge = window.KittyChat;

@@ -1,5 +1,6 @@
 {
-  "version": "1.2.22",
-  "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/PawLounge.user.js",
-  "notes": "v1.2.22: Cute scrapbook-style aesthetic moodboards, 72 categorized stickers, rotate/duplicate/resize tools, invitation-based live collaboration, and a room-specific board editable by BC room admins. Room board sync is peer-to-peer while compatible clients are connected; local image uploads stay private. Compatible with Essentials 3.9.55."
+  "version": "1.2.23",
+  "downloadUrl": "https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/KittyChat.user.js",
+  "notes": "R134 readiness: independent late-retry ModSDK hooks, PawLoungeR134Diag(), unchanged friendship/Marvelous bridge, group messaging, and moodboards. Requires live R134 beta smoke test.",
+  "channel": "R134 beta candidate"
 }

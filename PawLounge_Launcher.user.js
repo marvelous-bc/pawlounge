@@ -2,8 +2,10 @@
 // @name         BC PawLounge — Automatic Update Launcher
 // @namespace    https://github.com/marvelous-bc/kittychat/launcher
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
+// @updateURL    https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/PawLounge_Launcher.user.js
+// @downloadURL  https://raw.githubusercontent.com/marvelous-bc/pawlounge/main/PawLounge_Launcher.user.js
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.3.0
+// @version      1.3.1
 // @description  Fetch a fresh, uncached PawLounge build from GitHub whenever Bondage Club loads.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
@@ -11,6 +13,8 @@
 // @match        https://*.bondage-europe.com/R*
 // @match        https://*.bondageeurope.com/R*
 // @match        https://*.bondage-asia.com/club/*
+// @match        https://*.bondage-europe.com/*/BondageClub/*
+// @match        https://*.bondageeurope.com/*/BondageClub/*
 // @inject-into  page
 // @run-at       document-end
 // @grant        none
@@ -26,14 +30,14 @@
   const FILE = 'KittyChat.user.js';
   const PRIMARY_URL = `https://raw.githubusercontent.com/${REPO}/main/${FILE}`;
   const BACKUP_URL = `https://raw.githubusercontent.com/${REPO}/refs/heads/main/${FILE}`;
-  const MIN_VERSION = '0.8.7'; // Never run an older release from a stale CDN edge.
+  const MIN_VERSION = '1.2.23'; // Never run an older release from a stale CDN edge.
   const FETCH_TIMEOUT_MS = 15000;
   const STATUS_KEY = '__KittyChatLauncher';
 
   if (window[STATUS_KEY]?.started) return;
   const status = {
     started: Date.now(),
-    launcherVersion: '1.3.0',
+    launcherVersion: '1.3.1',
     phase: 'starting',
     sourceUrl: PRIMARY_URL,
     cachePolicy: 'always-network-no-store',
