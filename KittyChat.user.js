@@ -1,4 +1,3 @@
-
 // ==UserScript==
 // @name         BC PawLounge
 // @namespace    https://github.com/marvelous-bc/kittychat
@@ -12628,6 +12627,3 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     } catch {}
   }
 })();
-Draggable item chatgpt-project-conversation:g-p-6ab7ff5a18d88191ac5534519d4ccf7d:6af37644-de64-83ea-83b8-464c9e41fb71 was dropped.
-
-
