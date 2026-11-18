@@ -1,15 +1,86 @@
+Can you send me the fully updated essentials plug-in for r134 and the pawlounge one?
+
+Current version for essentials ends with .15 and pawlounge .22 as r133 but r134 came out. You already made them r134 friendly, just make sure everything is still up to date Mira and please do send me back the files
+
+Both plugins are updated and packaged for Bondage Club R134, with their existing features, artwork, and Marvelous integration preserved.
+ Subby's Plushies & Essentials — v4.0.17
+
+Complete R134 release
+Packaged
+
+Download full Essentials ZIP
+Script (.txt)
+Userscript (.js)
+
+Includes all original assets, launchers, configuration files, and documentation.
+
+Updates included: R134 custom-asset color compatibility, Heartkeeper Lantern color handling, and Harmonizer support for per-layer color defaults. It also retains the v4.0.15 action-speed improvements and the v4.0.16 long-session character-click smoother.
+ PawLounge — v1.2.24
+
+Complete R134 release
+Packaged
+
+Download full PawLounge ZIP
+Script (.txt)
+Userscript (.js)
+
+Includes all original graphics, stickers, launcher, and configuration files.
+
+Updates included: More reliable registration of native BC hooks, protection against duplicate hooks, and corrected update metadata. Existing messaging, profiles, moodboards, and Essentials integration are retained.
+Validation
+
+JavaScript syntax checks passed.
+
+Targeted R134 compatibility tests passed.
+
+ZIP integrity verified; no original asset files missing.
+
+Live R134 gameplay testing is still needed before calling either build fully verified.
+
+Installation instructions for both plugins
+
+Important: Disable your older versions before installing these standalone scripts. If you use automatic-update launchers, publish the updated files to your GitHub repositories first; otherwise the launchers will continue loading the old releases.
+R134_Essentials_PawLounge_Installation.txtDocument
+Subbys_Essentials_R134_4.0.17.txtDocument
+Subbys_Essentials_R134_4.0.17.user.jsCode
+PawLounge_R134_1.2.24.txtDocument
+PawLounge_R134_1.2.24.user.jsCode
+Show less
+Send version.json for both plugins
+
+Here are the R134 version.json files, extracted from your latest plugin releases.
+
+Subby's Plushies & Essentials — v4.0.17
+
+Download version.json
+
+PawLounge — v1.2.24
+
+Download version.json
+
+Both files preserve the release metadata from the R134 packages.
+
+Upload each file to the root of its corresponding GitHub repository, replacing the existing version.json.
+version.jsonCode
+version.jsonCode
 // ==UserScript==
 // @name         BC PawLounge
 // @namespace    https://github.com/marvelous-bc/kittychat
 // @homepageURL  https://github.com/marvelous-bc/pawlounge
 // @supportURL   https://github.com/marvelous-bc/pawlounge/issues
-// @version      1.2.22
-// @description  PawLounge 1.2.22: cute collaborative moodboards and room-admin shared boards.
+// @version      1.2.24
+// @description  PawLounge 1.2.24: R134 resilient native hooks, compatibility diagnostics, and moodboards.
 // @author       marvelous-bc
 // @match        https://*.bondageprojects.elementfx.com/R*
+// @match        https://bondageprojects.elementfx.com/R*
+// @match        https://bondageprojects.com/R*
+// @match        https://bondage-europe.com/R*
+// @match        https://bondageeurope.com/R*
 // @match        https://*.bondageprojects.com/R*
 // @match        https://*.bondage-europe.com/R*
 // @match        https://*.bondageeurope.com/R*
+// @match        https://bondage-asia.com/club/*
+// @match        https://www.bondage-asia.com/club/*
 // @inject-into  page
 // @run-at       document-end
 // @grant        none
@@ -17,7 +88,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const VERSION = '1.2.22';
+  const VERSION = '1.2.24';
   // Aesthetic Moodboards v2: shared editor in Essentials and PawLounge.
   // Personal boards are local; invited collaboration and room boards use bounded
   // native BC Hidden messages, with sender/admin checks and no uploaded image bytes.
@@ -3584,72 +3655,91 @@
     return true;
   }
 
+  // R134: BC may expose ServerSend, room messages, beep and notifications at
+  // different times. Attach each supported ModSDK hook once, independently;
+  // never replace core game globals or make one missing API block everything.
+  const r134NativeHooks = {installed:new Set(), errors:Object.create(null), sdkAttempts:0};
   function hookBC() {
     registerNativeWhisperHandler();
-    if (state.mod) return;
-    if (typeof window.ServerSend !== 'function' || typeof window.ServerAccountBeep !== 'function' || typeof window.ChatRoomMessage !== 'function') return;
-    const sdk = window.bcModSdk;
-    if (sdk && typeof sdk.registerMod === 'function') {
+    if (!state.mod) {
+      const sdk = window.bcModSdk || window.bcModSDK;
+      if (!sdk || typeof sdk.registerMod !== 'function') {
+        if (!hookBC.waitNoticeLogged) {
+          hookBC.waitNoticeLogged = true;
+          console.info('[PawLounge] Waiting for ModSDK to register BC hooks.');
+        }
+        return;
+      }
       try {
-        const mod = sdk.registerMod({ name: 'kittychat', fullName: 'PawLounge', version: VERSION,
-          repository: 'https://github.com/marvelous-bc/pawlounge' });
-        mod.hookFunction('ServerAccountBeep', 1, (args, next) => {
-          try {
-            const data=args[0];
-            // Known Kittychat group envelopes are handled only in Kittychat, not BC's normal beep window.
-            if (data && !data.BeepType && kcDecode(data.Message) && receiveGroupBeep(data,numeric(data.MemberNumber))) return;
-            receiveBeep(data);
-          } catch (e) { console.warn('[Kittychat] receive:',e); }
-          return inMutedNativePacket('beep', args[0], () => next(args));
-        });
-        // Observe native BC's online-friend results using the same ModSDK
-        // chain as the other PawLounge features (no direct overwrite).
-        // Failure to install this optional hook only disables remote status
-        // labels; native BC login and the rest of PawLounge keep working.
-        if (typeof window.ServerAccountQueryResult === 'function') {
-          try {
-            mod.hookFunction('ServerAccountQueryResult', 1, (args, next) => {
-              try { pawObserveNativePresence(args[0]); }
-              catch (err) { console.warn('[PawLounge] Online presence observation failed:', err); }
-              return next(args);
-            });
-            pawOnlinePresence.modSdkHookInstalled=true;
-          } catch (err) { console.warn('[PawLounge] ModSDK online presence hook unavailable:', err); }
-        }
-        mod.hookFunction('ServerSend', 1, (args, next) => { try { onOutgoing(args[0], args[1]); } catch (e) { console.warn('[Kittychat] send:',e); } return next(args); });
-        mod.hookFunction('ChatRoomMessage', 1, (args, next) => { try { captureNativeRoomMessage(args[0]); } catch (e) { console.warn('[Kittychat] whisper:',e); } return inMutedNativePacket('whisper', args[0], () => next(args)); });
-        // Handle /pawverify via ModSDK as a secondary path for BC send methods
-        // that bypass Enter keydown. Never send the command into public chat.
-        if(typeof window.ChatRoomSendChat==='function'){
-          try{mod.hookFunction('ChatRoomSendChat',1,(args,next)=>{
-            const field=document.getElementById('InputChat');
-            if(window.CurrentScreen==='ChatRoom'&&field&&/^\/pawverify\s*$/i.test(String(field.value||''))){
-              field.value='';marvelousVerifyOpen();return;
-            }
-            return next(args);
-          });}catch(err){console.warn('[PawLounge] /pawverify fallback hook unavailable:',err);}
-        }
-        // Optional BC hooks are independent: a renamed API must not break
-        // the existing messenger hooks or prevent Kittychat from loading.
-        if (typeof window.ServerShowBeep === 'function') {
-          try { mod.hookFunction('ServerShowBeep', 1, (args, next) => next(nativeSilentBeepArgs(args))); }
-          catch (e) { console.warn('[Kittychat] Native beep silence hook unavailable:',e); }
-        }
-        if (typeof window.NotificationRaise === 'function') {
-          try { mod.hookFunction('NotificationRaise', 1, (args, next) => suppressNativeMessageNotification(args) ? undefined : next(args)); }
-          catch (e) { console.warn('[Kittychat] Native notification silence hook unavailable:',e); }
-        }
-        state.mod = mod; log('Connected with BC Mod SDK'); return;
-      } catch (err) { console.warn('[Kittychat] Mod SDK registration failed; using chainable wrappers:',err); }
+        r134NativeHooks.sdkAttempts++;
+        state.mod = sdk.registerMod({name:'kittychat',fullName:'PawLounge',version:VERSION,
+          repository:'https://github.com/marvelous-bc/pawlounge'});
+        log('Connected with BC Mod SDK');
+      } catch (err) {
+        // No unsafe direct-monkeypatch fallback; retry after BC finishes loading.
+        r134NativeHooks.errors.SDK = String(err?.message || err);
+        if (r134NativeHooks.sdkAttempts <= 3) console.warn('[PawLounge] ModSDK registration pending:', err);
+        return;
+      }
     }
-    // ModSDK may be initialized later by BCX or the mod manager. Do not
-    // replace native BC functions as a fallback: wait for SDK, then retry on
-    // the existing startup tick. Native BC remains untouched in the meantime.
-    if (!hookBC.waitNoticeLogged) {
-      hookBC.waitNoticeLogged=true;
-      console.info('[PawLounge] ModSDK not available yet; waiting to register compatible BC hooks.');
-    }
+    const mod = state.mod;
+    if (typeof mod?.hookFunction !== 'function') return;
+    const hook = (name, priority, handler) => {
+      if (r134NativeHooks.installed.has(name) || typeof window[name] !== 'function') return false;
+      try {
+        mod.hookFunction(name,priority,handler);
+        r134NativeHooks.installed.add(name);
+        delete r134NativeHooks.errors[name];
+        return true;
+      } catch (err) {
+        // Recheck during the existing startup tick, without growing duplicate hooks.
+        r134NativeHooks.errors[name] = String(err?.message || err);
+        return false;
+      }
+    };
+    hook('ServerAccountBeep',1,(args,next)=>{
+      try {
+        const data=args[0];
+        if (data && !data.BeepType && kcDecode(data.Message) && receiveGroupBeep(data,numeric(data.MemberNumber))) return;
+        receiveBeep(data);
+      } catch(e) {console.warn('[Kittychat] receive:',e);}
+      return inMutedNativePacket('beep',args[0],()=>next(args));
+    });
+    if (hook('ServerAccountQueryResult',1,(args,next)=>{
+      try {pawObserveNativePresence(args[0]);}
+      catch(err) {console.warn('[PawLounge] Online presence observation failed:',err);}
+      return next(args);
+    })) pawOnlinePresence.modSdkHookInstalled=true;
+    hook('ServerSend',1,(args,next)=>{
+      try {onOutgoing(args[0],args[1]);}
+      catch(e) {console.warn('[Kittychat] send:',e);}
+      return next(args);
+    });
+    hook('ChatRoomMessage',1,(args,next)=>{
+      try {captureNativeRoomMessage(args[0]);}
+      catch(e) {console.warn('[Kittychat] whisper:',e);}
+      return inMutedNativePacket('whisper',args[0],()=>next(args));
+    });
+    hook('ChatRoomSendChat',1,(args,next)=>{
+      const field=document.getElementById('InputChat');
+      if(window.CurrentScreen==='ChatRoom'&&field&&/^\/pawverify\s*$/i.test(String(field.value||''))){
+        field.value='';marvelousVerifyOpen();return;
+      }
+      return next(args);
+    });
+    hook('ServerShowBeep',1,(args,next)=>next(nativeSilentBeepArgs(args)));
+    hook('NotificationRaise',1,(args,next)=>
+      suppressNativeMessageNotification(args)?undefined:next(args));
   }
+  window.PawLoungeR134Diag = () => ({
+    version:VERSION, gamePath:location.pathname, modSdkRegistered:!!state.mod,
+    installedHooks:[...r134NativeHooks.installed],
+    pendingHooks:['ServerAccountBeep','ServerAccountQueryResult','ServerSend','ChatRoomMessage',
+      'ChatRoomSendChat','ServerShowBeep','NotificationRaise']
+      .filter(name=>!r134NativeHooks.installed.has(name)),
+    errors:{...r134NativeHooks.errors}, sdkAttempts:r134NativeHooks.sdkAttempts,
+    note:'Pending optional hooks may be absent in BC; existing features remain usable.'
+  });
   function sendText(text, target = state.selected) {
     const member=numeric(target),chat=ensure(member);
     text=trim(text,2000);
@@ -12602,3 +12692,6 @@ input,textarea,select{color:var(--ink);caret-color:var(--accent)}input::selectio
     } catch {}
   }
 })();
+Draggable item chatgpt-project-conversation:g-p-6ab7ff5a18d88191ac5534519d4ccf7d:6af37644-de64-83ea-83b8-464c9e41fb71 was dropped.
+
+
